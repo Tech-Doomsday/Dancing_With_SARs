@@ -1,0 +1,37 @@
+# manifest.yaml — 3.08 deforestation
+# auto-scaffolded from nisar_hazard_engine.json — fill in / adjust as the pipeline is implemented
+
+code: "3.08"
+name: "deforestation"
+sensor: "NISAR"
+model_type: "statistics (sequential change)"
+
+applies: "forest land cover or S4 tree cover >= 30%"
+
+uses: "M2 HV and HH (G20), baseline stats, optional M1 coherence"
+uses_codes: 
+  - "M2"
+  - "M1"
+
+own_prep: "forest mask, exclude water / layover / steep slopes, flag epochs within 48 h of rain, prefer cross-pol HV for moisture robustness"
+
+own_fetch: "R7 GFW alerts, S4 loss year, R6 FIRMS (separate fire loss from clearing), R4, R10 (windthrow)"
+fetch_codes: 
+  - "R7"
+  - "S4"
+  - "R6"
+  - "R4"
+  - "R10"
+
+method:
+  - "per-pixel CUSUM on HV dB against robust baseline; persistence rule (>= 2-3 consecutive epochs below baseline by >= k dB); patch filter >= 0.5 ha; cause attribution: fire (FIRMS in patch) | clearing (geometric patch, roads) | windthrow (post-storm cluster)"
+
+output: "P(forest loss), area ha, cause label, persistence count, agreement with R7"
+
+min_epochs: null
+
+status_values:
+  - "SUPPORTED"
+  - "NOT_SUPPORTED"
+  - "INSUFFICIENT_EVIDENCE"
+  - "NOT_MODELLED"

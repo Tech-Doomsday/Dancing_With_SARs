@@ -1,0 +1,35 @@
+# manifest.yaml — 3.09 wildfire_burn_scar
+# auto-scaffolded from nisar_hazard_engine.json — fill in / adjust as the pipeline is implemented
+
+code: "3.09"
+name: "wildfire_burn_scar"
+sensor: "NISAR"
+model_type: "statistics"
+
+applies: "vegetated classes (forest, shrub, grass), not water"
+
+uses: "M2 HV + HH, M1 coherence change, baseline, M4"
+uses_codes: 
+  - "M2"
+  - "M1"
+  - "M4"
+
+own_prep: "dB prep, coherence-change layer vs history (80 m), soil-moisture normalization"
+
+own_fetch: "R6 FIRMS hotspots in window + MCD64A1, R5 temperature / humidity / wind"
+fetch_codes: 
+  - "R6"
+  - "R5"
+
+method:
+  - "scar polygon from post-fire HV decrease + co-pol change; hotspot density inside the polygon with hotspot-before-SAR-change ordering; irregular perimeter vs geometric clearing; SAR sees the scar through smoke, not the active front"
+
+output: "P(burn scar), area, hotspot overlap ratio, severity proxy (delta HV dB)"
+
+min_epochs: null
+
+status_values:
+  - "SUPPORTED"
+  - "NOT_SUPPORTED"
+  - "INSUFFICIENT_EVIDENCE"
+  - "NOT_MODELLED"

@@ -1,0 +1,33 @@
+# manifest.yaml — 3.03 volcanic_deformation
+# auto-scaffolded from nisar_hazard_engine.json — fill in / adjust as the pipeline is implemented
+
+code: "3.03"
+name: "volcanic_deformation"
+sensor: "NISAR"
+model_type: "physics (Mogi / sill / dike)"
+
+applies: "tiles within 50 km of an S7 volcano; global scan also tests radial patterns on high terrain"
+
+uses: "M1 LOS (asc + desc when both exist), DEM"
+uses_codes: 
+  - "M1"
+
+own_prep: "topography-correlated phase regression on flanks, ramp removal outside the edifice, asc/desc combination into vertical + east-west"
+
+own_fetch: "S7 activity records, R1 low-magnitude seismicity (M>=2 within 30 km)"
+fetch_codes: 
+  - "S7"
+  - "R1"
+
+method:
+  - "Mogi inversion (x, y, depth, dV) vs rectangular tensile source; model choice by BIC; atmospheric veto from elevation correlation coefficient"
+
+output: "P(volcanic unrest deformation), source type, depth, volume change, summit rate, nearby events"
+
+min_epochs: null
+
+status_values:
+  - "SUPPORTED"
+  - "NOT_SUPPORTED"
+  - "INSUFFICIENT_EVIDENCE"
+  - "NOT_MODELLED"

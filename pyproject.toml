@@ -1,0 +1,6 @@
+[project]
+name = "nisar-hazard-engine"
+version = "0.1.0"
+description = "Global SAR hazard detection engine (NISAR primary, Sentinel-1 fallback)"
+requires-python = ">=3.11"
+dependencies = []

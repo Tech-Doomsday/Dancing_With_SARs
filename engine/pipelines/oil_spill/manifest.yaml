@@ -1,0 +1,35 @@
+# manifest.yaml — 3.15 oil_spill
+# auto-scaffolded from nisar_hazard_engine.json — fill in / adjust as the pipeline is implemented
+
+code: "3.15"
+name: "oil_spill"
+sensor: "Sentinel-1 primary, NISAR where covered"
+model_type: "statistics + learned slot"
+
+applies: "ocean tiles with coverage, wind between ~2 and ~10 m/s"
+
+uses: "M6 VV (or M2 VV/HH), ocean mask"
+uses_codes: 
+  - "M6"
+  - "M2"
+
+own_prep: "calibration, coastline mask, noise-floor, incidence normalization, speckle filter, wind co-registration"
+
+own_fetch: "R5 10 m wind (reject scenes outside window), S13 platforms, R13 vessel tracks"
+fetch_codes: 
+  - "R5"
+  - "S13"
+  - "R13"
+
+method:
+  - "adaptive local-threshold dark-spot detection vs surrounding sea; features: area, perimeter, shape complexity, contrast, boundary gradient, wind, distance to platform / ship; oil vs look-alike classifier (gradient boosting, weights loaded from file if present, otherwise rule-based); probability capped for L-band thin-film insensitivity"
+
+output: "P(oil slick), area km2, source candidates, look-alike probability, wind used"
+
+min_epochs: null
+
+status_values:
+  - "SUPPORTED"
+  - "NOT_SUPPORTED"
+  - "INSUFFICIENT_EVIDENCE"
+  - "NOT_MODELLED"

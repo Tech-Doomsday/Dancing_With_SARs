@@ -1,0 +1,34 @@
+# manifest.yaml — 3.05 glacier_ice_flow
+# auto-scaffolded from nisar_hazard_engine.json — fill in / adjust as the pipeline is implemented
+
+code: "3.05"
+name: "glacier_ice_flow"
+sensor: "NISAR"
+model_type: "statistics"
+
+applies: "ice/snow land class or S8 polygon"
+
+uses: "M3 offsets, M2 sigma0, geometry, DEM"
+uses_codes: 
+  - "M3"
+  - "M2"
+
+own_prep: "offset outlier rejection by correlation, off-ice bias removal from rock outside RGI, offsets -> velocity via dt, range+azimuth -> horizontal speed (surface-parallel flow)"
+
+own_fetch: "R12 ITS_LIVE per-pixel median/MAD climatology, S8 outlines"
+fetch_codes: 
+  - "R12"
+  - "S8"
+
+method:
+  - "velocity z-score vs ITS_LIVE and own stack; surge flag when acceleration is sustained over a glacier-wide area; terminus position change from sigma0 edges"
+
+output: "P(anomalous flow / surge), speed ratio, area, flowline map"
+
+min_epochs: null
+
+status_values:
+  - "SUPPORTED"
+  - "NOT_SUPPORTED"
+  - "INSUFFICIENT_EVIDENCE"
+  - "NOT_MODELLED"
