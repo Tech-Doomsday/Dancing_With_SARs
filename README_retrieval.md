@@ -15,11 +15,19 @@ engine/retrieval/
     decode.py              deflate/shuffle/fletcher32 without libhdf5 (threads scale, no global lock)
     cache.py               RAM LRU -> disk chunk cache -> Zarr clip store; TTL, stale-while-error; search cache
     nisar_client.py        search -> index -> chunk-exact fetch -> assemble; singleflight; prefetch; h5py fallback
+engine/tiling/mgrs.py      MGRS tiles (id <-> bbox/polygon, tiles covering a footprint); config/tiling.yaml sets the cell size
+engine/retrieval/state.py  SQLite: seen granules, version supersession, dirty-tile work queue (safe for many workers)
+engine/retrieval/scheduler/granule_poller.py   6-hourly ASF diff -> tiles queued; tools/poll_granules.py is the CLI
 config/retrieval.yaml      every knob (concurrency, gap, cache sizes, TTLs) - no absolute paths
 tests/                     15 tests against a local ASF-like server (redirect, auth stripping, 503, expiry, offline)
 tools/bench_synthetic.py   old approach vs new, reproducible
 tools/probe_granule.py     RUN THIS ON A REAL GRANULE: layout, supported-filter check, cold/warm timings
 ```
+
+## Verify everything on your machine (one command)
+`python tools/final_check.py` - unit tests, ASF polling, real GUNW + GCOV tile fetch compared value-by-value with h5py,
+cache tiers, restart, neighbour tile, 4 concurrent processes, then copies learned catalogs into `config/catalog/`.
+Report: `<data dir>/final_check_report.txt`.
 
 ## Install
 `pip install -r requirements-retrieval.txt` (the client checks at startup and names anything missing).
@@ -49,3 +57,16 @@ Layer keys are the prototype's flat `__` names, so downstream code that read the
 Redirect/presigned-URL behaviour, real chunk sizes and filters, real latency. `probe_granule.py` answers all
 three in one run. Files whose layers use other HDF5 filters, or contiguous layers, take the h5py fallback
 (still block-cached) and are reported by the probe.
+
+## Tiles and polling
+```python
+from engine.tiling.mgrs import tile_at, tile_from_id, tiles_for_bbox
+t = tile_at(-118.95, 34.65)                      # 10 km cell, e.g. 11SLU.. (size from config/tiling.yaml)
+res = client.fetch_tile(t, product="GCOV", layers=r"grids/frequencyA/(HHHH|HVHV|mask)")
+
+poller = GranulePoller(client)                   # python tools/poll_granules.py [--loop] [--region W S E N]
+poller.poll()                                    # new granules -> tiles -> dirty_tiles queue
+for item in poller.state.claim(20, worker="w1"): # pipeline workers
+    client.fetch_tile(item["tile"], product=item["product"], layers=...); poller.state.complete(item["tile"], item["granule_id"])
+```
+Tile cells at zone boundaries exist in both zones (as with Sentinel-2). UTM latitudes only (-80..84).

@@ -55,6 +55,8 @@ class Settings:
     decode: dict = field(default_factory=dict)
     cache: dict = field(default_factory=dict)
     search: dict = field(default_factory=dict)
+    poll: dict = field(default_factory=dict)
+    tiling: dict = field(default_factory=dict)
 
     @property
     def clips_dir(self) -> Path:
@@ -67,6 +69,10 @@ class Settings:
     @property
     def index_dir(self) -> Path:
         return self.data_dir / "cache" / "layout"
+
+    @property
+    def state_db(self) -> Path:
+        return self.data_dir / "state" / "retrieval.sqlite"
 
     @property
     def catalog_dirs(self) -> list[Path]:
@@ -88,6 +94,9 @@ def load_settings(config_path: str | os.PathLike | None = None, root: Path | Non
     raw = yaml.safe_load(cfg_file.read_text()) if cfg_file.exists() else {}
     data_dir = Path(os.environ.get("NISAR_DATA_DIR") or root / "data").expanduser()
     s = Settings(root=root, data_dir=data_dir)
-    for sec in ("net", "decode", "cache", "search"):
+    for sec in ("net", "decode", "cache", "search", "poll"):
         setattr(s, sec, _apply_env(sec, raw.get(sec, {})))
+    tf = root / "config" / "tiling.yaml"
+    tiling = yaml.safe_load(tf.read_text()) if tf.exists() else {}
+    s.tiling = _apply_env("tiling", {"scheme": "mgrs", "cell_size_m": 10000, "margin_m": 300, **(tiling or {})})
     return s

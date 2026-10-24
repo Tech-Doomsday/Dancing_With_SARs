@@ -34,3 +34,10 @@ cache:
 search:
   max_results: 250
   keep_all_versions: false
+
+poll:
+  products: [GCOV, GUNW]     # processing levels the granule poller watches
+  lookback_days: 45          # search window on acquisition time (late-processed granules inside it are still caught)
+  max_results: 2000
+  interval_hours: 6
+  region: null               # [W, S, E, N] to restrict the poller to an area of interest; null = global

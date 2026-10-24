@@ -12,6 +12,7 @@ from pathlib import Path
 import numpy as np
 
 from .decode import SUPPORTED
+from .fsutil import replace_file
 
 INDEX_VERSION = 3
 
@@ -104,7 +105,7 @@ class GranuleIndex:
         path.parent.mkdir(parents=True, exist_ok=True)
         tmp = path.with_suffix(f".tmp{os.getpid()}.npz")
         np.savez(tmp, **arrs)               # uncompressed: loads in a few ms
-        os.replace(tmp, path)
+        replace_file(tmp, path)
 
     @staticmethod
     def load(path: Path) -> "GranuleIndex | None":

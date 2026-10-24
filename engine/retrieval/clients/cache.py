@@ -13,6 +13,8 @@ from pathlib import Path
 
 import numpy as np
 
+from .fsutil import replace_dir, replace_file
+
 
 def sha(*parts) -> str:
     return hashlib.sha1("\x1f".join(str(p) for p in parts).encode()).hexdigest()
@@ -84,10 +86,12 @@ class DiskChunkCache:
 
     def put(self, key: str, data) -> None:
         p = self._p(key)
+        if p.exists():                         # immutable content: first writer wins
+            return
         p.parent.mkdir(parents=True, exist_ok=True)
         tmp = p.with_name(p.name + f".{os.getpid()}.{threading.get_ident()}.tmp")
         tmp.write_bytes(data)
-        os.replace(tmp, p)
+        replace_file(tmp, p, keep_existing=True)
         with self._lock:
             if self._bytes is None:
                 self._bytes = self._scan()
@@ -124,7 +128,7 @@ class ClipStore:
     def __init__(self, root: Path, ttl_s: float | None):
         self.root, self.ttl = Path(root), ttl_s
 
-    def key(self, granule_id: str, bbox, layers: list[str] | None, schema: int = 1) -> str:
+    def key(self, granule_id: str, bbox, layers: list[str] | None, schema: int = 2) -> str:
         bb = ",".join(f"{v:.6f}" for v in bbox)
         return sha("clip", schema, granule_id, bb, ",".join(sorted(layers or ["*"])))
 
@@ -158,19 +162,22 @@ class ClipStore:
         root = zarr.open_group(str(tmp / "data.zarr"), mode="w", zarr_format=3)
         codec = BloscCodec(cname="zstd", clevel=3, shuffle="shuffle")
         for g in grids.values():
-            grp = root.require_group(g.grid)
+            # short hashed names keep the on-disk path far below Windows' 260-char limit; the real
+            # names live in attrs
+            grp = root.require_group("g" + sha(g.grid)[:10])
+            grp.attrs["grid_key"] = g.grid
             grp.attrs["epsg"] = int(g.epsg)
             grp.attrs["extras"] = list(g.extras)
             for name, arr in [("x", g.x), ("y", g.y), *g.extras.items()]:
-                grp.create_array(name, data=np.asarray(arr), chunks=np.asarray(arr).shape or (1,))
+                a_ = np.asarray(arr)
+                grp.create_array(name, data=a_, chunks=a_.shape or (1,))
             for lk, arr in g.layers.items():
                 ch = tuple(arr.shape[:-2]) + (min(arr.shape[-2], 512), min(arr.shape[-1], 512))
-                grp.create_array(lk, data=arr, chunks=ch, compressors=codec)
+                za = grp.create_array("L" + sha(lk)[:12], data=arr, chunks=ch, compressors=codec)
+                za.attrs["layer_key"] = lk
         (tmp / "meta.json").write_text(json.dumps({**meta, "created": time.time()}))
-        if d.exists():
-            shutil.rmtree(d, ignore_errors=True)
         d.parent.mkdir(parents=True, exist_ok=True)
-        os.replace(tmp, d)
+        replace_dir(tmp, d)
 
 
 # ------------------------------------------------------------------ search listings
@@ -198,4 +205,4 @@ class SearchCache:
         p = self.root / f"{k}.json"
         tmp = p.with_suffix(f".{os.getpid()}.tmp")
         tmp.write_text(json.dumps({"created": time.time(), "items": items}))
-        os.replace(tmp, p)
+        replace_file(tmp, p)

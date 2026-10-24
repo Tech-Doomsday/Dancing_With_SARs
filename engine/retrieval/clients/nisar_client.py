@@ -23,6 +23,7 @@ from ..auth.secrets import EarthdataAuth, earthdata_auth
 from .cache import ByteLRU, ClipStore, DiskChunkCache, SearchCache, sha
 from ..settings import Settings, load_settings
 from .decode import UnsupportedFilter, decode_chunk
+from .fsutil import replace_file
 from .h5_index import (GranuleIndex, GridLayout, LayerLayout, build_index, catalog_missing, catalog_of,
                        extend_index)
 from .range_io import HttpIO, LoopThread, RangeError, RangeFile
@@ -32,12 +33,17 @@ _VERSION_TAIL = re.compile(r"_([A-Z])(\d{5})(_[A-Z]_[A-Z]_[A-Z]_\d{3})$")
 
 
 # ------------------------------------------------------------------ pure helpers (unit-tested)
+def scene_key(granule_id: str) -> tuple[str, int]:
+    """(identity of the scene without its processing version, version number)."""
+    m = _VERSION_TAIL.search(granule_id)
+    return (granule_id[:m.start()] + m.group(3), int(m.group(2))) if m else (granule_id, 0)
+
+
 def drop_older_versions(refs: list[GranuleRef]) -> tuple[list[GranuleRef], int]:
     """Same scene processed more than once -> keep the highest processing version."""
     best: dict[str, tuple[int, int]] = {}
     for i, r in enumerate(refs):
-        m = _VERSION_TAIL.search(r.granule_id)
-        key, ver = (r.granule_id[:m.start()] + m.group(3), int(m.group(2))) if m else (r.granule_id, 0)
+        key, ver = scene_key(r.granule_id)
         if key not in best or ver > best[key][0]:
             best[key] = (ver, i)
     keep = sorted(i for _, i in best.values())
@@ -102,20 +108,22 @@ class NisarClient:
         self._catalogs: dict[str, dict] = {}
 
     # ---------------------------------------------------------------- search
-    def search(self, bbox, t0=None, t1=None, product=None, maturity=None):
+    def search(self, bbox, t0=None, t1=None, product=None, maturity=None, fresh=False, max_results=None):
         """-> (refs, degraded). Uses asf_search; result lists are TTL-cached and served stale
-        (degraded=True) if ASF is unreachable."""
+        (degraded=True) if ASF is unreachable. bbox=None searches everywhere; fresh=True skips the
+        cache read (the poller does this) but still falls back to a stale entry if ASF is down."""
         keep_all = bool(self.cfg.search["keep_all_versions"])
         prods = [p.strip() for p in product.split(",")] if isinstance(product, str) else (product or [])
-        k = self.searches.key(bbox, t0, t1, prods, maturity, keep_all)
-        hit = self.searches.get(k)
+        k = self.searches.key(bbox or (0, 0, 0, 0), t0, t1, prods, maturity, keep_all)
+        hit = None if fresh else self.searches.get(k)
         if hit:
             return [GranuleRef(**d) for d in hit[0]], False
         try:
             import asf_search as asf
-            w, s, e, n = bbox
-            kw = {"dataset": "NISAR", "maxResults": int(self.cfg.search["max_results"]),
-                  "intersectsWith": f"POLYGON(({w} {s},{e} {s},{e} {n},{w} {n},{w} {s}))"}
+            kw = {"dataset": "NISAR", "maxResults": int(max_results or self.cfg.search["max_results"])}
+            if bbox:
+                w, s, e, n = bbox
+                kw["intersectsWith"] = f"POLYGON(({w} {s},{e} {s},{e} {n},{w} {n},{w} {s}))"
             if t0: kw["start"] = t0
             if t1: kw["end"] = t1
             if prods: kw["processingLevel"] = prods
@@ -127,7 +135,7 @@ class NisarClient:
                 gid = re.sub(r"\.h5$", "", str(p.get("fileID") or name))
                 refs.append(GranuleRef(gid, p.get("url"), p.get("processingLevel"), p.get("startTime"),
                                        p.get("stopTime"), p.get("pathNumber"), p.get("frameNumber"),
-                                       p.get("flightDirection"), _size(p)))
+                                       p.get("flightDirection"), _size(p), _ring(r)))
             if not keep_all:
                 refs, _ = drop_older_versions(refs)
             self.searches.put(k, [r.to_dict() for r in refs])
@@ -150,6 +158,14 @@ class NisarClient:
         res.stats = {**self.io.metrics.snapshot(), **self.counters,
                      "ram_hits": self.ram.hits, "disk_hits": self.disk.hits}
         return res
+
+    def fetch_tile(self, tile, t0=None, t1=None, product=None, layers=None, maturity=None,
+                   granules=None, margin_m=None) -> FetchResult:
+        """fetch() for one MGRS tile (engine.tiling.mgrs.Tile or a tile id string)."""
+        from ...tiling.mgrs import tile_from_id
+        t = tile_from_id(tile) if isinstance(tile, str) else tile
+        m = self.cfg.tiling["margin_m"] if margin_m is None else margin_m
+        return self.fetch(t.bbox(m), t0, t1, product, layers, maturity, granules)
 
     def prefetch(self, bboxes, t0=None, t1=None, product=None, layers=None, maturity=None):
         """Warm every tier for these boxes; results are discarded (arrays stay in the caches)."""
@@ -215,11 +231,16 @@ class NisarClient:
     @staticmethod
     def _from_zarr(g, bbox, root, source) -> GranuleClip:
         grids = {}
-        for name, grp in root.groups():
+        for _, grp in root.groups():
+            key = grp.attrs["grid_key"]
             ex_names = set(grp.attrs.get("extras", []))
             extras = {k: np.asarray(grp[k][:]) for k in ex_names}
-            lay = {k: np.asarray(grp[k][:]) for k in grp.array_keys() if k not in ex_names and k not in ("x", "y")}
-            grids[name] = GridClip(name, int(grp.attrs["epsg"]), np.asarray(grp["x"][:]), np.asarray(grp["y"][:]), extras, lay)
+            lay = {}
+            for k in grp.array_keys():
+                lk = grp[k].attrs.get("layer_key")
+                if lk is not None:
+                    lay[lk] = np.asarray(grp[k][:])
+            grids[key] = GridClip(key, int(grp.attrs["epsg"]), np.asarray(grp["x"][:]), np.asarray(grp["y"][:]), extras, lay)
         return GranuleClip(g, tuple(bbox), grids, source)
 
     # ---------------------------------------------------------------- layout index
@@ -285,7 +306,7 @@ class NisarClient:
         d.mkdir(parents=True, exist_ok=True)
         tmp = d / f"{g.product}.{os.getpid()}.tmp"
         tmp.write_text(json.dumps(cat))
-        os.replace(tmp, d / f"{g.product}.json")
+        replace_file(tmp, d / f"{g.product}.json")
         self._catalogs[g.product] = cat
 
     def _full_walk(self, g: GranuleRef) -> GranuleIndex:
@@ -498,9 +519,20 @@ class NisarClient:
             self.counters["fallback_layers"] += 1
 
 
+def _ring(r):
+    """Outer footprint ring [[lon, lat], ...] from an asf_search product (attribute or geojson())."""
+    for get in (lambda: r.geometry, lambda: r.geojson()["geometry"]):
+        try:
+            ring = get()["coordinates"][0]
+            return [[float(x), float(y)] for x, y, *_ in ring]
+        except (AttributeError, KeyError, IndexError, TypeError, ValueError):
+            continue
+    return None
+
+
 def _check_deps():
     missing = []
-    for m in ("numpy", "h5py", "aiohttp", "zarr", "pyproj", "yaml"):
+    for m in ("numpy", "h5py", "aiohttp", "zarr", "pyproj", "yaml", "shapely"):
         try:
             __import__(m)
         except ImportError:

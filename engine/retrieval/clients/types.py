@@ -16,6 +16,7 @@ class GranuleRef:
     frame: int | None = None
     direction: str | None = None
     size_bytes: int | None = None
+    footprint: list | None = None   # [[lon, lat], ...] outer ring from ASF, if known
 
     def to_dict(self) -> dict:
         return self.__dict__.copy()
