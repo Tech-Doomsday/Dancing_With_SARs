@@ -45,12 +45,35 @@ def valid_frac(arr):
     return None
 
 
+def verify(c, g, ix, r):
+    """Ground truth check: engine output vs h5py reading the same pixel window of the same layers."""
+    h5 = c._fallback_file(g)
+    allok = True
+    for gc in r.clips:
+        for gr in gc.grids.values():
+            gl = next(v for v in ix.grids.values() if v.key == gr.grid)
+            x0 = int(np.nonzero(gl.x == gr.x[0])[0][0])
+            y0 = int(np.nonzero(gl.y == gr.y[0])[0][0])
+            for lk, arr in gr.layers.items():
+                L = next(v for v in ix.layers.values() if v.key == lk)
+                with c._fb_lock:
+                    d = h5[L.path]
+                    ref = d[(slice(None),) * (d.ndim - 2) + (slice(y0, y0 + arr.shape[-2]), slice(x0, x0 + arr.shape[-1]))]
+                ok = (arr.shape == ref.shape and arr.dtype == ref.dtype and
+                      (np.array_equal(arr, ref, equal_nan=True) if arr.dtype.kind in "fc" else np.array_equal(arr, ref)))
+                allok &= ok
+                print(f"      verify {'OK  ' if ok else 'FAIL'} {lk.split('__')[-1]:24} {arr.shape} {arr.dtype}")
+    print(f"      => {'ALL LAYERS IDENTICAL TO h5py' if allok else 'MISMATCH - do not trust the fast path on this product'}")
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--url"); ap.add_argument("--bbox", type=float, nargs=4)
     ap.add_argument("--product", default="GUNW"); ap.add_argument("--start"); ap.add_argument("--end")
     ap.add_argument("--layers", default=None, help="regex on HDF5 dataset path")
     ap.add_argument("--no-bandwidth", action="store_true", help="skip the parallel-download scaling test")
+    ap.add_argument("--verify", action="store_true",
+                    help="after the cold clip, re-read the same windows with plain h5py and compare every value")
     ap.add_argument("--clip-bbox", type=float, nargs=4, metavar=("W", "S", "E", "N"))
     ap.add_argument("--index-experiment", action="store_true", help="compare layout-index strategies, then exit")
     ap.add_argument("--include-old", action="store_true", help="with --index-experiment: also time the old 4 MiB page-buffer walk (~90 s on a slow link)")
@@ -137,6 +160,8 @@ def main():
         n = sum(arr.nbytes for gc in r.clips for gr in gc.grids.values() for arr in gr.layers.values()) / 1e6
         print(f"  {label:28} {dt:6.2f}s  {d['requests']:4d} requests  {d['bytes_fetched'] / 1e6:8.1f} MB wire  "
               f"{n:8.1f} MB result  errors={r.errors or 'none'}")
+        if label == "cold" and a.verify:
+            verify(c, g, ix, r)
         if label == "cold":
             for gc in r.clips:
                 for gr in gc.grids.values():
