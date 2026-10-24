@@ -1,0 +1,9 @@
+# add to pyproject.toml dependencies
+numpy>=1.26
+h5py>=3.8          # needs HDF5>=1.10.5 for get_chunk_info
+aiohttp>=3.9
+zarr>=3.0
+pyproj>=3.6
+pyyaml
+python-dotenv
+asf_search>=7      # search only; pip install pytest for the tests

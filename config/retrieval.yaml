@@ -1,0 +1,36 @@
+# Retrieval layer settings. Every value can be overridden by an env var / .env entry
+# named NISAR_<SECTION>_<KEY> (e.g. NISAR_NET_CONCURRENCY=32). No absolute paths here:
+# the data root comes from NISAR_DATA_DIR (.env) or defaults to <repo>/data.
+
+net:
+  concurrency: 24            # simultaneous range GETs per process
+  connect_timeout_s: 20
+  stall_timeout_s: 25        # no bytes for this long => attempt counts as failed and is retried
+  retries: 5
+  coalesce_gap_bytes: 262144 # merge two chunk reads if the hole between them is smaller than this
+  max_request_bytes: 33554432
+  index_block_size_bytes: 524288   # read granularity while scanning HDF5 metadata (index build, h5py fallback)
+  index_page_buffer: false         # true = HDF5 page buffer (reads whole file pages, 4 MiB on NISAR) - costly on slow links
+  block_size_bytes: 4194304        # RangeFile default
+  url_ttl_s: 2400            # reuse a resolved (presigned) URL this long; re-resolved on 401/403
+  auth_hosts:                # Authorization header is only ever sent to these host suffixes
+    - earthdata.nasa.gov
+    - earthdatacloud.nasa.gov
+    - asf.alaska.edu
+
+decode:
+  threads: 4                 # inflate/unshuffle threads (zlib releases the GIL)
+
+cache:
+  ram_chunks_mb: 512         # decoded-chunk LRU in RAM
+  disk_chunks_gb: 20         # compressed-chunk cache on disk (LRU by mtime)
+  clips_gb: 50
+  ttl_s:                     # null = immutable (keyed by processing version, never expires)
+    granule_clip: null
+    search: 21600            # 6 h, same cadence as the granule poller
+    layout_index: null
+  stale_on_error: true       # serve an expired clip + degraded flag if the network is down
+
+search:
+  max_results: 250
+  keep_all_versions: false
