@@ -71,6 +71,31 @@ def step(name):
 
 
 # --------------------------------------------------------------------------- steps
+@step("install integrity")
+def check_install():
+    """Every shipped code file must match the manifest, otherwise results would describe old code."""
+    import hashlib, json
+    mf = ROOT / "MANIFEST.json"
+    if not mf.exists():
+        record("install integrity", "WARN", "no MANIFEST.json (cannot verify the install)")
+        return True
+    want = json.loads(mf.read_text())
+    strict, soft = [], []
+    for rel, h in want.items():
+        p = ROOT / rel
+        got = hashlib.sha256(p.read_bytes().replace(b"\r\n", b"\n")).hexdigest() if p.exists() else None
+        if got != h:
+            (soft if rel.startswith("config/") or rel.endswith((".md", ".example", ".gitignore")) else strict).append(
+                rel + ("" if p.exists() else "  (MISSING)"))
+    if strict:
+        out("  files that are old or missing:\n    " + "\n    ".join(strict[:25]))
+        record("install integrity", "FAIL", f"{len(strict)} code file(s) are stale/missing -> re-run the install block (it copies over ALL files)")
+        return False
+    record("install integrity", "PASS" if not soft else "WARN",
+           f"all {len(want) - len(soft)} code files match" + (f"; {len(soft)} config/doc file(s) differ (fine if you edited them): {soft[:4]}" if soft else ""))
+    return True
+
+
 @step("environment")
 def check_env(cfg, auth):
     out(f"python {platform.python_version()} on {platform.platform()}")
@@ -96,16 +121,24 @@ def check_env(cfg, auth):
 @step("unit tests (local mock server)")
 def run_pytest():
     def run():
-        return subprocess.run([sys.executable, "-m", "pytest", "tests", "-q", "-p", "no:cacheprovider"],
+        return subprocess.run([sys.executable, "-m", "pytest", "tests", "-q", "-p", "no:cacheprovider", "-rfE", "--tb=short"],
                               cwd=ROOT, capture_output=True, text=True, timeout=900)
     r = run()
     if "No module named pytest" in r.stderr + r.stdout:
         out("  installing pytest + mgrs (test-only packages) ...")
         subprocess.run([sys.executable, "-m", "pip", "install", "-q", "pytest", "mgrs"], capture_output=True, timeout=600)
         r = run()
-    tail = [l for l in (r.stdout + r.stderr).strip().splitlines() if l.strip()][-6:]
-    out("  " + "\n  ".join(tail))
-    record("unit tests", "PASS" if r.returncode == 0 else "FAIL", tail[-1] if tail else "no output")
+    lines = (r.stdout + "\n" + r.stderr).splitlines()
+    summary = next((l for l in reversed(lines) if " passed" in l or " failed" in l or "error" in l.lower()), "no output")
+    failed = [l for l in lines if l.startswith(("FAILED ", "ERROR "))]
+    if r.returncode != 0:
+        i = next((k for k, l in enumerate(lines) if "FAILURES" in l or "ERRORS" in l), 0)
+        j = next((k for k, l in enumerate(lines) if "short test summary" in l), len(lines))
+        out("  ---- pytest failure details ----\n  " + "\n  ".join(lines[i:j][:90]))
+        for l in failed:
+            name, _, why = l.partition(" - ")
+            record("unit test " + name.split(" ", 1)[-1].split("::")[-1], "FAIL", (why or name)[:240])
+    record("unit tests", "PASS" if r.returncode == 0 else "FAIL", summary.strip("= "))
 
 
 def do_poll(client, region, products, label, searcher=None):
@@ -148,7 +181,21 @@ def pick_tile(ref, cell):
     return tile_at(c.x, c.y, cell)
 
 
-def check_product(client, product, ref, cell, report_mb):
+def check_product(client, product, ref, cell, report_mb=True):
+    """Runs the checks with brand-new clip/chunk/RAM caches (index + catalog are kept), so a re-run
+    always exercises the real network path instead of being served from the previous run."""
+    from engine.retrieval.clients.cache import ByteLRU, ClipStore, DiskChunkCache
+    tmpd = Path(tempfile.mkdtemp(prefix="nisar_fc_"))
+    saved = (client.disk, client.clips, client.ram)
+    client.disk, client.clips, client.ram = DiskChunkCache(tmpd / "chunks", 1 << 33), ClipStore(tmpd / "clips", None), ByteLRU(256 << 20)
+    try:
+        return _check_product(client, product, ref, cell)
+    finally:
+        client.disk, client.clips, client.ram = saved
+        shutil.rmtree(tmpd, ignore_errors=True)
+
+
+def _check_product(client, product, ref, cell):
     from engine.retrieval import checks
     from engine.tiling.mgrs import Tile, tile_from_id
     from engine.retrieval.clients.nisar_client import NisarClient
@@ -169,8 +216,9 @@ def check_product(client, product, ref, cell, report_mb):
     out(f"  index: built={client.counters['index_built']} disk={client.counters['index_disk']} targeted={client.counters.get('index_targeted', 0)} "
         f"skeleton={client.counters['index_skeleton_s']:.1f}s tables={client.counters['index_tables_s']:.1f}s")
     ok = bool(res.clips) and not res.errors
-    record(f"{product} tile fetch", "PASS" if ok else "FAIL",
-           f"{dt:.1f}s incl. index, {d['requests']} requests, {d['bytes_fetched'] / 1e6:.1f} MB, errors={res.errors or 'none'}")
+    src = res.clips[0].source if res.clips else None
+    record(f"{product} tile fetch", ("PASS" if src == "network" else "WARN") if ok else "FAIL",
+           f"{dt:.1f}s incl. index, {d['requests']} requests, {d['bytes_fetched'] / 1e6:.1f} MB, source={src}, errors={res.errors or 'none'}")
     if not ok:
         return None
     gc = next(iter(res.clips[0].grids.values()))
@@ -193,6 +241,7 @@ def check_product(client, product, ref, cell, report_mb):
            f"source={res2.clips[0].source if res2.clips else None}, {d['requests']} requests")
 
     c2 = NisarClient(client.cfg, client.auth)                       # simulated process restart: RAM cold, disk warm
+    c2.disk, c2.clips = client.disk, client.clips
     try:
         b2 = c2.io.metrics.snapshot(); t = time.time()
         res3 = c2.fetch_tile(tile, product=product, layers=layers, granules=[ref]); dt = time.time() - t
@@ -257,13 +306,24 @@ def export_catalogs(cfg):
 
 # --------------------------------------------------------------------------- main
 def main():
+    try:
+        _main()
+    except SystemExit:
+        raise
+    except BaseException:
+        out("\nUNEXPECTED CRASH of the check script itself:\n" + traceback.format_exc())
+        record("check script", "FAIL", "crashed (see traceback above)")
+        _finish(None)
+
+
+def _main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--selftest", action="store_true", help="developer mode: run against a local mock ASF")
     ap.add_argument("--skip-tests", action="store_true")
     a = ap.parse_args()
 
     server = None
-    if a.selftest:
+    if a.selftest and not os.environ.get("NISAR_SELFTEST_KEEP"):
         os.environ["NISAR_DATA_DIR"] = tempfile.mkdtemp(prefix="nisar_selftest_")
     from engine.retrieval.auth.secrets import EarthdataAuth, earthdata_auth
     from engine.retrieval.clients.nisar_client import NisarClient
@@ -276,9 +336,11 @@ def main():
     regions = {"la": LA_REGION}
     if a.selftest:
         from synth import RangeServer, lonlat_box, make_granule
-        tmp = Path(tempfile.mkdtemp(prefix="nisar_mock_"))
+        tmp = Path(os.environ["NISAR_DATA_DIR"]) / "mock"
+        tmp.mkdir(parents=True, exist_ok=True)
         name = "NISAR_L2_PR_GUNW_A_001_000_000_000_000_000_000_20260701T000000_20260701T000030_X05010_N_F_J_001.h5"
-        make_granule(tmp / name, 1500, 1500)
+        if not (tmp / name).exists():
+            make_granule(tmp / name, 1500, 1500)
         server = RangeServer(tmp, latency_s=0.02)
         w, s, e, n = lonlat_box(0, 0, 1500, 1500)
         mock = GranuleRef(name[:-3], server.url(name), "GUNW", "20261008T000000Z", "20261008T000030Z",
@@ -290,8 +352,11 @@ def main():
 
     out("NISAR retrieval layer - final acceptance check" + ("  [SELFTEST against a mock]" if a.selftest else ""))
     out(f"started {time.strftime('%Y-%m-%d %H:%M:%S')}   expected duration: a few minutes (longer on slow links)")
+    proceed = check_install()
     check_env(cfg, auth)
-    if not auth.available:
+    if proceed is False:
+        out("\nSTOPPED: the installed files are not the files from the zip. Run the install block again.")
+    elif not auth.available:
         out("\nNo credentials: cannot continue. Create .env from .env.example, then run again.")
     else:
         if not a.selftest and not a.skip_tests:
@@ -304,7 +369,7 @@ def main():
                 r1, by = res
             if not a.selftest:
                 step("poller (Bangladesh region, informational)")(do_poll)(client, BD_REGION, ["GUNW", "GCOV"], "bd")
-            cell = int(cfg.tiling["cell_size_m"])
+            cell = int(getattr(cfg, "tiling", {}).get("cell_size_m", 10000))
             infos = {}
             for product in ("GUNW", "GCOV"):
                 cands = [x for x in by.get(product, []) if x.footprint]
@@ -324,6 +389,10 @@ def main():
         finally:
             client.close()
 
+    _finish(cfg, server)
+
+
+def _finish(cfg, server=None):
     out("\n" + "=" * 72)
     out("SUMMARY")
     for name, status, detail in RESULTS:
@@ -332,7 +401,7 @@ def main():
     nw = sum(1 for _, s, _ in RESULTS if s == "WARN")
     ns = sum(1 for _, s, _ in RESULTS if s == "SKIP")
     out(f"\nRESULT: {'ALL CHECKS PASSED' if nf == 0 else f'{nf} CHECK(S) FAILED'}   (warnings: {nw}, skipped: {ns})")
-    rp = cfg.data_dir / "final_check_report.txt"
+    rp = (cfg.data_dir if cfg else ROOT / "data") / "final_check_report.txt"
     try:
         rp.parent.mkdir(parents=True, exist_ok=True)
         rp.write_text("\n".join(LOG), encoding="utf-8")

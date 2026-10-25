@@ -173,6 +173,9 @@ class NisarClient:
             self.fetch(bb, t0, t1, product, layers, maturity)
 
     def close(self):
+        if getattr(self, "_closed", False):
+            return
+        self._closed = True
         self.io.close()
         self.pool.shutdown(wait=False)
         self.blocking.shutdown(wait=False)

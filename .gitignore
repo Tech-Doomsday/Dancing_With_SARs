@@ -3,3 +3,4 @@ data/
 __pycache__/
 .pytest_cache/
 *.pyc
+_backup_before_install_*/

@@ -29,6 +29,11 @@ tools/probe_granule.py     RUN THIS ON A REAL GRANULE: layout, supported-filter 
 cache tiers, restart, neighbour tile, 4 concurrent processes, then copies learned catalogs into `config/catalog/`.
 Report: `<data dir>/final_check_report.txt`.
 
+## Install / update (PowerShell)
+Download `nisar_retrieval_final.zip`, then run the block from the chat message (it backs up engine/tools/tests/config,
+copies ALL files over the repo, installs requirements and runs `python tools/final_check.py`, whose first step verifies
+every file against MANIFEST.json).
+
 ## Install
 `pip install -r requirements-retrieval.txt` (the client checks at startup and names anything missing).
 

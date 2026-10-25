@@ -1,6 +1,8 @@
-"""Settings: config/retrieval.yaml + .env + NISAR_* env overrides. No hardcoded paths."""
+"""Settings: built-in defaults < config/retrieval.yaml + config/tiling.yaml < .env / NISAR_* env vars.
+Defaults live here too, so an old or partial YAML can never crash the engine. No hardcoded paths."""
 from __future__ import annotations
 
+import copy
 import os
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -13,6 +15,24 @@ try:
 except ImportError:  # pragma: no cover
     load_dotenv = None
 
+DEFAULTS: dict[str, dict] = {
+    "net": {
+        "concurrency": 24, "connect_timeout_s": 20, "stall_timeout_s": 25, "retries": 5,
+        "coalesce_gap_bytes": 262144, "max_request_bytes": 33554432,
+        "index_block_size_bytes": 524288, "index_page_buffer": False, "block_size_bytes": 4194304,
+        "url_ttl_s": 2400, "auth_hosts": ["earthdata.nasa.gov", "earthdatacloud.nasa.gov", "asf.alaska.edu"],
+    },
+    "decode": {"threads": 4},
+    "cache": {
+        "ram_chunks_mb": 512, "disk_chunks_gb": 20, "clips_gb": 50,
+        "ttl_s": {"granule_clip": None, "search": 21600, "layout_index": None},
+        "stale_on_error": True,
+    },
+    "search": {"max_results": 250, "keep_all_versions": False},
+    "poll": {"products": ["GCOV", "GUNW"], "lookback_days": 45, "max_results": 2000, "interval_hours": 6, "region": None},
+    "tiling": {"scheme": "mgrs", "cell_size_m": 10000, "margin_m": 300},
+}
+
 
 def project_root(start: Path | None = None) -> Path:
     here = (start or Path(__file__)).resolve()
@@ -22,9 +42,21 @@ def project_root(start: Path | None = None) -> Path:
     return Path.cwd()
 
 
+def _merge(base: dict, over: dict) -> dict:
+    out = copy.deepcopy(base)
+    for k, v in (over or {}).items():
+        out[k] = _merge(out[k], v) if isinstance(v, dict) and isinstance(out.get(k), dict) else v
+    return out
+
+
 def _coerce(raw: str, like: Any) -> Any:
     if like is None:
-        return None if raw.lower() in ("", "null", "none") else float(raw) if raw.replace(".", "", 1).isdigit() else raw
+        if raw.lower() in ("", "null", "none"):
+            return None
+        try:
+            return float(raw)
+        except ValueError:
+            return raw
     if isinstance(like, bool):
         return raw.lower() in ("1", "true", "yes", "on")
     if isinstance(like, int):
@@ -84,6 +116,13 @@ class Settings:
         return self.data_dir / "cache" / "search"
 
 
+def _read_yaml(p: Path) -> dict:
+    try:
+        return yaml.safe_load(p.read_text(encoding="utf-8")) or {}
+    except (OSError, yaml.YAMLError):
+        return {}
+
+
 def load_settings(config_path: str | os.PathLike | None = None, root: Path | None = None) -> Settings:
     root = root or project_root()
     if load_dotenv:
@@ -91,12 +130,11 @@ def load_settings(config_path: str | os.PathLike | None = None, root: Path | Non
             if p.exists():
                 load_dotenv(p, override=False)
     cfg_file = Path(config_path or os.environ.get("NISAR_CONFIG") or root / "config" / "retrieval.yaml")
-    raw = yaml.safe_load(cfg_file.read_text()) if cfg_file.exists() else {}
+    raw = _read_yaml(cfg_file)
+    raw["tiling"] = _merge(raw.get("tiling") or {}, _read_yaml(root / "config" / "tiling.yaml"))
+    merged = _merge(DEFAULTS, raw)
     data_dir = Path(os.environ.get("NISAR_DATA_DIR") or root / "data").expanduser()
     s = Settings(root=root, data_dir=data_dir)
-    for sec in ("net", "decode", "cache", "search", "poll"):
-        setattr(s, sec, _apply_env(sec, raw.get(sec, {})))
-    tf = root / "config" / "tiling.yaml"
-    tiling = yaml.safe_load(tf.read_text()) if tf.exists() else {}
-    s.tiling = _apply_env("tiling", {"scheme": "mgrs", "cell_size_m": 10000, "margin_m": 300, **(tiling or {})})
+    for sec in DEFAULTS:
+        setattr(s, sec, _apply_env(sec, merged[sec]))
     return s

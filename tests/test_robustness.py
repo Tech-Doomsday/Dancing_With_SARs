@@ -88,3 +88,15 @@ def test_concurrent_processes_share_one_data_dir_without_corruption(tmp_path, se
     c = make_client(tmp_path / "x"); c.cfg.data_dir = data
     assert c.counters["chunks_net"] == 0
     c.close()
+
+
+def test_verify_clip_works_when_result_came_from_a_cache(tmp_path, server, served, granule):
+    """The crash seen on a re-run: second run is served from the clip cache, so the client never opened the index."""
+    c1 = make_client(tmp_path)
+    c1.fetch(BOX, layers="unwrappedPhase|coherenceMagnitude", granules=[granule])
+    c1.close()
+    c2 = make_client(tmp_path)                                   # same data dir, brand-new process-like client
+    res = c2.fetch(BOX, layers="unwrappedPhase|coherenceMagnitude", granules=[granule])
+    assert res.clips[0].source == "clip-cache" and granule.granule_id not in c2._indexes
+    ver = checks.verify_clip(c2, granule, res)
+    assert ver and all(same for _, same, *_ in ver)

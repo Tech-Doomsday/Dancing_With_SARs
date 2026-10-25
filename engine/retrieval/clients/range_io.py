@@ -36,7 +36,13 @@ class LoopThread:
 
     def _main(self):
         asyncio.set_event_loop(self.loop)
-        self.loop.run_forever()
+        try:
+            self.loop.run_forever()
+        finally:                                  # release the loop's self-pipe sockets
+            try:
+                self.loop.run_until_complete(self.loop.shutdown_asyncgens())
+            finally:
+                self.loop.close()
 
     def run(self, coro, timeout: float | None = None):
         return asyncio.run_coroutine_threadsafe(coro, self.loop).result(timeout)
@@ -104,7 +110,7 @@ class HttpIO:
         if self._session is None:
             n = int(self.net["concurrency"])
             conn = aiohttp.TCPConnector(limit=n * 2, limit_per_host=n, ttl_dns_cache=600,
-                                        keepalive_timeout=60, enable_cleanup_closed=True)
+                                        keepalive_timeout=60)
             to = aiohttp.ClientTimeout(total=None, connect=float(self.net["connect_timeout_s"]),
                                        sock_read=float(self.net["stall_timeout_s"]))
             self._session = aiohttp.ClientSession(connector=conn, timeout=to, auto_decompress=False)
@@ -240,6 +246,9 @@ class HttpIO:
             await self._session.close()
 
     def close(self):
+        if getattr(self, "_closed", False):
+            return
+        self._closed = True
         try:
             self.lt.run(self.aclose(), timeout=10)
         finally:

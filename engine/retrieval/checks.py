@@ -30,7 +30,10 @@ def valid_fraction(arr):
 def verify_clip(client, granule, res) -> list[tuple[str, bool, tuple, str]]:
     """Compare every array in `res` with plain h5py reading the same pixel window of the same file.
     Returns [(layer key, identical?, shape, dtype)]."""
-    ix = client._indexes[granule.granule_id]
+    ix = client._indexes.get(granule.granule_id)
+    if ix is None:                                   # result came from a cache, so this client never opened the index
+        import re
+        ix = client.io.lt.run(client._index(granule, re.compile(r"(?!)")))     # skeleton only, no chunk tables
     h5 = client._fallback_file(granule)
     out = []
     for clip in res.clips:

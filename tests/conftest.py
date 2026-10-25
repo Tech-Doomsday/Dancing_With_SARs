@@ -26,11 +26,41 @@ def server(served):
     yield s
 
 
+_CREATED: list = []
+
+
 def make_client(tmp_path, **net):
     cfg = load_settings(root=Path(__file__).resolve().parents[1])
     cfg.data_dir = tmp_path / "data"
     cfg.net.update(auth_hosts=["127.0.0.1"], retries=3, connect_timeout_s=5, stall_timeout_s=10, **net)
-    return NisarClient(cfg, EarthdataAuth(token="test"))
+    c = NisarClient(cfg, EarthdataAuth(token="test"))
+    _CREATED.append(c)
+    return c
+
+
+@pytest.fixture(autouse=True)
+def _close_all_clients():
+    """Every client a test creates is closed afterwards, even if the test failed half-way."""
+    yield
+    while _CREATED:
+        try:
+            _CREATED.pop().close()
+        except Exception:
+            pass
+
+
+def rm(path):
+    """Delete a directory tree for real. Windows can hold freshly written files for a moment
+    (antivirus / indexer), so retry, and fail loudly instead of silently leaving data behind."""
+    import shutil
+    import time
+    path = Path(path)
+    for i in range(40):
+        shutil.rmtree(path, ignore_errors=True)
+        if not path.exists():
+            return
+        time.sleep(0.1 * (1 + i // 5))
+    raise AssertionError(f"could not delete {path} (files locked by another process?)")
 
 
 @pytest.fixture()

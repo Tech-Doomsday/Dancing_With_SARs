@@ -1,4 +1,4 @@
 # Tiling scheme for the hazard engine: MGRS cells.
 scheme: mgrs
-cell_size_m: 10000     # 100000 | 10000 | 1000. 10 km = ~500 px at 20 m (GCOV), ~125 px at 80 m (GUNW)
+cell_size_m: 10000     # 100000 | 10000 | 1000. 10 km = ~1000 px at 10 m (GCOV), ~125 px at 80 m (GUNW)
 margin_m: 300          # ring added around a tile when fetching, so edge filters/resampling have context

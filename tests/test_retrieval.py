@@ -6,7 +6,7 @@ import h5py
 import numpy as np
 import pytest
 
-from conftest import make_client
+from conftest import make_client, rm
 from engine.retrieval.clients.decode import UnsupportedFilter, decode_chunk, unshuffle
 from engine.retrieval.clients.nisar_client import drop_older_versions
 from engine.retrieval.clients.range_io import coalesce
@@ -114,7 +114,7 @@ def test_new_bbox_reuses_chunks_and_index(tmp_path, server, granule):
 
 def test_ram_tier_serves_repeat_reads(client, server, granule):
     client.fetch(BOX, layers="unwrappedPhase", granules=[granule])
-    shutil.rmtree(client.clips.root, ignore_errors=True)       # force re-assembly from chunk tiers
+    rm(client.clips.root)       # force re-assembly from chunk tiers
     server.reset()
     client.fetch(BOX, layers="unwrappedPhase", granules=[granule])
     assert client.counters["chunks_ram"] > 0 and server.requests == 0
@@ -148,7 +148,7 @@ def test_resolve_once_and_no_auth_leak(client, server, granule):
 
 def test_presigned_expiry_triggers_reresolve(client, server, granule):
     client.fetch(BOX, layers="unwrappedPhase", granules=[granule])
-    shutil.rmtree(client.clips.root, ignore_errors=True); shutil.rmtree(client.cfg.chunks_dir, ignore_errors=True)
+    rm(client.clips.root); rm(client.cfg.chunks_dir)
     client.ram._d.clear(); client.ram.size = 0
     server.sig = "v2"                                                   # old signed URL now 403s
     r = client.fetch(BOX, layers="unwrappedPhase", granules=[granule])
@@ -157,7 +157,7 @@ def test_presigned_expiry_triggers_reresolve(client, server, granule):
 
 def test_transient_5xx_is_retried(client, server, granule):
     client.fetch(BOX, layers="unwrappedPhase", granules=[granule])      # builds index
-    shutil.rmtree(client.clips.root, ignore_errors=True); shutil.rmtree(client.cfg.chunks_dir, ignore_errors=True)
+    rm(client.clips.root); rm(client.cfg.chunks_dir)
     client.ram._d.clear(); client.ram.size = 0
     server.fail_next = 3
     r = client.fetch(BOX, layers="unwrappedPhase", granules=[granule])
@@ -165,13 +165,13 @@ def test_transient_5xx_is_retried(client, server, granule):
 
 
 def test_stale_clip_served_when_network_down(tmp_path, server, granule):
-    from conftest import make_client
+    from conftest import make_client, rm
     c = make_client(tmp_path)
     c.cfg.cache["ttl_s"]["granule_clip"] = 0.05
     c.clips.ttl = 0.05
     c.fetch(BOX, layers="unwrappedPhase", granules=[granule])
     time.sleep(0.1)
-    shutil.rmtree(c.cfg.chunks_dir, ignore_errors=True); c.ram._d.clear(); c.ram.size = 0
+    rm(c.cfg.chunks_dir); c.ram._d.clear(); c.ram.size = 0
     server.online = False
     c.io._resolved.clear()
     r = c.fetch(BOX, layers="unwrappedPhase", granules=[granule])

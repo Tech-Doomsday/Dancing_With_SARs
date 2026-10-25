@@ -38,7 +38,14 @@ class State:
         c = sqlite3.connect(self.path, timeout=30, isolation_level=None)
         c.row_factory = sqlite3.Row
         try:
-            c.execute("BEGIN IMMEDIATE")
+            for attempt in range(60):                       # Windows can report 'locked' despite the busy timeout
+                try:
+                    c.execute("BEGIN IMMEDIATE")
+                    break
+                except sqlite3.OperationalError as ex:
+                    if "locked" not in str(ex).lower() and "busy" not in str(ex).lower() or attempt == 59:
+                        raise
+                    time.sleep(0.05 * (1 + attempt % 10))
             yield c
             c.execute("COMMIT")
         except BaseException:
