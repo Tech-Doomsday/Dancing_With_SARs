@@ -150,6 +150,8 @@ class NisarClient:
     def fetch(self, bbox, t0=None, t1=None, product=None, layers: str | None = None,
               maturity=None, granules: list[GranuleRef] | None = None) -> FetchResult:
         """Architecture §8 entry point: fetch(bbox, t0, t1, product, layers) -> clips."""
+        if getattr(self, "_closed", False):
+            raise RuntimeError("NisarClient is closed")
         degraded = False
         if granules is None:
             granules, degraded = self.search(bbox, t0, t1, product, maturity)
@@ -176,6 +178,15 @@ class NisarClient:
         if getattr(self, "_closed", False):
             return
         self._closed = True
+        with self._fb_lock:                      # open h5py handles + their block caches
+            for rf, h5 in list(self._fb.values()):
+                for obj in (h5, rf):
+                    try:
+                        obj.close()
+                    except Exception:
+                        pass
+            self._fb.clear()
+        self._indexes.clear()
         self.io.close()
         self.pool.shutdown(wait=False)
         self.blocking.shutdown(wait=False)

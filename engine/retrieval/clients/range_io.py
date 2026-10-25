@@ -6,8 +6,8 @@ Nothing here knows about HDF5. Callers hand in (offset, length) lists and get by
 from __future__ import annotations
 
 import asyncio
+import concurrent.futures
 import random
-import sys
 import threading
 import time
 from dataclasses import dataclass, field
@@ -28,10 +28,15 @@ class AuthError(RangeError):
 
 # --------------------------------------------------------------------------- loop thread
 class LoopThread:
-    """A private asyncio loop on a daemon thread; sync code calls .run(coro)."""
+    """A private asyncio loop on a daemon thread; sync code calls .run(coro).
+
+    close() is synchronous: it stops the loop, cancels whatever is still pending, closes the loop and joins
+    the thread. After that, run() raises RuntimeError immediately instead of waiting on a loop that will
+    never run the coroutine (that waiting-forever case is what used to hang)."""
 
     def __init__(self, name: str = "nisar-io"):
         self.loop = asyncio.new_event_loop()
+        self._closed = False
         self._t = threading.Thread(target=self._main, name=name, daemon=True)
         self._t.start()
 
@@ -40,20 +45,59 @@ class LoopThread:
         try:
             self.loop.run_forever()
         finally:
-            if sys.platform != "win32":           # release the loop's self-pipe sockets (a leak otherwise);
-                try:                              # not on Windows: ProactorEventLoop.close() can spin on open sockets
-                    self.loop.run_until_complete(self.loop.shutdown_asyncgens())
-                finally:
-                    self.loop.close()
+            try:
+                pending = [t for t in asyncio.all_tasks(self.loop) if not t.done()]
+                for t in pending:
+                    t.cancel()                    # waiters blocked in run() get CancelledError instead of hanging
+                if pending:
+                    self.loop.run_until_complete(asyncio.gather(*pending, return_exceptions=True))
+                self.loop.run_until_complete(self.loop.shutdown_asyncgens())
+            except Exception:
+                pass
+            finally:
+                try:
+                    self.loop.close()             # releases the loop's self-pipe sockets
+                except Exception:
+                    pass
+
+    @property
+    def closed(self) -> bool:
+        return self._closed or not self._t.is_alive()
 
     def run(self, coro, timeout: float | None = None):
-        return asyncio.run_coroutine_threadsafe(coro, self.loop).result(timeout)
+        if self.closed:
+            coro.close()
+            raise RuntimeError("event loop is closed (the client was closed)")
+        fut = asyncio.run_coroutine_threadsafe(coro, self.loop)
+        deadline = None if timeout is None else time.monotonic() + timeout
+        while True:
+            wait = 0.5 if deadline is None else max(0.0, min(0.5, deadline - time.monotonic()))
+            try:
+                return fut.result(wait)
+            except concurrent.futures.TimeoutError:
+                if not self._t.is_alive():        # loop died while we were waiting: never wait forever
+                    fut.cancel()
+                    raise RuntimeError("event loop stopped while a call was in flight (the client was closed)")
+                if deadline is not None and time.monotonic() >= deadline:
+                    fut.cancel()
+                    raise
 
     def submit(self, coro):
+        if self.closed:
+            coro.close()
+            raise RuntimeError("event loop is closed (the client was closed)")
         return asyncio.run_coroutine_threadsafe(coro, self.loop)
 
-    def close(self):
-        self.loop.call_soon_threadsafe(self.loop.stop)
+    def close(self, join_timeout: float = 10.0):
+        if self._closed:
+            return
+        self._closed = True
+        try:
+            self.loop.call_soon_threadsafe(self.loop.stop)
+        except RuntimeError:
+            pass
+        if threading.current_thread() is not self._t:
+            self._t.join(join_timeout)
 
 
 # --------------------------------------------------------------------------- metrics

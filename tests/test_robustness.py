@@ -100,3 +100,67 @@ def test_verify_clip_works_when_result_came_from_a_cache(tmp_path, server, serve
     assert res.clips[0].source == "clip-cache" and granule.granule_id not in c2._indexes
     ver = checks.verify_clip(c2, granule, res)
     assert ver and all(same for _, same, *_ in ver)
+
+
+# ------------------------------------------------------------------ close() semantics (this used to hang forever)
+def _within(seconds, fn):
+    """Run fn in a thread; fail (instead of hanging the whole suite) if it does not finish."""
+    box = {}
+
+    def target():
+        try:
+            box["r"] = fn()
+        except BaseException as ex:
+            box["e"] = ex
+    t = threading.Thread(target=target, daemon=True)
+    t.start(); t.join(seconds)
+    assert not t.is_alive(), f"call did not return within {seconds}s (hung)"
+    if "e" in box:
+        raise box["e"]
+    return box.get("r")
+
+
+def test_close_is_synchronous_releases_everything_and_use_after_close_fails_fast(tmp_path, server, granule):
+    c = make_client(tmp_path)
+    c.fetch(BOX, layers="unwrappedPhase", granules=[granule])
+    c._fallback_file(granule)                                       # make sure an h5py handle is open
+    assert c._fb
+    c.close()
+    assert c.io.lt.loop.is_closed() and not c.io.lt._t.is_alive()   # loop closed, thread gone, on return
+    assert not c._fb and not c._indexes                             # fallback handles released
+    with pytest.raises(RuntimeError):
+        _within(10, lambda: c.fetch(BOX, layers="unwrappedPhase", granules=[granule]))
+    with pytest.raises(RuntimeError):
+        _within(10, lambda: c.io.lt.run(c.io.resolve(granule.url)))
+    c.close()                                                       # idempotent
+
+
+def test_use_after_close_never_hangs_even_when_racing_the_shutdown(tmp_path, server, granule):
+    for _ in range(25):
+        c = make_client(tmp_path)
+        t = threading.Thread(target=c.close)
+        t.start()
+        try:
+            _within(10, lambda: c.fetch(BOX, layers="unwrappedPhase", granules=[granule]))
+        except RuntimeError:
+            pass                                                    # failing fast is the contract; hanging is the bug
+        t.join(10)
+        assert not t.is_alive()
+
+
+def test_closing_while_a_fetch_is_in_flight_releases_the_waiter(tmp_path, server, granule):
+    server.latency = 1.0
+    c = make_client(tmp_path)
+    err = {}
+
+    def work():
+        try:
+            c.fetch(BOX, layers="unwrappedPhase", granules=[granule])
+        except BaseException as ex:
+            err["e"] = ex
+    t = threading.Thread(target=work, daemon=True)
+    t.start()
+    time.sleep(0.4)
+    c.close()
+    t.join(15)
+    assert not t.is_alive(), "the in-flight fetch hung after close()"
