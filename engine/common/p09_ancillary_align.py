@@ -1,86 +1,114 @@
-"""P09 - ancillary alignment: DEM -> slope/aspect/HAND (+ water) onto the grids.
+# P09 — align DEM, slope/aspect/curvature, HAND, land cover, water occurrence and context rasters to the canonical grids
+"""Everything the `AncillaryProvider` can deliver, on G80 and G20, plus an honest per-layer status.
 
-Terrain is computed on a 1-px padded grid and cropped, so tile edges are not
-biased. HAND here is a local-minimum PROXY (flagged HAND_IS_PROXY); inject a real
-routing-based HAND later via ``hand_provider`` without touching anything else.
+* DEM-derived layers (elevation, slope, aspect, profile/plan curvature, HAND) come from `terrain_set` (shared with
+  P05, computed once). HAND is computed on an extended grid so drainage outside the tile is seen.
+* `landcover` (WorldCover codes, uint8, 0 = unknown) and `water_occurrence` are resampled to both grids
+  (nearest / bilinear); the context rasters (tree cover, built-up, permafrost, glacier, river buffer, shoreline
+  distance) are aligned to G80, and to G20 only where cheap and meaningful.
+* A missing or unreadable layer is a `status` entry with `available=False` and a flag - never a made-up default.
+  Provider scalar facts (e.g. `volcano_distance_km`) are passed through untouched.
 """
 from __future__ import annotations
 
-from typing import Callable, Dict, Optional
-
 import numpy as np
 
-from . import _terrain
-from ._raster import crop_to, resample
-from ._types import Grid
-from .p07_correction_audit import elevation_audit
-from .state import F_HAND_PROXY, F_NO_DEM, F_NO_LS, F_NO_WATER, BundleBuilder
+from .ancillary import RASTER_NAMES
+from .context import BuildContext
+from .frozen import Dual, FrozenDict
+from .scene_bundle import AncillaryLayers, AncillaryStatus
+from .terrain_set import aligned_raster, ensure_hand, get_terrain
 
-STAGE = "P09"
-
-HandProvider = Callable[[np.ndarray, Grid], np.ndarray]
-hand_provider: Optional[HandProvider] = None   # module-level hook; None -> proxy
-
-
-def _terrain_on(state: BundleBuilder, dem_raster, grid: Grid) -> Dict[str, np.ndarray]:
-    pad = grid.padded(1)
-    dem_p = resample(dem_raster.data, dem_raster.grid, pad, "mean")
-    slope, aspect = _terrain.slope_aspect(dem_p, grid.dx, grid.dy)
-    return {"dem": crop_to(dem_p, pad, grid), "slope": crop_to(slope, pad, grid),
-            "aspect": crop_to(aspect, pad, grid), "dem_padded": dem_p}
+# name -> (resampling method on G80, also on G20?)
+_CONTEXT = {
+    "tree_cover": ("bilinear", False),
+    "builtup": ("bilinear", False),
+    "permafrost": ("nearest", False),
+    "glacier": ("nearest", False),
+    "river_buffer": ("nearest", False),
+    "shoreline_distance_m": ("bilinear", False),
+}
 
 
-def run(state: BundleBuilder) -> Dict:
-    anc = state.inp.ancillary
-    cfg = state.cfg
-    g80, g20 = state.grids["G80"], state.grids["G20"]
-    metrics: Dict = {}
-    dem = anc.get("dem")
-    if dem is None:
-        state.flag(F_NO_DEM)
-        metrics["dem"] = "missing"
+def _core_cover(ctx: BuildContext, cov: np.ndarray, grid) -> float:
+    rs, cs = grid.core_slices()
+    return float(np.asarray(cov)[rs, cs].mean())
+
+
+def _as_uint8(a: np.ndarray) -> np.ndarray:
+    if a.dtype.kind == "f":
+        a = np.nan_to_num(a, nan=0.0)
+    return np.clip(a, 0, 255).astype(np.uint8)
+
+
+def _align(ctx: BuildContext, name: str, method: str, both: bool, integer: bool = False):
+    """-> (Dual, AncillaryStatus). Failures become a status + flag, not an exception."""
+    try:
+        got = aligned_raster(ctx, name, ctx.grids.g80, method)
+    except Exception as ex:
+        ctx.flag("ancillary_error", "error", "P09", f"{name}: {type(ex).__name__}: {ex}", layer=name)
+        return Dual(), AncillaryStatus(name, False, "", None, f"unreadable: {type(ex).__name__}: {ex}")
+    if got is None:
+        return Dual(), AncillaryStatus(name, False, "", None, "not provided")
+    a80, layer, cov80 = got
+    a20 = None
+    if both:
+        try:
+            g = aligned_raster(ctx, name, ctx.grids.g20, method)
+            a20 = g[0] if g is not None else None
+        except Exception as ex:
+            ctx.flag("ancillary_error", "error", "P09", f"{name} (G20): {type(ex).__name__}: {ex}", layer=name)
+    covered = _core_cover(ctx, cov80, ctx.grids.g80)
+    if covered < 0.5:
+        ctx.flag("ancillary_partial", "warn", "P09", f"{name}: covers only {covered:.0%} of the tile", layer=name, coverage=covered)
+    if integer:
+        a80 = _as_uint8(a80)
+        a20 = _as_uint8(a20) if a20 is not None else None
+    note = f"covers {covered:.0%} of the tile" + ("" if covered > 0 else " (tile outside the raster)")
+    return Dual(a80, a20), AncillaryStatus(name, covered > 0, layer.source, layer.version, note)
+
+
+def run(ctx: BuildContext) -> None:
+    status: dict = {}
+    ts = get_terrain(ctx)
+    if ts.available:
+        try:
+            ensure_hand(ctx, ts)
+        except Exception as ex:
+            ctx.flag("ancillary_error", "error", "P09", f"hand: {type(ex).__name__}: {ex}", layer="hand")
+    dual = lambda d: Dual(d.get("G80"), d.get("G20"))      # noqa: E731
+    if ts.available:
+        for n in ("dem", "slope", "aspect", "curvature", "hand"):
+            status[n] = AncillaryStatus(n, n != "hand" or bool(ts.hand), ts.source if n != "hand" else "derived:dem",
+                                        ts.version, "" if n != "hand" or ts.hand else "HAND could not be computed")
     else:
-        t80 = _terrain_on(state, dem, g80)
-        state.put("dem_m", t80["dem"])
-        state.put("slope_deg", t80["slope"])
-        state.put("aspect_deg", t80["aspect"])
-        if hand_provider is not None:
-            hand = hand_provider(t80["dem"], g80).astype(np.float32)
-            state.meta["hand_method"] = "external_provider"
-        else:
-            pad = g80.padded(1)
-            hand = crop_to(_terrain.hand_proxy(t80["dem_padded"], max(1, int(round(cfg.hand_radius_m / g80.dx)))), pad, g80)
-            state.meta["hand_method"] = "local_min_proxy"
-            state.meta["hand_radius_m"] = cfg.hand_radius_m
-            state.flag(F_HAND_PROXY)
-        state.put("hand_m", hand)
-        if state.needs_g20:
-            t20 = _terrain_on(state, dem, g20)
-            state.put("dem_g20_m", t20["dem"], "G20")
-            state.put("slope_g20_deg", t20["slope"], "G20")
-            state.put("aspect_g20_deg", t20["aspect"], "G20")
-            state.put("hand_g20_m", resample(hand, g80, g20, "bilinear"), "G20")
-        # refine layover/shadow from the DEM only when the product did not provide it
-        if state.meta.get("layover_shadow_source") == "none" and {"los_e", "los_n", "los_u"} <= set(state.layers):
-            ls = _terrain.layover_shadow_from_dem(t80["dem"], g80.dx, g80.dy, state.layers["los_e"],
-                                                  state.layers["los_n"], state.layers["los_u"])
-            state.layers["layover_shadow"] = ls
-            state.meta["layover_shadow_source"] = "dem_derived"
-            state.flags.discard(F_NO_LS)
-        elevation_audit(state)
-        metrics["dem"] = "ok"
-        metrics["hand_method"] = state.meta["hand_method"]
-
-    water = anc.get("water")
-    if water is None:
-        state.flag(F_NO_WATER)
-        state.put("water", np.zeros(g80.shape, dtype=bool))
-        state.meta["water_source"] = "none"
-    else:
-        frac = resample(water.data.astype(np.float32), water.grid, g80, "mean")
-        state.put("water", np.nan_to_num(frac, nan=0.0) >= cfg.water_threshold)
-        state.meta["water_source"] = "ancillary"
-        if state.needs_g20:
-            f20 = resample(water.data.astype(np.float32), water.grid, g20, "mean")
-            state.put("water_g20", np.nan_to_num(f20, nan=0.0) >= cfg.water_threshold, "G20")
-    return metrics
+        status["dem"] = AncillaryStatus("dem", False, "", None, ts.note or "not provided")
+        for n in ("slope", "aspect", "curvature", "hand"):
+            status[n] = AncillaryStatus(n, False, "", None, "needs dem")
+    lc, status["landcover"] = _align(ctx, "landcover", "nearest", True, integer=True)
+    wo, status["water_occurrence"] = _align(ctx, "water_occurrence", "bilinear", True)
+    context = {}
+    for name, (method, both) in _CONTEXT.items():
+        d, st = _align(ctx, name, method, both, integer=False)
+        status[name] = st
+        if d.available:
+            context[name] = d
+    try:
+        facts = dict(ctx.ancillary_provider.facts(ctx.tile) or {})
+    except Exception as ex:
+        ctx.flag("ancillary_error", "error", "P09", f"facts: {type(ex).__name__}: {ex}", layer="facts")
+        facts = {}
+    status["facts"] = AncillaryStatus("facts", bool(facts), type(ctx.ancillary_provider).__name__, None,
+                                      ", ".join(sorted(facts)) if facts else "none")
+    ctx.ancillary = AncillaryLayers(
+        elevation_m=dual(ts.elevation) if ts.available else Dual(),
+        slope_deg=dual(ts.slope) if ts.available else Dual(),
+        aspect_deg=dual(ts.aspect) if ts.available else Dual(),
+        curvature_profile=dual(ts.curv_profile) if ts.available else Dual(),
+        curvature_plan=dual(ts.curv_plan) if ts.available else Dual(),
+        hand_m=dual(ts.hand) if ts.available and ts.hand else Dual(),
+        landcover=lc, water_occurrence_pct=wo, context=FrozenDict(context), facts=FrozenDict(facts),
+        status=FrozenDict(status), hand_valid_fraction=ts.hand_valid_fraction)
+    missing = sorted(n for n in (*RASTER_NAMES, "hand") if n in status and not status[n].available)
+    if missing:
+        ctx.flag("ancillary_missing", "info", "P09", "ancillary layers not available: " + ", ".join(missing), missing=missing)

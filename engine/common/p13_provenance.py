@@ -1,84 +1,94 @@
-"""P13 - provenance: checksums + param hash -> deterministic bundle id -> SceneBundle.
+# P13 — provenance: input hashes, parameter hash, code version, deterministic bundle id, assumptions
+"""Who and what a bundle was built from.
 
-bundle_id depends only on (tile, schema, params, granule ids/versions, raw input
-checksums), so it is stable across machines and numpy versions. Output-layer
-checksums are recorded separately for integrity checks, not folded into the id.
+`bundle_id` = blake2b over (contract version, tile, request, input digests, ancillary digest, parameter hash, code
+version). Identical inputs + parameters + code give the same id, so `bundle_io.save_bundle` is idempotent and a
+pipeline result can name the exact bundle it was computed from. Not in the id: wall-clock time, step timings, git commit
+(the source digest already covers the code) and flags (they are derived from the same inputs).
 """
 from __future__ import annotations
 
 import hashlib
 import json
-import platform
+import subprocess
 from datetime import datetime, timezone
-from typing import Any, Dict
+from functools import lru_cache
+from pathlib import Path
 
 import numpy as np
 
-from .scene_bundle import SCHEMA_VERSION, CORE_LAYERS, SceneBundle
-from .state import BundleBuilder
-
-STAGE = "P13"
-__version__ = "1.0.0"
+from .config import repo_root
+from .context import BuildContext, iso
+from .scene_bundle import CONTRACT_VERSION
 
 
-def checksum(a: np.ndarray) -> str:
-    a = np.ascontiguousarray(a)
-    h = hashlib.sha256()
-    h.update(str(a.dtype).encode())
-    h.update(str(a.shape).encode())
-    h.update(a.tobytes())
-    return h.hexdigest()[:16]
+def _h(n: int) -> "hashlib._Hash":
+    return hashlib.blake2b(digest_size=n)
 
 
-def _input_checksums(state: BundleBuilder) -> Dict[str, str]:
-    out: Dict[str, str] = {}
-    for tag, clip in (("gunw", state.clip), ("gcov", state.bs_clip)):
-        if clip is None:
-            continue
-        for name in sorted(clip.layers):
-            out[f"{tag}:{clip.granule_id}:{name}"] = checksum(clip.layers[name].data)
-    for name in sorted(state.inp.ancillary):
-        out[f"ancillary:{name}"] = checksum(state.inp.ancillary[name].data)
-    return out
+@lru_cache(maxsize=1)
+def code_version(n: int = 16) -> str:
+    """Digest of every engine/common source file (so a logic change changes the bundle id)."""
+    h = _h(n)
+    root = Path(__file__).resolve().parent
+    for p in sorted(root.glob("*.py")):
+        h.update(p.name.encode())
+        h.update(p.read_bytes())
+    return h.hexdigest()
 
 
-def run(state: BundleBuilder) -> Dict:
-    res, cfg = state.resolution, state.cfg
-    missing = [n for n in CORE_LAYERS if n not in state.layers]
-    if missing:
-        raise RuntimeError(f"P13: core layers missing at freeze time: {missing}")
-    inputs = _input_checksums(state)
-    granules = {"current": res.current.granule_id,
-                "history": [g.granule_id for g in res.history],
-                "gcov_current": res.gcov_current.granule_id if res.gcov_current else None,
-                "gcov_history": [g.granule_id for g in res.gcov_history],
-                "versions": {g.granule_id: g.processing_version
-                             for g in res.all_pairs + ((res.gcov_current,) if res.gcov_current else ()) + res.gcov_history}}
-    id_blob = json.dumps({"tile": state.inp.tile.tile_id, "bbox": state.inp.tile.bbox, "schema": SCHEMA_VERSION,
-                          "params": cfg.param_hash(), "granules": granules, "inputs": inputs,
-                          "grids": {k: v.to_dict() for k, v in state.grids.items()}}, sort_keys=True, default=str)
-    bundle_id = "sb_" + hashlib.sha256(id_blob.encode()).hexdigest()[:20]
-    prov: Dict[str, Any] = {
-        "engine_common_version": __version__, "schema_version": SCHEMA_VERSION, "param_hash": cfg.param_hash(),
-        "config": cfg.to_dict(), "granules": granules, "input_checksums": inputs,
-        "layer_checksums": {k: checksum(v) for k, v in sorted(state.layers.items())},
-        "graph": res.graph, "dropped_granules": [list(x) for x in res.dropped],
-        "stage_log": [{"stage": s.stage, "status": s.status, "seconds": round(s.seconds, 4),
-                       "notes": s.notes, "metrics": s.metrics} for s in state.stage_log],
-        "created_utc": datetime.now(timezone.utc).isoformat(timespec="seconds"),
-        "python": platform.python_version(), "numpy": np.__version__,
-    }
-    cur = res.current
-    state.bundle = SceneBundle(
-        bundle_id=bundle_id, tile=state.inp.tile, sensor=cur.sensor, product=cur.product,
-        group={"sensor": cur.sensor, "track": cur.track, "frame": cur.frame, "direction": cur.direction},
-        epoch={"granule_id": cur.granule_id, "ref_time": cur.ref_time.isoformat(),
-               "sec_time": cur.sec_time.isoformat() if cur.sec_time else None,
-               "gcov_granule_id": res.gcov_current.granule_id if res.gcov_current else None,
-               "processing_version": cur.processing_version},
-        grids=dict(state.grids), layers=state.layers, layer_grid=state.layer_grid,
-        meta=dict(state.meta), stack=state.stack,
-        corrections=state.audit, quality=state.quality, routing=state.routing,
-        flags=tuple(sorted(state.flags)), cold_start=bool(state.stack.cold_start),
-        degraded_mode=state.degraded_mode, provenance=prov)
-    return {"bundle_id": bundle_id, "n_layers": len(state.layers), "flags": sorted(state.flags)}
+@lru_cache(maxsize=1)
+def git_commit() -> str | None:
+    try:
+        r = subprocess.run(["git", "rev-parse", "HEAD"], cwd=repo_root(), capture_output=True, text=True, timeout=5)
+        return r.stdout.strip() or None if r.returncode == 0 else None
+    except Exception:
+        return None
+
+
+def _ancillary_digest(ctx: BuildContext, n: int) -> str:
+    h = _h(n)
+    a = ctx.ancillary
+    if a is None:
+        return h.hexdigest()
+    for name in ("elevation_m", "landcover", "water_occurrence_pct"):
+        arr = getattr(a, name).g80
+        if arr is not None:
+            h.update(name.encode())
+            h.update(np.ascontiguousarray(arr).tobytes())
+    for k in sorted(a.context):
+        h.update(k.encode())
+        if a.context[k].g80 is not None:
+            h.update(np.ascontiguousarray(a.context[k].g80).tobytes())
+    h.update(json.dumps({k: v for k, v in sorted(a.facts.items())}, sort_keys=True, default=str).encode())
+    for k in sorted(a.status):
+        s = a.status[k]
+        h.update(f"{k}|{s.available}|{s.source}|{s.version}".encode())
+    return h.hexdigest()
+
+
+def run(ctx: BuildContext) -> None:
+    n = ctx.cfg.provenance.hash_bytes
+    recs = tuple(sorted(ctx.input_records, key=lambda r: r.granule_id))
+    ih = _h(n)
+    for r in recs:
+        ih.update(f"{r.granule_id}|{r.product}|{r.sha}".encode())
+    inputs_hash = ih.hexdigest()
+    params_hash = _h(n)
+    params_hash.update(ctx.cfg.chain_params_json().encode())
+    params_hash = params_hash.hexdigest()
+    rq = ctx.request
+    req = json.dumps({"tile": ctx.tile.id, "as_of": iso(rq.as_of), "t0": iso(rq.t0), "t1": iso(rq.t1),
+                      "event_window": [iso(x) if x is not None else None for x in rq.event_window] if rq.event_window else None,
+                      "triggers": rq.triggers, "codes": sorted(rq.active_codes) if rq.active_codes is not None else None},
+                     sort_keys=True, default=str)
+    cv = code_version(n)
+    h = _h(n)
+    for part in (CONTRACT_VERSION, req, inputs_hash, _ancillary_digest(ctx, n), params_hash, cv):
+        h.update(part.encode())
+        h.update(b"\x00")
+    ctx.bundle_id = f"{ctx.tile.id}-{h.hexdigest()}"
+    ctx.provenance_parts = {
+        "inputs": recs, "inputs_hash": inputs_hash, "params_hash": params_hash, "code_version": cv,
+        "git_commit": git_commit(), "created_at": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
+        "assumptions": tuple(ctx.assumptions)}

@@ -1,20 +1,31 @@
-"""engine.common - common preprocessing (P01..P13) producing the SceneBundle.
+"""2 · COMMON PREPROCESSING — P01..P13, sequential, producing one read-only SceneBundle shared by every pipeline.
 
-Public surface (everything else is internal):
-    build_scene_bundle / run_preprocessing, PreprocInput, PreprocConfig,
-    SceneBundle, ClipSource, Clip, Raster, Grid, TileSpec, GranuleRecord.
+    from engine.common import build_scene_bundle          # run the chain for one tile
+    from engine.common import SceneBundle, load_bundle    # what a pipeline (or its worker process) needs
+
+Pipelines import only `engine.common.scene_bundle` types (and may call `load_bundle`); they never import the chain.
+Names are resolved lazily so importing the contract does not pull in the chain's dependencies.
 """
-from ._types import (Clip, ClipError, ClipSource, GranuleRecord, GranuleResolutionError, Grid,
-                     InMemoryClipSource, InsufficientInputError, PreprocError, Raster, TileSpec)
-from .config import PreprocConfig
-from .p13_provenance import __version__
-from .runner import PreprocResult, build_scene_bundle, run_preprocessing
-from .scene_bundle import CORE_LAYERS, SCHEMA_VERSION, SceneBundle, TemporalStack
-from .state import PreprocInput
+from __future__ import annotations
 
-__all__ = [
-    "build_scene_bundle", "run_preprocessing", "PreprocInput", "PreprocConfig", "PreprocResult",
-    "SceneBundle", "TemporalStack", "CORE_LAYERS", "SCHEMA_VERSION", "ClipSource", "InMemoryClipSource",
-    "Clip", "Raster", "Grid", "TileSpec", "GranuleRecord", "PreprocError", "GranuleResolutionError",
-    "ClipError", "InsufficientInputError", "__version__",
-]
+import importlib
+
+_LAZY = {
+    "build_scene_bundle": ".chain", "run_steps": ".chain", "assemble": ".chain", "STEPS": ".chain",
+    "load_common_config": ".config", "CommonConfig": ".config",
+    "save_bundle": ".bundle_io", "load_bundle": ".bundle_io", "bundle_path": ".bundle_io",
+    "assert_bundle_contract": ".contract", "check_bundle": ".contract", "ContractViolation": ".contract",
+    "SceneBundle": ".scene_bundle", "CONTRACT_VERSION": ".scene_bundle",
+    "AncillaryProvider": ".ancillary", "DirectoryAncillary": ".ancillary", "NullAncillary": ".ancillary",
+}
+
+__all__ = sorted(_LAZY)
+
+
+def __getattr__(name: str):
+    mod = _LAZY.get(name)
+    if mod is None:
+        raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
+    value = getattr(importlib.import_module(mod, __name__), name)
+    globals()[name] = value
+    return value

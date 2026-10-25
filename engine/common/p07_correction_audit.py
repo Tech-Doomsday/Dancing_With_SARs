@@ -1,86 +1,118 @@
-"""P07 - correction audit: RECORD corrections, never apply them silently.
+# P07 — record applied tropo/iono/tide correction flags, never apply silently
+"""What could be removed from the LOS signal, recorded - never applied.
 
-For every correction layer the product ships (ionosphere, troposphere, solid-earth
-tide) we convert it to LOS metres as a diagnostic layer, report its magnitude and
-whether the *product* already applied it. The engine itself applies nothing:
-``engine_applied`` is always False. A residual planar ramp and (once the DEM is
-aligned, in P09) the phase/elevation correlation are recorded the same way.
+For every pair this step converts each correction layer the product provides (ionosphere phase screen,
+hydrostatic and wet troposphere, solid-earth tide) into the same units and sign as `los_m`, i.e. "how much
+apparent displacement does this effect contribute", and stores it as a diagnostic layer. The audit also states
+whether the product generator already applied it (an assumption from config: the clip carries no processing
+metadata) and always `applied_by_engine=False`.
+
+`residual_los_m` = `los_m` minus every available diagnostic the product did not apply. It is offered as a layer
+for pipelines that want it (land_subsidence uses it); `los_m` itself is never altered, so no pipeline can receive
+a silently corrected field.
 """
 from __future__ import annotations
 
-from typing import Dict, Optional
+import math
 
 import numpy as np
 
-from .p06_phase_to_los import phase_to_los_m
-from .state import BundleBuilder
+from .context import BuildContext
+from .frozen import FrozenDict
+from .p05_geometry import collapse_height
+from .scene_bundle import CorrectionAudit, CorrectionItem
+from .terrain_set import get_terrain
 
-STAGE = "P07"
-
-SCREENS = {
-    "iono_phase": ("iono_los_m", "ionosphere"),
-    "wet_tropo_phase": ("wet_tropo_los_m", "wet_troposphere"),
-    "hydro_tropo_phase": ("hydro_tropo_los_m", "hydrostatic_troposphere"),
-    "solid_earth_tide_phase": ("tide_los_m", "solid_earth_tide"),
+# correction name -> (layer role, is it a height cube?)
+SOURCES = {
+    "iono": ("iono_phase", False),
+    "tropo_hydrostatic": ("tropo_hydro_phase", True),
+    "tropo_wet": ("tropo_wet_phase", True),
+    "solid_earth_tide": ("tide_phase", True),
 }
 
 
-def planar_ramp_mm(disp: np.ndarray, dx: float, dy: float, max_px: int = 50000) -> Optional[Dict[str, float]]:
-    ok = np.isfinite(disp)
-    if ok.sum() < 100:
+def planar_ramp(a: np.ndarray, dx: float, dy: float, min_pixels: int = 100):
+    """Least-squares plane through the finite pixels of `a` (metres): (amplitude over the extent, d/dEast, d/dNorth), all
+    in mm / mm per km; None when fewer than `min_pixels` are finite. Rows run north -> south."""
+    ok = np.isfinite(a)
+    if int(ok.sum()) < min_pixels:
         return None
     rr, cc = np.nonzero(ok)
-    if rr.size > max_px:
-        sel = np.random.default_rng(0).choice(rr.size, max_px, replace=False)
-        rr, cc = rr[sel], cc[sel]
-    z = disp[rr, cc].astype(np.float64)
-    X = np.column_stack([np.ones(rr.size), cc * dx / 1000.0, rr * dy / 1000.0])  # km
-    coef, *_ = np.linalg.lstsq(X, z, rcond=None)
-    ny, nx = disp.shape
-    corners = np.array([[0, 0], [nx * dx / 1000.0, 0], [0, ny * dy / 1000.0], [nx * dx / 1000.0, ny * dy / 1000.0]])
-    plane = coef[1] * corners[:, 0] + coef[2] * corners[:, 1]
-    return {"gradient_x_mm_per_km": float(coef[1] * 1e3), "gradient_y_mm_per_km": float(coef[2] * 1e3),
-            "amplitude_mm": float((plane.max() - plane.min()) * 1e3)}
+    A = np.column_stack([np.ones(rr.size), cc * dx / 1000.0, -rr * dy / 1000.0])       # km east, km north
+    coef, *_ = np.linalg.lstsq(A, a[rr, cc].astype(np.float64), rcond=None)
+    ny, nx = a.shape
+    amp = abs(coef[1]) * nx * dx / 1000.0 + abs(coef[2]) * ny * dy / 1000.0
+    return float(amp * 1e3), float(coef[1] * 1e3), float(coef[2] * 1e3)
 
 
-def elevation_audit(state: BundleBuilder) -> None:
-    """Called by P09 once a DEM is on G80: Pearson r between LOS displacement and elevation."""
-    dem, disp = state.layers.get("dem_m"), state.layers.get("los_disp_m")
-    if dem is None or disp is None:
-        return
-    ok = np.isfinite(dem) & np.isfinite(disp)
-    if ok.sum() < 100 or np.std(dem[ok]) == 0 or np.std(disp[ok]) == 0:
-        state.audit["elevation_correlation"] = {"r": None, "n": int(ok.sum())}
-        return
-    r = float(np.corrcoef(dem[ok].astype(np.float64), disp[ok].astype(np.float64))[0, 1])
-    state.audit["elevation_correlation"] = {"r": r, "n": int(ok.sum()), "engine_applied": False}
+def elevation_correlation(a: np.ndarray, dem: np.ndarray, min_pixels: int = 100) -> float:
+    """Pearson r between `a` and the DEM over pixels where both are finite (NaN when undefined)."""
+    ok = np.isfinite(a) & np.isfinite(dem)
+    if int(ok.sum()) < min_pixels:
+        return float("nan")
+    x, y = a[ok].astype(np.float64), dem[ok].astype(np.float64)
+    if x.std() == 0.0 or y.std() == 0.0:
+        return float("nan")
+    return float(np.corrcoef(x, y)[0, 1])
 
 
-def run(state: BundleBuilder) -> Dict:
-    cfg, w = state.cfg, state.work
-    wl = state.meta["wavelength_m"]
-    applied_in_product = (state.clip.attrs.get("corrections_applied") or {}) if state.clip else {}
-    entries: Dict[str, Dict] = {}
-    for src, (layer_name, label) in SCREENS.items():
-        if src not in w:
-            entries[label] = {"available": False, "applied_in_product": applied_in_product.get(label),
-                              "engine_applied": False}
+def run(ctx: BuildContext) -> None:
+    r = ctx.cfg.radar
+    k = r.phase_sign * r.wavelength_m / (4.0 * math.pi)
+    flags = r.corrections_applied_by_product
+    ctx.assume("correction screens (iono / tropo / tide) are interferometric phase in radians and are NOT already applied "
+               "to unwrappedPhase (config radar.corrections_applied_by_product) - unverified on real NISAR data")
+    terrain = get_terrain(ctx) if any(w.units for w in ctx.ifg.values()) else None
+    for key, w in ctx.ifg.items():
+        if w.los_m is None:
             continue
-        los = phase_to_los_m(w[src], wl, cfg)
-        state.put(layer_name, los)
-        ok = np.isfinite(los)
-        rms = float(np.sqrt(np.mean(los[ok].astype(np.float64) ** 2)) * 1e3) if ok.any() else None
-        p95 = float(np.percentile(np.abs(los[ok]), 95) * 1e3) if ok.any() else None
-        entries[label] = {"available": True, "layer": layer_name, "rms_mm": rms, "p95_abs_mm": p95,
-                          "valid_fraction": float(ok.mean()),
-                          "applied_in_product": applied_in_product.get(label), "engine_applied": False,
-                          "significant": bool(rms is not None and rms > cfg.audit_flag_mm)}
-    state.audit["corrections"] = entries
-    g = state.grids["G80"]
-    ramp = planar_ramp_mm(state.layers["los_disp_m"], g.dx, g.dy, cfg.audit_max_fit_pixels)
-    if ramp is not None:
-        ramp["significant"] = bool(ramp["amplitude_mm"] > cfg.ramp_flag_mm)
-        ramp["engine_applied"] = False
-    state.audit["residual_ramp"] = ramp
-    return {"corrections_available": [k for k, v in entries.items() if v["available"]],
-            "ramp_mm": ramp["amplitude_mm"] if ramp else None}
+        P = w.los_m.shape[0]
+        shape = w.los_m.shape[1:]
+        items = {}
+        residual = w.los_m.copy()
+        used = []
+        for name, (role, cube) in SOURCES.items():
+            layer = np.full((P,) + shape, np.nan, np.float32)
+            have = False
+            for i, u in enumerate(w.units):
+                arr = next((a for (rr, _p), a in u.layers.items() if rr == role), None)
+                if arr is None:
+                    continue
+                if cube and arr.ndim == 3:
+                    at = terrain.elevation["G80"] if terrain is not None and terrain.available else r_fallback(ctx)
+                    arr = collapse_height(arr, u.heights, at)
+                layer[i] = (w.sign[i] * k) * arr
+                have = True
+            applied = bool(flags.get(name, False))
+            if have:
+                rms = tuple(float(np.sqrt(np.nanmean(layer[i] ** 2))) if np.isfinite(layer[i]).any() else float("nan")
+                            for i in range(P))
+                items[name] = CorrectionItem(name, True, applied, False, layer, rms,
+                                             "diagnostic only: not removed from los_m")
+                if not applied:
+                    used.append(name)
+                    residual = residual - np.nan_to_num(layer, nan=0.0)
+            else:
+                items[name] = CorrectionItem(name, False, None, False, None, (),
+                                             "layer absent from the retrieved clips")
+        missing = [n for n, it in items.items() if not it.available]
+        if missing:
+            ctx.flag("corrections_missing", "info", "P07", f"{key}: no diagnostic layer for {', '.join(missing)}", stack=key,
+                     missing=missing)
+        g80 = ctx.grids.g80
+        rs, cs = g80.core_slices()
+        ramps = [planar_ramp(w.los_m[i][rs, cs], g80.dx, g80.dy) or (float("nan"),) * 3 for i in range(P)]
+        dem = terrain.elevation["G80"][rs, cs] if terrain is not None and terrain.available else None
+        diag = {"planar_ramp_amplitude_mm": tuple(t[0] for t in ramps),
+                "ramp_gradient_x_mm_per_km": tuple(t[1] for t in ramps),
+                "ramp_gradient_y_mm_per_km": tuple(t[2] for t in ramps)}
+        if dem is not None:
+            diag["elevation_correlation_r"] = tuple(elevation_correlation(w.los_m[i][rs, cs], dem) for i in range(P))
+        w.corrections = CorrectionAudit(items, residual.astype(np.float32) if used else None, tuple(used),
+                                        "residual = los_m - sum(diagnostics not applied by the product); los_m is untouched",
+                                        FrozenDict(diag))
+
+
+def r_fallback(ctx: BuildContext) -> float:
+    return ctx.cfg.geometry.fallback_height_m

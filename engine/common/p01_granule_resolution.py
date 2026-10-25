@@ -1,153 +1,230 @@
-"""P01 - granule resolution: pair graph, track/frame/direction.
+# P01 — keep newest processing version, build GUNW pair graph, tag track/frame/direction
+"""Which granules make up this tile's picture, and how they relate.
 
-Turns the catalog's candidate granules into (current pair, bounded history,
-matching GCOV granules) for ONE tile. Pure metadata work, no pixel I/O.
+Searches through the injected retriever (anything with `search(bbox, t0, t1, product)`; `NisarClient` is one),
+then:
+
+1. keeps only the newest processing version of each scene,
+2. tags every granule with track / frame / direction, taking ASF's metadata first and the granule id second
+   (a disagreement is flagged, not guessed away),
+3. groups granules by stack = (direction, relative orbit), merges adjacent frames of one pass into a single
+   epoch / pair,
+4. for GUNW, reads reference and secondary times from the id and orders every pair so that ref < sec
+   (a pair stored the other way round is marked `flipped`; P06 normalises the sign),
+5. keeps the newest `max_gcov_epochs` epochs / `max_gunw_pairs` pairs per stack and lists the granules to fetch.
+
+Nothing is fetched here. A pair whose dates cannot be parsed is kept but marked unresolved and excluded from
+the network metrics, never assigned made-up dates.
 """
 from __future__ import annotations
 
 import re
-from dataclasses import dataclass, field
-from datetime import date
-from typing import Dict, List, Optional, Sequence, Tuple
+from datetime import timedelta
 
-from ._types import BBox, GranuleRecord, GranuleResolutionError, TileSpec
-from .config import PreprocConfig
-from .state import F_DISCONNECTED, F_SINGLE_PAIR, BundleBuilder
+from .context import (BuildContext, EpochGroup, GranuleMeta, PairGroup, Resolved, iso, parse_time)
+from .layers import wanted_products
 
-STAGE = "P01"
-
-
-@dataclass(frozen=True)
-class GranuleResolution:
-    group_key: Tuple
-    current: GranuleRecord
-    history: Tuple[GranuleRecord, ...]
-    gcov_current: Optional[GranuleRecord]
-    gcov_history: Tuple[GranuleRecord, ...]
-    graph: Dict
-    dropped: Tuple[Tuple[str, str], ...] = field(default_factory=tuple)
-
-    @property
-    def all_pairs(self) -> Tuple[GranuleRecord, ...]:
-        return self.history + (self.current,)
+_TS = re.compile(r"(?<!\d)(\d{8}T\d{6})(?!\d)")
+_TRK = re.compile(r"_(\d{3})_([AD])_(\d{3})(?=_)")
+_VERSION_TAIL = re.compile(r"_([A-Z])(\d{5})(_[A-Z]_[A-Z]_[A-Z]_\d{3})$")   # same convention as retrieval.scene_key
 
 
-def _ver_key(v: str) -> Tuple[int, ...]:
-    nums = re.findall(r"\d+", v or "")
-    return tuple(int(n) for n in nums) if nums else (0,)
+def parse_granule_id(gid: str) -> dict:
+    """Best-effort fields from a NISAR granule id: all timestamps in order, track, direction, frame."""
+    times = [parse_time(t) for t in _TS.findall(gid)]
+    m = _TRK.search(gid)
+    return {"times": tuple(times),
+            "track": int(m.group(1)) if m else None,
+            "direction": m.group(2) if m else None,
+            "frame": int(m.group(3)) if m else None}
 
 
-def _intersects(a: Optional[BBox], b: BBox) -> bool:
-    if a is None:
-        return True
-    return not (a[2] <= b[0] or a[0] >= b[2] or a[3] <= b[1] or a[1] >= b[3])
+def stack_key(direction: str | None, track: int | None) -> str:
+    """"A005": direction + relative orbit. "UNK" when neither is known; a partial tag keeps what is known."""
+    if not direction and track is None:
+        return "UNK"
+    return f"{direction or 'X'}{'' if track is None else format(int(track), '03d')}"
 
 
-def pair_graph(pairs: Sequence[GranuleRecord]) -> Dict:
-    """Connectivity of the acquisition-date network defined by GUNW pairs."""
-    dates = sorted({d for p in pairs for d in (p.ref_time.date(), p.epoch_date)})
-    parent = {d: d for d in dates}
-
-    def find(x: date) -> date:
-        while parent[x] != x:
-            parent[x] = parent[parent[x]]
-            x = parent[x]
-        return x
-
-    for p in pairs:
-        a, b = find(p.ref_time.date()), find(p.epoch_date)
-        if a != b:
-            parent[a] = b
-    comps: Dict[date, List[date]] = {}
-    for d in dates:
-        comps.setdefault(find(d), []).append(d)
-    gaps = [(b - a).days for a, b in zip(dates, dates[1:])]
-    return {
-        "n_epochs": len(dates), "n_pairs": len(pairs), "n_components": len(comps),
-        "largest_component_epochs": max((len(v) for v in comps.values()), default=0),
-        "span_days": float((dates[-1] - dates[0]).days) if dates else 0.0,
-        "max_gap_days": max(gaps) if gaps else 0,
-        "first_date": dates[0].isoformat() if dates else None,
-        "last_date": dates[-1].isoformat() if dates else None,
-    }
+def _norm_dir(d) -> str | None:
+    if not d:
+        return None
+    d = str(d).strip().upper()
+    return {"ASCENDING": "A", "A": "A", "DESCENDING": "D", "D": "D"}.get(d)
 
 
-def _dedupe(records: Sequence[GranuleRecord], dropped: List[Tuple[str, str]]) -> List[GranuleRecord]:
-    best: Dict[Tuple, GranuleRecord] = {}
-    for r in records:
-        key = (r.product, r.group_key, r.ref_time.date(), r.sec_time.date() if r.sec_time else None)
-        cur = best.get(key)
-        if cur is None or _ver_key(r.processing_version) > _ver_key(cur.processing_version):
-            if cur is not None:
-                dropped.append((cur.granule_id, "superseded_by_newer_processing_version"))
-            best[key] = r
+def _scene_key(gid: str) -> tuple[str, int]:
+    try:
+        from ..retrieval.clients.nisar_client import scene_key
+        return scene_key(gid)
+    except ImportError:                                  # retrieval's optional deps (aiohttp...) not installed
+        m = _VERSION_TAIL.search(gid)
+        return (gid[:m.start()] + m.group(3), int(m.group(2))) if m else (gid, 0)
+
+
+def meta_for(ref, ctx: BuildContext | None = None) -> GranuleMeta:
+    p = parse_granule_id(ref.granule_id)
+    d_asf, d_id = _norm_dir(ref.direction), p["direction"]
+    t_asf, t_id = ref.track, p["track"]
+    direction, track = d_asf or d_id, t_asf if t_asf is not None else t_id
+    if ctx is not None:
+        if d_asf and d_id and d_asf != d_id or (t_asf is not None and t_id is not None and int(t_asf) != t_id):
+            ctx.flag("track_mismatch", "warn", "P01", "ASF track/direction disagrees with the granule id; ASF used",
+                     granule=ref.granule_id, asf=(t_asf, d_asf), parsed=(t_id, d_id))
+    frame = ref.frame if ref.frame is not None else p["frame"]
+    times = p["times"]
+    if not times and ref.start:
+        try:
+            times = (parse_time(ref.start),)
+        except ValueError:
+            times = ()
+    return GranuleMeta(ref, ref.product or "", times, stack_key(direction, track),
+                       int(track) if track is not None else None, direction,
+                       int(frame) if frame is not None else None, _scene_key(ref.granule_id)[1])
+
+
+def _drop_older(refs: list) -> tuple[list, int]:
+    best: dict = {}
+    for i, r in enumerate(refs):
+        key, ver = _scene_key(r.granule_id)
+        if key not in best or ver > best[key][0]:
+            best[key] = (ver, i)
+    keep = sorted(i for _, i in best.values())
+    return [refs[i] for i in keep], len(refs) - len(keep)
+
+
+def _cluster(items: list, key, minutes: float) -> list:
+    """Group consecutive items (already sorted) whose `key` is within `minutes` of the previous one."""
+    groups: list = []
+    for it in items:
+        if groups and abs((key(it) - key(groups[-1][-1])).total_seconds()) <= minutes * 60:
+            groups[-1].append(it)
         else:
-            dropped.append((r.granule_id, "superseded_by_newer_processing_version"))
-    return list(best.values())
+            groups.append([it])
+    return groups
 
 
-def resolve(candidates: Sequence[GranuleRecord], tile: TileSpec, cfg: PreprocConfig,
-            target: Optional[GranuleRecord] = None) -> GranuleResolution:
-    dropped: List[Tuple[str, str]] = []
-    cands = []
-    for r in candidates:
-        if not _intersects(r.bbox, tile.bbox):
-            dropped.append((r.granule_id, "outside_tile"))
-        elif r.product == "GUNW" and (r.sec_time is None or r.sec_time <= r.ref_time):
-            dropped.append((r.granule_id, "invalid_pair_order"))
-        else:
-            cands.append(r)
-    gunw = _dedupe([r for r in cands if r.product == "GUNW"], dropped)
-    gcov = _dedupe([r for r in cands if r.product == "GCOV"], dropped)
+def _search(ctx: BuildContext, product: str):
+    r = ctx.retriever
+    margin = ctx.cfg.clip.margin_m
+    if margin is None:
+        margin = getattr(getattr(r, "cfg", None), "tiling", {}).get("margin_m", 300.0) if r is not None else 300.0
+    bbox = ctx.tile.bbox(margin)
+    return r.search(bbox, iso(ctx.request.t0), iso(ctx.request.t1), product)
 
-    if target is None:
-        if not gunw:
-            raise GranuleResolutionError(f"no GUNW pair intersects tile {tile.tile_id}")
-        target = max(gunw, key=lambda r: (r.sec_time, _ver_key(r.processing_version)))
-    elif target.product != "GUNW" or not target.is_pair:
-        raise GranuleResolutionError("target must be a GUNW pair")
-    else:  # make sure we use the freshest processing version of the requested pair
-        same = [g for g in gunw if g.group_key == target.group_key
-                and g.ref_time.date() == target.ref_time.date() and g.epoch_date == target.epoch_date]
-        target = max(same, key=lambda r: _ver_key(r.processing_version)) if same else target
 
-    key = target.group_key
-    cur_date = target.epoch_date
-    hist = []
-    for g in gunw:
-        if g.group_key != key or g.granule_id == target.granule_id:
+def run(ctx: BuildContext) -> None:
+    res = Resolved()
+    ctx.resolved = res
+    if ctx.retriever is None:
+        ctx.flag("no_retriever", "error", "P01", "no retriever supplied: nothing to resolve")
+        return
+    cfg = ctx.cfg
+    products = wanted_products(ctx.request.active_codes, cfg.products.include_goff)
+    names = {"GUNW": cfg.products.gunw, "GCOV": cfg.products.gcov, "GOFF": cfg.products.goff}
+    if not products:
+        ctx.flag("no_nisar_measurement", "info", "P01",
+                 "none of the active manifests needs a NISAR measurement (M1/M2/M3)", codes=sorted(ctx.request.active_codes or []))
+        return
+    as_of = ctx.request.as_of
+    merge = cfg.window.epoch_merge_minutes
+
+    for prod in products:
+        name = names[prod]
+        try:
+            refs, degraded = _search(ctx, name)
+        except Exception as ex:                          # reported, never silent
+            res.search_errors[prod] = f"{type(ex).__name__}: {ex}"
+            ctx.flag("search_error", "error", "P01", f"{prod} search failed: {ex}", product=prod)
             continue
-        if g.epoch_date >= cur_date:
-            dropped.append((g.granule_id, "not_older_than_current"))
-        elif g.temporal_baseline_days is not None and g.temporal_baseline_days > cfg.max_temporal_baseline_days:
-            dropped.append((g.granule_id, "baseline_too_long"))
+        if degraded:
+            res.search_degraded = True
+            ctx.flag("search_degraded", "warn", "P01", f"{prod} listing served from a stale cache (ASF unreachable)", product=prod)
+        refs = [r for r in refs if (r.product or name) == name]
+        refs, dropped = _drop_older(refs)
+        res.dropped_older += dropped
+        metas = [meta_for(r, ctx) for r in refs]
+
+        if prod == "GCOV":
+            _group_epochs(ctx, res, metas, merge, as_of)
         else:
-            hist.append(g)
-    hist.sort(key=lambda r: (r.epoch_date, r.ref_time), reverse=True)
-    for g in hist[cfg.max_history_pairs:]:
-        dropped.append((g.granule_id, "history_limit"))
-    hist = sorted(hist[:cfg.max_history_pairs], key=lambda r: (r.epoch_date, r.ref_time))
+            _group_pairs(ctx, res, metas, prod, merge, as_of)
 
-    by_date: Dict[date, GranuleRecord] = {}
-    for g in gcov:
-        if g.group_key == key:
-            d = g.ref_time.date()
-            if d not in by_date or _ver_key(g.processing_version) > _ver_key(by_date[d].processing_version):
-                by_date[d] = g
-    gcov_cur = by_date.get(cur_date) or by_date.get(target.ref_time.date())
-    older = sorted((d for d in by_date if d < cur_date and by_date[d] is not gcov_cur), reverse=True)
-    gcov_hist = tuple(by_date[d] for d in sorted(older[:cfg.max_history_gcov]))
-
-    graph = pair_graph(list(hist) + [target])
-    return GranuleResolution(key, target, tuple(hist), gcov_cur, gcov_hist, graph, tuple(dropped))
+    for prod, target in (("GUNW", res.gunw), ("GCOV", res.gcov), ("GOFF", res.goff)):
+        ids = []
+        for groups in target.values():
+            for g in groups:
+                ids.extend(m.ref for m in g.granules)
+        if ids:
+            res.to_fetch[prod] = ids
+    if not res.to_fetch and not res.search_errors:
+        ctx.flag("no_granules", "warn", "P01", "no NISAR granules cover this tile in the window",
+                 t0=iso(ctx.request.t0), t1=iso(ctx.request.t1))
+    if res.dropped_older:
+        ctx.flag("older_versions_dropped", "info", "P01", f"{res.dropped_older} superseded processing version(s) ignored")
 
 
-def run(state: BundleBuilder) -> Dict:
-    res = resolve(state.inp.candidates, state.inp.tile, state.cfg, state.inp.target)
-    state.resolution = res
-    if not res.history:
-        state.flag(F_SINGLE_PAIR)
-    if res.graph["n_components"] > 1:
-        state.flag(F_DISCONNECTED)
-    return {"history_pairs": len(res.history), "gcov_current": res.gcov_current is not None,
-            "gcov_history": len(res.gcov_history), "dropped": len(res.dropped), **res.graph}
+def _group_epochs(ctx, res: Resolved, metas: list, merge: float, as_of) -> None:
+    by_stack: dict = {}
+    for m in metas:
+        if not m.times:
+            ctx.flag("undated_granule", "warn", "P01", "granule has no parseable acquisition time; ignored",
+                     granule=m.ref.granule_id)
+            continue
+        if m.times[0] > as_of:
+            continue
+        by_stack.setdefault(m.stack_key, []).append(m)
+    for key, ms in by_stack.items():
+        ms.sort(key=lambda m: (m.times[0], m.ref.granule_id))
+        groups = [EpochGroup(key, g[0].times[0], g) for g in _cluster(ms, lambda m: m.times[0], merge)]
+        keep = groups[-ctx.cfg.window.max_gcov_epochs:]
+        if len(groups) > len(keep):
+            ctx.flag("epochs_truncated", "info", "P01", f"stack {key}: kept newest {len(keep)} of {len(groups)} epochs", stack=key)
+        res.gcov[key] = keep
+
+
+def _group_pairs(ctx, res: Resolved, metas: list, prod: str, merge: float, as_of) -> None:
+    target = res.gunw if prod == "GUNW" else res.goff
+    by_stack: dict = {}
+    for m in metas:
+        t = m.times
+        if len(t) >= 4:
+            ref_t, sec_t, ok = t[0], t[2], True
+        else:
+            ref_t = sec_t = None
+            ok = False
+            ctx.flag("unresolved_pair_dates", "warn", "P01",
+                     f"{prod} id carries {len(t)} timestamp(s), a pair needs 4; dates left unresolved",
+                     granule=m.ref.granule_id)
+        flipped = False
+        if ok and sec_t < ref_t:
+            ref_t, sec_t, flipped = sec_t, ref_t, True
+        if ok and sec_t > as_of:
+            continue
+        dt = (sec_t - ref_t).total_seconds() / 86400.0 if ok else None
+        by_stack.setdefault(m.stack_key, []).append((m, PairGroup(m.stack_key, ref_t, sec_t, dt, flipped, ok, [m])))
+    for key, items in by_stack.items():
+        resolved = sorted((x for x in items if x[1].resolved), key=lambda x: (x[1].sec_time, x[1].ref_time, x[0].ref.granule_id))
+        unresolved = [x for x in items if not x[1].resolved]
+        merged: list = []
+        for grp in _cluster(resolved, lambda x: x[1].sec_time, merge):
+            # same secondary pass and same reference pass -> adjacent frames of one pair
+            sub: list = []
+            for x in grp:
+                for s in sub:
+                    if abs((s[0][1].ref_time - x[1].ref_time).total_seconds()) <= merge * 60:
+                        s.append(x)
+                        break
+                else:
+                    sub.append([x])
+            for s in sub:
+                g0 = s[0][1]
+                merged.append(PairGroup(key, g0.ref_time, g0.sec_time, g0.dt_days, g0.flipped, True, [x[0] for x in s]))
+        merged.sort(key=lambda g: (g.sec_time, g.ref_time))
+        keep = merged[-ctx.cfg.window.max_gunw_pairs:]
+        if len(merged) > len(keep):
+            ctx.flag("pairs_truncated", "info", "P01", f"stack {key}: kept newest {len(keep)} of {len(merged)} pairs", stack=key)
+        target[key] = keep + [x[1] for x in unresolved]
+
+
+STEP_NAME = "granule_resolution"

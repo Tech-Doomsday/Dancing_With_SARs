@@ -207,6 +207,8 @@ Every folder has the same 8 files. Pipelines never import each other — only `e
 | `engine/registry.py` | scans `pipelines/*`, reads manifests, runs applicable ones in a process pool |
 | `tests/test_pipeline_independence.py` | static check: no cross-pipeline imports |
 | `tests/test_scene_bundle_contract.py` | fields every pipeline can rely on |
+| `tests/test_common_truth.py` | engine/common against analytic truth (terrain, HAND, UTM zones, fills, ramps) |
+| `tools/sar_debug/` | standalone HTML debug report for retrieval, files and the engine checkout (`cd tools && python -m sar_debug --demo`) |
 | `config/tiling.yaml` | grid scheme — still an open decision, see docs |
 | `docs/ARCHITECTURE.md` | full vision, data-reality check, OSS library map |
 

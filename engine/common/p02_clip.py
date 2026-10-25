@@ -1,68 +1,75 @@
-"""P02 - clip: tile + 1-px margin, requested layers only.
+# P02 — tile + 1-pixel margin, only the layers the active manifests request
+"""Fetch the resolved granules, clipped to this tile.
 
-Defines the canonical grids (so every epoch of a tile shares identical pixels),
-asks the ClipSource for exactly the layers this product needs, and validates the
-answer. It never opens files itself - that is retrieval's job.
+`retriever.fetch_tile(tile, ..., granules=[...], layers=<regex>)` does the byte-range work; this step decides
+*what to ask for*: only the products and layers needed by the measurement codes the active manifests declare
+(`request.active_codes`), with the margin from config (`clip.margin_m`, default: retrieval's `tiling.margin_m`)
+so edge filters and resampling have context. The retrieval layer additionally snaps its window out by one
+native pixel, which is the "1 px" margin.
+
+Every outcome the retriever reports is kept: errors and degraded (stale) results become flags, granules that do
+not overlap the tile are listed, and a fingerprint of every array that arrives is stored for P13.
 """
 from __future__ import annotations
 
-from typing import Dict, Sequence, Tuple
+import hashlib
 
-from ._raster import canonical_grids, grid_lonlat_bbox
-from ._types import BBox, Clip, ClipError, ClipSource, GranuleRecord, Raster
-from .config import PreprocConfig
-from .state import F_DEGRADED, BundleBuilder
+import numpy as np
 
-STAGE = "P02"
-
-GUNW_REQUIRED: Tuple[str, ...] = ("unw_phase", "coherence", "conncomp")
-GUNW_OPTIONAL: Tuple[str, ...] = (
-    "iono_phase", "iono_sigma", "wet_tropo_phase", "hydro_tropo_phase", "solid_earth_tide_phase",
-    "mask", "layover_shadow", "incidence", "los_x", "los_y", "rg_offset", "az_offset",
-)
-GCOV_POLS: Tuple[str, ...] = ("gamma0_hh", "gamma0_hv", "gamma0_vv", "gamma0_vh")
+from .context import BuildContext, iso
+from .layers import request_layers
+from .scene_bundle import InputRecord
 
 
-def requested_layers(granule: GranuleRecord) -> Tuple[Tuple[str, ...], Tuple[str, ...]]:
-    if granule.product == "GUNW":
-        return GUNW_REQUIRED, GUNW_OPTIONAL
-    if granule.product == "GCOV":
-        return (), GCOV_POLS
-    raise ClipError(f"unsupported product '{granule.product}' for granule {granule.granule_id}")
+def fingerprint(clip) -> str:
+    h = hashlib.blake2b(digest_size=16)
+    for gk in sorted(clip.grids):
+        g = clip.grids[gk]
+        h.update(gk.encode())
+        h.update(str(g.epsg).encode())
+        h.update(np.ascontiguousarray(g.x).tobytes())
+        h.update(np.ascontiguousarray(g.y).tobytes())
+        for ek in sorted(g.extras):
+            h.update(ek.encode())
+            h.update(np.ascontiguousarray(g.extras[ek]).tobytes())
+        for lk in sorted(g.layers):
+            a = np.ascontiguousarray(g.layers[lk])
+            h.update(lk.encode())
+            h.update(str(a.dtype).encode())
+            h.update(str(a.shape).encode())
+            h.update(a.tobytes())
+    return h.hexdigest()
 
 
-def clip_granule(source: ClipSource, granule: GranuleRecord, bbox: BBox) -> Clip:
-    req, opt = requested_layers(granule)
-    wanted = tuple(req) + tuple(opt)
-    clip = source.read_clip(granule, bbox, wanted)
-    if not isinstance(clip, Clip):
-        raise ClipError(f"ClipSource returned {type(clip).__name__}, expected Clip")
-    layers: Dict[str, Raster] = {k: v for k, v in clip.layers.items() if k in wanted}
-    missing = [k for k in req if k not in layers]
-    if missing:
-        raise ClipError(f"granule {granule.granule_id}: missing required layers {missing}")
-    if granule.product == "GCOV" and not layers:
-        raise ClipError(f"granule {granule.granule_id}: no gamma0 polarisation returned")
-    return Clip(clip.granule_id, layers, dict(clip.attrs))
-
-
-def run(state: BundleBuilder) -> Dict:
-    cfg: PreprocConfig = state.cfg
-    state.grids = canonical_grids(state.inp.tile, cfg)
-    # 1 px of G80 around the *canonical* footprint, expressed as a WGS84 box
-    state.clip_bbox = grid_lonlat_bbox(state.grids["G80"], pad_px=cfg.clip_margin_px)
-    res = state.resolution
-    state.clip = clip_granule(state.inp.clip_source, res.current, state.clip_bbox)
-    notes = []
-    if res.gcov_current is not None:
+def run(ctx: BuildContext) -> None:
+    res = ctx.resolved
+    if res is None or not res.to_fetch:
+        return
+    cfg = ctx.cfg
+    names = {"GUNW": cfg.products.gunw, "GCOV": cfg.products.gcov, "GOFF": cfg.products.goff}
+    for prod, refs in res.to_fetch.items():
+        name = names[prod]
+        layers = request_layers(name if prod != "GOFF" else "GOFF", ctx.request.active_codes, cfg.products.frequency,
+                                tuple(cfg.products.pols), cfg.products.use_noise_floor)
+        if layers is None:
+            ctx.flag("nothing_to_request", "info", "P02", f"{prod}: no layer is needed by the active manifests")
+            continue
         try:
-            state.bs_clip = clip_granule(state.inp.clip_source, res.gcov_current, state.clip_bbox)
-        except ClipError as exc:  # backscatter is optional; absence is recorded, never hidden
-            state.bs_clip = None
-            notes.append(f"gcov_clip_failed: {exc}")
-    state.degraded_mode = bool(state.inp.degraded_mode or state.clip.attrs.get("degraded_mode")
-                               or (state.bs_clip is not None and state.bs_clip.attrs.get("degraded_mode")))
-    if state.degraded_mode:
-        state.flag(F_DEGRADED)
-    return {"layers": sorted(state.clip.layers), "gcov_layers": sorted(state.bs_clip.layers) if state.bs_clip else [],
-            "clip_bbox": state.clip_bbox, "notes": notes}
+            fr = ctx.retriever.fetch_tile(ctx.tile, iso(ctx.request.t0), iso(ctx.request.t1), product=name,
+                                          layers=layers, granules=list(refs), margin_m=cfg.clip.margin_m)
+        except Exception as ex:                            # reported, never silent
+            ctx.flag("fetch_failed", "error", "P02", f"{prod} fetch raised {type(ex).__name__}: {ex}", product=prod)
+            continue
+        ctx.fetched[prod] = fr
+        if fr.degraded:
+            ctx.flag("fetch_degraded", "warn", "P02", f"{prod}: served from stale cache / listing", product=prod)
+        for gid, why in fr.errors.items():
+            ctx.flag("fetch_error", "error", "P02", f"{gid}: {why}", granule=gid, product=prod)
+        for gid, why in fr.skipped.items():
+            ctx.flag("fetch_skipped", "info", "P02", f"{gid}: {why}", granule=gid, product=prod)
+        for clip in fr.clips:
+            gid = clip.granule.granule_id
+            ctx.clips[gid] = clip
+            layer_keys = tuple(sorted(k for g in clip.grids.values() for k in g.layers))
+            ctx.input_records.append(InputRecord(gid, prod, clip.source, tuple(sorted(clip.grids)), layer_keys,
+                                                 fingerprint(clip)))
