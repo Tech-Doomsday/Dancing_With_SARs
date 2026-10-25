@@ -60,10 +60,14 @@ def _needs_met(ctx: BuildContext, step: Step) -> bool:
     return False
 
 
-def run_steps(ctx: BuildContext) -> None:
+def run_steps(ctx: BuildContext, observer=None) -> None:
+    """`observer(step, ctx, record)` is called after every step (skipped ones too). It is read-only debugging
+    plumbing (engine.common.debug.trace uses it) and never changes what a step does."""
     for step in STEPS:
         if not _needs_met(ctx, step):
             ctx.steps.append(StepRecord(step.code, step.name, "skipped", 0.0, "nothing to work on"))
+            if observer is not None:
+                observer(step, ctx, ctx.steps[-1])
             continue
         with Timer() as t:
             try:
@@ -73,6 +77,8 @@ def run_steps(ctx: BuildContext) -> None:
                 ctx.flag("step_failed", "error", step.code, f"{type(ex).__name__}: {ex}", exception=type(ex).__name__)
                 rec = StepRecord(step.code, step.name, "error", 0.0, f"{type(ex).__name__}: {ex}")
         ctx.steps.append(StepRecord(rec.code, rec.name, rec.status, round(t.seconds, 4), rec.message))
+        if observer is not None:
+            observer(step, ctx, ctx.steps[-1])
 
 
 # ---------------------------------------------------------------------------------------------
@@ -191,7 +197,7 @@ def assemble(ctx: BuildContext) -> SceneBundle:
 # ---------------------------------------------------------------------------------------------
 def build_scene_bundle(tile, retriever, as_of: datetime | str | None = None, *, ancillary: AncillaryProvider | None = None,
                        active_codes: set | None = None, event_window: tuple | None = None, triggers: dict | None = None,
-                       cfg: CommonConfig | None = None, lookback_days: float | None = None) -> SceneBundle:
+                       cfg: CommonConfig | None = None, lookback_days: float | None = None, observer=None) -> SceneBundle:
     """Run P01..P13 for one tile and return the frozen bundle.
 
     as_of         the instant the bundle describes (default: now). Fixing it makes the build reproducible.
@@ -215,5 +221,5 @@ def build_scene_bundle(tile, retriever, as_of: datetime | str | None = None, *, 
     req = BuildRequest(tile, as_of_dt, as_of_dt - timedelta(days=lb), as_of_dt, ew, dict(triggers or {}),
                        set(active_codes) if active_codes is not None else None)
     ctx = BuildContext(req, cfg, grids, retriever, ancillary)
-    run_steps(ctx)
+    run_steps(ctx, observer)
     return assemble(ctx)

@@ -58,8 +58,9 @@ class ClipCfg:
 @dataclass(frozen=True)
 class RadarCfg:
     wavelength_m: float = 0.2384   # NISAR L-band, c / 1.2575 GHz. centerFrequency is NOT carried by the clip (see data_retival_bugs.md)
-    phase_sign: int = -1           # los_toward_sensor = phase_sign * wavelength / (4 pi) * phase, for ref EARLIER than sec (ref * conj(sec) convention). UNVERIFIED on real data.
-    los_vector_points: str = "ground_to_sensor"  # direction of losUnitVectorX/Y in the product. UNVERIFIED on real data.
+    phase_sign: int = -1           # los_toward_sensor = phase_sign * wavelength / (4 pi) * phase, for ref EARLIER than sec (ref * conj(sec) convention). Consistent with NISAR ATBD JPL D-95677 phi = 4pi/lambda (R_sec - R_ref); no ground-truth displacement was available to confirm it end to end.
+    los_vector_points: str = "ground_to_sensor"  # direction of losUnitVectorX/Y in the product: NISAR L2 GUNW spec (JPL D-102272) says "from target to sensor"; matched numerically on one real product (ALOS-1 via NISAR SDS, see debug/compare.py)
+    look_side: str | None = None   # "left" | "right" when known (identification/lookDirection, NOT carried by the clip): enables P05's sign check
     gunw_effective_looks: float = 100.0  # independent looks per 80 m pixel (not carried by the clip). Assumption.
     max_sigma_phase_rad: float = 2.0     # cap on the Cramer-Rao phase std so near-zero coherence stays finite
     min_coherence: float = 0.02          # below this the pixel gets no sigma (and is flagged invalid for sigma)

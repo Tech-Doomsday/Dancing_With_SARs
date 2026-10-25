@@ -1,433 +1,208 @@
-"""SceneBundle - the read-only object P01-P13 build and every pipeline receives.
+"""SceneBundle: the read-only object every pipeline receives.
 
-Everything here is a frozen dataclass; every array is read-only (and, when loaded from disk, memory-mapped), so a
-pipeline cannot change what another pipeline will read. Pipelines import only this module's types, never the
-chain that built them.
-
-Conventions that hold for every array in the bundle
----------------------------------------------------
-* Grids: `grids.g80` (80 m, GUNW/GOFF-derived, geometry, terrain context) and `grids.g20` (20 m, GCOV-derived).
-  Both live in the tile's UTM CRS and cover the same extent: the 10 km tile plus a halo. The tile proper is
-  `grid.core_slices()`. Row 0 is north. `grids.index_map_20_to_80` maps every G20 pixel to its G80 pixel.
-* Invalid data is NaN (floats) or 0 (`conn_comp`). Floating point layers are float32. Nothing is silently
-  corrected: every correction that *could* be applied is a diagnostic layer in `CorrectionAudit`.
-* LOS displacement `los_m` is metres, positive TOWARD the sensor, later date minus earlier date.
-* `los_enu` is the unit vector from the ground toward the sensor in (East, North, Up) of the tile's projected
-  axes (grid north, not true north).
-* Backscatter is dB of RTC gamma0 (`gamma0_db`) and of sigma0 where the product carries the conversion factor.
-* Times are ISO-8601 UTC strings ("2026-07-01T00:00:00Z").
+Immutability is enforced, not promised: arrays are flagged non-writeable and all
+mappings are ``MappingProxyType``. ``save``/``load`` persist a bundle under
+``<root>/<bundle_id>/`` (intended root: data/bundles/).
 """
 from __future__ import annotations
 
-from dataclasses import dataclass, field, fields
-from typing import Any
+import json
+from dataclasses import dataclass, field
+from datetime import date, datetime
+from types import MappingProxyType
+from typing import Any, Dict, Mapping, Optional, Tuple
 
 import numpy as np
 
-from .frozen import Dual, FrozenDict, freeze
-from .grids import GridSet, GridSpec
+from ._types import Grid, TileSpec
 
-CONTRACT_VERSION = "1.0"
+SCHEMA_VERSION = "1.0"
 
-STATUS_OK, STATUS_PARTIAL, STATUS_EMPTY = "ok", "partial", "empty"
-
-
-def _freeze_fields(self) -> None:
-    for f in fields(self):
-        v = getattr(self, f.name)
-        nv = freeze(v)
-        if nv is not v:
-            object.__setattr__(self, f.name, nv)
+# Layers every bundle is guaranteed to carry (all on G80).
+CORE_LAYERS: Tuple[str, ...] = ("los_disp_m", "los_sigma_m", "coherence", "conncomp",
+                                "valid", "layover_shadow", "stable")
 
 
-def _dc(cls):
-    """frozen dataclass whose fields are frozen on construction."""
-    cls.__post_init__ = _freeze_fields
-    return dataclass(frozen=True)(cls)
+def _ro(a: np.ndarray) -> np.ndarray:
+    a = np.asarray(a)
+    a.flags.writeable = False
+    return a
 
 
-# ---------------------------------------------------------------------------------------------
-# identity of the scene
-# ---------------------------------------------------------------------------------------------
-@_dc
-class TileInfo:
-    id: str
-    epsg: int
-    e0: float                       # SW corner, UTM metres
-    n0: float
-    size_m: float
-    bbox_lonlat: tuple              # (W, S, E, N) of the tile proper
-    center_lonlat: tuple            # (lon, lat)
-
-    @staticmethod
-    def from_tile(tile) -> "TileInfo":
-        return TileInfo(tile.id, int(tile.epsg), float(tile.e0), float(tile.n0), float(tile.size),
-                        tuple(float(v) for v in tile.bbox(0.0)), tuple(float(v) for v in tile.center))
-
-
-@_dc
-class RequestInfo:
-    as_of: str
-    t0: str
-    t1: str
-    event_window: tuple | None = None        # (start, end) of the triggering event, if any
-    triggers: FrozenDict = field(default_factory=FrozenDict)   # scheduler context: {"quake": {...}, "storm": True, "wind_ms": 6.1}
-    active_codes: tuple | None = None        # measurement codes the active manifests asked for (None = all)
+def _jsonable(o: Any) -> Any:
+    if isinstance(o, Mapping):
+        return {str(k): _jsonable(v) for k, v in o.items()}
+    if isinstance(o, (list, tuple, set, frozenset)):
+        return [_jsonable(v) for v in (sorted(o) if isinstance(o, (set, frozenset)) else o)]
+    if isinstance(o, (np.floating,)):
+        v = float(o)
+        return None if v != v else v
+    if isinstance(o, (np.integer,)):
+        return int(o)
+    if isinstance(o, (np.bool_,)):
+        return bool(o)
+    if isinstance(o, np.ndarray):
+        return o.tolist()
+    if isinstance(o, (datetime, date)):
+        return o.isoformat()
+    if isinstance(o, Grid):
+        return o.to_dict()
+    if isinstance(o, float) and (o != o):
+        return None
+    return o
 
 
-@_dc
-class Flag:
-    """Something the consumer should know about. Never raised silently: lands in SceneBundle.flags."""
-    code: str                       # machine id, e.g. "fetch_error", "cold_start", "ancillary_missing"
-    severity: str                   # info | warn | error
-    step: str                       # P01..P13 | chain
-    message: str
-    detail: FrozenDict = field(default_factory=FrozenDict)
+def _freeze(m: Mapping[str, Any]) -> Mapping[str, Any]:
+    return MappingProxyType(dict(m))
 
 
-@_dc
-class AcquisitionRef:
-    """One radar pass over the tile (adjacent frames of the same pass are merged)."""
-    granule_ids: tuple
-    time: str
-    product: str
-    track: int | None
-    direction: str | None           # "A" | "D"
-    frames: tuple = ()
+@dataclass(frozen=True)
+class TemporalStack:
+    """P10 output. Rows of the stacks follow ``pairs`` order (current pair last)."""
 
-
-@_dc
-class PairRef:
-    """One interferogram. `ref_time` < `sec_time` always: pairs the product stores the other way round are
-    flagged `flipped` and their phase sign is normalised in P06."""
-    granule_ids: tuple
-    ref_time: str | None
-    sec_time: str | None
-    dt_days: float | None           # sec - ref, > 0
-    flipped: bool
-    times_resolved: bool
-    track: int | None
-    direction: str | None
-    frames: tuple = ()
-    bperp_m: float | None = None
-
-
-# ---------------------------------------------------------------------------------------------
-# M1 / M3: interferometric stack (G80)
-# ---------------------------------------------------------------------------------------------
-@_dc
-class CorrectionItem:
-    name: str                       # iono | tropo_hydrostatic | tropo_wet | solid_earth_tide
-    available: bool
-    applied_by_product: bool | None  # None = unknown (the clip carries no processing metadata)
-    applied_by_engine: bool          # always False: this chain never applies a correction
-    layer_m: np.ndarray | None       # (P, n80, n80) LOS metres, same sign/direction as los_m, DIAGNOSTIC only
-    rms_m: tuple = ()                # per pair, over valid pixels
-    note: str = ""
-
-
-@_dc
-class CorrectionAudit:
-    items: FrozenDict = field(default_factory=FrozenDict)      # name -> CorrectionItem
-    residual_los_m: np.ndarray | None = None                   # los_m minus every available diagnostic not applied by the product
-    residual_components: tuple = ()                            # names subtracted to make residual_los_m
-    note: str = ""
-
-
-@_dc
-class PairNetwork:
+    epochs: Tuple[Mapping[str, Any], ...] = ()
+    pairs: Tuple[Mapping[str, Any], ...] = ()
+    coh_stack: Optional[np.ndarray] = None        # (n_pairs, ny, nx) float16, G80
+    disp_stack: Optional[np.ndarray] = None       # (n_pairs, ny, nx) float32 metres, G80
+    bs_epochs: Tuple[Mapping[str, Any], ...] = ()
+    bs_stack: Mapping[str, np.ndarray] = field(default_factory=dict)  # pol -> (n, ny20, nx20) float16 dB
     n_pairs: int = 0
-    n_dates: int = 0
-    n_components: int = 0
-    largest_component_pairs: int = 0
-    largest_component_dates: int = 0
-    min_dt_days: float | None = None
-    max_dt_days: float | None = None
-    connected: bool = False
-    dates: tuple = ()
-    n_unresolved: int = 0           # pairs whose dates could not be parsed
-
-
-@_dc
-class CoherenceBaseline:
-    median: np.ndarray              # (n80, n80) over prior pairs
-    mad: np.ndarray
-    n: np.ndarray                   # int16 valid count
-    latest: np.ndarray              # coherence of the newest pair
-    n_pairs: int
-
-
-@_dc
-class InterferometricData:
-    pairs: tuple                    # tuple[PairRef], axis-0 order of every array below, oldest sec_time first
-    los_m: np.ndarray               # (P, n80, n80) float32
-    sigma_m: np.ndarray             # 1-sigma from coherence + looks (Cramer-Rao), NaN where undefined
-    coherence: np.ndarray
-    conn_comp: np.ndarray           # uint16, 0 = no usable unwrapping
-    phase_rad: np.ndarray           # gated unwrapped phase as stored in the product
-    iono_floor_m: np.ndarray        # per-pixel ionosphere 1-sigma (NaN where the product has none)
-    corrections: CorrectionAudit
-    network: PairNetwork
-    coherence_baseline: CoherenceBaseline | None = None
-    sigma_model: str = "cramer_rao"
-
-
-@_dc
-class OffsetData:
-    pairs: tuple
-    range_m: np.ndarray             # (P, n80, n80) slant-range offset (as stored; metres in NISAR products)
-    azimuth_m: np.ndarray           # along-track offset
-    peak: np.ndarray                # correlation surface peak, 0-1
-
-
-# ---------------------------------------------------------------------------------------------
-# M2: backscatter stack (G20)
-# ---------------------------------------------------------------------------------------------
-@_dc
-class Baseline:
-    median_db: FrozenDict           # pol -> (n20, n20): median over the prior epochs
-    mad_db: FrozenDict              # raw median absolute deviation (not scaled)
-    sigma_db: FrozenDict            # robust sigma = max(1.4826 * MAD, speckle floor)
-    n: FrozenDict                   # pol -> int16 valid-epoch count
-    n_epochs: int                   # prior epochs used
-    epoch_indices: tuple            # indices into BackscatterData.epochs
-    history_days: float
-    cold_start: bool
-    seasonal_ok: bool               # harmonic fits allowed (history >= seasonal_min_history_days)
-    speckle_floor_db: float | None = None
-
-
-@_dc
-class BackscatterMasks:
-    layover: np.ndarray | None      # (n20, n20) bool, static for the stack's geometry; None = could not be evaluated
-    shadow: np.ndarray | None
-    low_incidence: np.ndarray | None
-    high_incidence: np.ndarray | None
-
-
-@_dc
-class BackscatterData:
-    epochs: tuple                   # tuple[AcquisitionRef], ascending time
-    gamma0_db: FrozenDict           # pol -> (E, n20, n20) float32
-    sigma0_db: FrozenDict           # pol -> (E, n20, n20); empty when the product has no rtcGammaToSigmaFactor
-    hv_hh_db: np.ndarray | None     # (E, n20, n20) HV dB minus HH dB
-    n_looks: np.ndarray | None
-    valid: np.ndarray               # (E, n20, n20) bool: finite gamma0 in at least one polarization
-    masks: BackscatterMasks
-    baseline: Baseline
-    current_index: int              # the newest epoch (what pipelines compare against the baseline)
-
-
-# ---------------------------------------------------------------------------------------------
-# geometry / masks per stack
-# ---------------------------------------------------------------------------------------------
-@_dc
-class Geometry:
-    source: str                     # radarGrid:GUNW | radarGrid:GCOV | none
-    height_source: str              # dem | fallback | none
-    los_enu: Dual                   # (3, n, n) ground->sensor unit vector (E, N, Up)
-    incidence_deg: Dual             # (n, n) ellipsoid incidence from the product
-    heading_deg: float | None       # platform heading, clockwise from grid north
-    convergence_deg: float          # grid convergence at the tile centre (true north = grid north + this)
-    local_incidence_deg: Dual       # terrain-aware; empty without a DEM
-    layover: Dual                   # bool; empty without a DEM
-    shadow: Dual
-    consistency_deg: float | None   # max |incidence - arccos(Up)|: a large value means the LOS convention is wrong
-    vectors_available: bool = True
-
-
-@_dc
-class StableMask:
-    mask: Dual                      # bool, True = stable
-    criteria: tuple                 # criteria that were applied
-    missing: tuple                  # criteria that could not be evaluated (no DEM, no coherence, ...)
-    components: FrozenDict = field(default_factory=FrozenDict)   # criterion -> Dual(bool)
-
-
-@_dc
-class StackQuality:
-    coverage_g80: float             # fraction of the tile proper with any interferometric data
-    coverage_g20: float
-    mean_coherence: float | None
-    valid_fraction_g80: float       # fraction of the tile proper with finite LOS in the newest pair
-    valid_fraction_g20: float       # ... with finite gamma0 in the newest epoch
-    layover_shadow_fraction: float | None
-
-
-@_dc
-class StackBundle:
-    key: str                        # e.g. "A005": direction + relative orbit
-    track: int | None
-    direction: str | None
-    interferometric: InterferometricData | None
-    offsets: OffsetData | None
-    backscatter: BackscatterData | None
-    geometry: Geometry | None
-    stable: StableMask | None
-    quality: StackQuality
-
-
-# ---------------------------------------------------------------------------------------------
-# ancillary + routing + depth + provenance
-# ---------------------------------------------------------------------------------------------
-@_dc
-class AncillaryStatus:
-    name: str
-    available: bool
-    source: str = ""
-    version: str | None = None
-    note: str = ""
-
-
-@_dc
-class AncillaryLayers:
-    elevation_m: Dual = field(default_factory=Dual)
-    slope_deg: Dual = field(default_factory=Dual)
-    aspect_deg: Dual = field(default_factory=Dual)
-    curvature_profile: Dual = field(default_factory=Dual)
-    curvature_plan: Dual = field(default_factory=Dual)
-    hand_m: Dual = field(default_factory=Dual)
-    landcover: Dual = field(default_factory=Dual)               # uint8 WorldCover codes, 0 = unknown
-    water_occurrence_pct: Dual = field(default_factory=Dual)
-    context: FrozenDict = field(default_factory=FrozenDict)     # name -> Dual (tree_cover, builtup, ...)
-    facts: FrozenDict = field(default_factory=FrozenDict)       # tile-level scalars from the provider
-    status: FrozenDict = field(default_factory=FrozenDict)      # name -> AncillaryStatus
-    hand_valid_fraction: float | None = None
-
-
-@_dc
-class TileQuality:
-    valid_fraction_g80: float
-    valid_fraction_g20: float
-    mean_coherence: float | None
-    layover_shadow_fraction: float | None
-    water_fraction: float | None
-    land_fraction: float | None
-    water_source: str               # landcover | water_occurrence | backscatter_proxy | unknown
-    n_stacks: int
-
-
-@_dc
-class RoutingDecision:
-    pipeline: str
-    applies: str                    # yes | no | unknown
-    reasons: tuple
-    needs: tuple = ()               # inputs that were missing when applies == "unknown"
-    proxy: bool = False             # decided on a proxy rather than the nominal input
-
-
-@_dc
-class Routing:
-    quality: TileQuality
-    landcover_hist: FrozenDict      # WorldCover code -> fraction of the tile proper
-    decisions: FrozenDict           # pipeline name -> RoutingDecision
-    applicable: tuple               # names with applies == "yes"
-    unknown: tuple                  # names with applies == "unknown"
-
-
-@_dc
-class DataDepth:
-    n_gunw_pairs: int = 0
-    n_gunw_pairs_connected: int = 0
-    n_gunw_dates: int = 0
-    n_gcov_epochs: int = 0
-    history_days: float = 0.0
+    n_epochs: int = 0
+    span_days: float = 0.0
     cold_start: bool = True
-    per_stack: FrozenDict = field(default_factory=FrozenDict)
 
-    def metric(self, name: str) -> int:
-        return {"pairs": self.n_gunw_pairs, "pairs_connected": self.n_gunw_pairs_connected,
-                "epochs": max(self.n_gunw_dates, self.n_gcov_epochs), "dates": self.n_gunw_dates,
-                "gcov_epochs": self.n_gcov_epochs}[name]
-
-
-@_dc
-class InputRecord:
-    granule_id: str
-    product: str
-    source: str                     # network | clip-cache | stale-clip-cache | memory
-    grids: tuple
-    layers: tuple
-    sha: str                        # digest of every array that came out of the clip
+    def __post_init__(self) -> None:
+        for name in ("coh_stack", "disp_stack"):
+            v = getattr(self, name)
+            if v is not None:
+                object.__setattr__(self, name, _ro(v))
+        object.__setattr__(self, "bs_stack", _freeze({k: _ro(v) for k, v in self.bs_stack.items()}))
+        object.__setattr__(self, "epochs", tuple(_freeze(e) for e in self.epochs))
+        object.__setattr__(self, "pairs", tuple(_freeze(p) for p in self.pairs))
+        object.__setattr__(self, "bs_epochs", tuple(_freeze(e) for e in self.bs_epochs))
 
 
-@_dc
-class StepRecord:
-    code: str
-    name: str
-    status: str                     # ok | skipped | error
-    seconds: float
-    message: str = ""
-
-
-@_dc
-class Provenance:
-    bundle_id: str
-    contract_version: str
-    code_version: str               # digest of engine/common sources
-    params_hash: str
-    inputs_hash: str
-    inputs: tuple
-    steps: tuple
-    assumptions: tuple              # conventions applied that were not verified against real data
-    git_commit: str | None
-    created_at: str                 # not part of the bundle id
-
-
-# ---------------------------------------------------------------------------------------------
-# the bundle
-# ---------------------------------------------------------------------------------------------
-@_dc
+@dataclass(frozen=True)
 class SceneBundle:
-    contract_version: str
     bundle_id: str
-    status: str                     # ok | partial | empty
-    tile: TileInfo
-    request: RequestInfo
-    epoch: str | None               # newest acquisition used
-    grids: GridSet
-    stacks: FrozenDict              # key -> StackBundle
-    ancillary: AncillaryLayers
-    routing: Routing | None
-    depth: DataDepth
-    capabilities: frozenset         # M1 M2 M3 geometry terrain landcover water_occurrence stable_mask baseline corrections
-    flags: tuple
-    provenance: Provenance
+    tile: TileSpec
+    sensor: str
+    product: str
+    group: Mapping[str, Any]                 # sensor/track/frame/direction
+    epoch: Mapping[str, Any]                 # granule ids, ref/sec times
+    grids: Mapping[str, Grid]
+    layers: Mapping[str, np.ndarray]
+    layer_grid: Mapping[str, str]
+    meta: Mapping[str, Any]                  # scalars: wavelength_m, los_azimuth_deg, hand_method, ...
+    stack: TemporalStack
+    corrections: Mapping[str, Any]           # P07 audit (recorded, never applied)
+    quality: Mapping[str, Any]               # P12 tile quality
+    routing: Mapping[str, Any]               # P12 per-pipeline applicability + reasons
+    flags: Tuple[str, ...]
+    cold_start: bool
+    degraded_mode: bool
+    provenance: Mapping[str, Any]
+    schema_version: str = SCHEMA_VERSION
 
-    # -- conveniences for pipeline authors (read-only views, no state) -----------------------------
-    def has(self, capability: str) -> bool:
-        return capability in self.capabilities
+    def __post_init__(self) -> None:
+        set_ = lambda k, v: object.__setattr__(self, k, v)  # noqa: E731
+        set_("grids", _freeze(self.grids))
+        set_("layers", _freeze({k: _ro(v) for k, v in self.layers.items()}))
+        set_("layer_grid", _freeze(self.layer_grid))
+        for k in ("group", "epoch", "meta", "corrections", "quality", "routing", "provenance"):
+            set_(k, _freeze(getattr(self, k)))
+        set_("flags", tuple(sorted(set(self.flags))))
+        missing = [n for n in self.layer_grid if n not in self.layers]
+        if missing:
+            raise ValueError(f"layer_grid names without data: {missing}")
 
-    @property
-    def primary_key(self) -> str | None:
-        """The stack with the most data (pairs + epochs)."""
-        best, score = None, -1
-        for k, s in self.stacks.items():
-            n = (len(s.interferometric.pairs) if s.interferometric else 0) + \
-                (len(s.backscatter.epochs) if s.backscatter else 0)
-            if n > score:
-                best, score = k, n
-        return best
+    # ---- access -------------------------------------------------------
+    def has(self, name: str) -> bool:
+        return name in self.layers
 
-    def stack(self, key: str | None = None) -> StackBundle | None:
-        key = key or self.primary_key
-        return self.stacks.get(key) if key else None
+    def layer(self, name: str) -> np.ndarray:
+        try:
+            return self.layers[name]
+        except KeyError:
+            raise KeyError(f"layer '{name}' not in bundle {self.bundle_id}; "
+                           f"available: {sorted(self.layers)}") from None
 
-    def pairs_spanning(self, t0: str, t1: str) -> list:
-        """[(stack_key, index, PairRef)] of pairs whose reference is <= t0 and secondary >= t1."""
-        out = []
-        for k, s in self.stacks.items():
-            if s.interferometric is None:
-                continue
-            for i, p in enumerate(s.interferometric.pairs):
-                if p.times_resolved and p.ref_time <= t0 and p.sec_time >= t1:
-                    out.append((k, i, p))
+    def require(self, *names: str) -> None:
+        miss = [n for n in names if n not in self.layers]
+        if miss:
+            raise KeyError(f"bundle {self.bundle_id} lacks required layers {miss}")
+
+    def grid_of(self, name: str) -> Grid:
+        self.layer(name)
+        return self.grids[self.layer_grid[name]]
+
+    def applicable_pipelines(self) -> Tuple[str, ...]:
+        return tuple(self.routing.get("applicable", ()))
+
+    def summary(self) -> Dict[str, Any]:
+        return _jsonable({
+            "bundle_id": self.bundle_id, "tile": self.tile.tile_id, "sensor": self.sensor,
+            "product": self.product, "epoch": dict(self.epoch), "cold_start": self.cold_start,
+            "degraded_mode": self.degraded_mode, "flags": list(self.flags),
+            "quality": dict(self.quality), "applicable": list(self.applicable_pipelines()),
+            "n_layers": len(self.layers), "n_pairs": self.stack.n_pairs,
+            "n_epochs": self.stack.n_epochs,
+        })
+
+    # ---- persistence ----------------------------------------------------
+    def save(self, root) -> "Any":
+        from pathlib import Path
+        out = Path(root) / self.bundle_id
+        out.mkdir(parents=True, exist_ok=True)
+        np.savez_compressed(out / "layers.npz", **{k: np.asarray(v) for k, v in self.layers.items()})
+        st: Dict[str, np.ndarray] = {}
+        if self.stack.coh_stack is not None:
+            st["coh_stack"] = np.asarray(self.stack.coh_stack)
+        if self.stack.disp_stack is not None:
+            st["disp_stack"] = np.asarray(self.stack.disp_stack)
+        for pol, arr in self.stack.bs_stack.items():
+            st[f"bs_{pol}"] = np.asarray(arr)
+        np.savez_compressed(out / "stack.npz", **st)
+        meta = _jsonable({
+            "schema_version": self.schema_version, "bundle_id": self.bundle_id,
+            "tile": {"tile_id": self.tile.tile_id, "bbox": list(self.tile.bbox)},
+            "sensor": self.sensor, "product": self.product, "group": self.group,
+            "epoch": self.epoch, "grids": self.grids, "layer_grid": self.layer_grid,
+            "meta": self.meta,
+            "stack": {"epochs": list(self.stack.epochs), "pairs": list(self.stack.pairs),
+                      "bs_epochs": list(self.stack.bs_epochs), "n_pairs": self.stack.n_pairs,
+                      "n_epochs": self.stack.n_epochs, "span_days": self.stack.span_days,
+                      "cold_start": self.stack.cold_start,
+                      "bs_pols": list(self.stack.bs_stack)},
+            "corrections": self.corrections, "quality": self.quality, "routing": self.routing,
+            "flags": list(self.flags), "cold_start": self.cold_start,
+            "degraded_mode": self.degraded_mode, "provenance": self.provenance,
+        })
+        (out / "meta.json").write_text(json.dumps(meta, indent=2, sort_keys=True))
         return out
 
-    def flags_of(self, code: str) -> tuple:
-        return tuple(f for f in self.flags if f.code == code)
-
-
-__all__ = [n for n, v in list(globals().items())
-           if isinstance(v, type) and getattr(v, "__module__", "") == __name__] + [
-    "CONTRACT_VERSION", "STATUS_OK", "STATUS_PARTIAL", "STATUS_EMPTY", "Dual", "FrozenDict", "GridSet", "GridSpec"]
+    @staticmethod
+    def load(path) -> "SceneBundle":
+        from pathlib import Path
+        p = Path(path)
+        m = json.loads((p / "meta.json").read_text())
+        with np.load(p / "layers.npz") as z:
+            layers = {k: z[k] for k in z.files}
+        with np.load(p / "stack.npz") as z:
+            sz = {k: z[k] for k in z.files}
+        s = m["stack"]
+        stack = TemporalStack(
+            epochs=tuple(s["epochs"]), pairs=tuple(s["pairs"]),
+            coh_stack=sz.get("coh_stack"), disp_stack=sz.get("disp_stack"),
+            bs_epochs=tuple(s["bs_epochs"]),
+            bs_stack={pol: sz[f"bs_{pol}"] for pol in s["bs_pols"]},
+            n_pairs=s["n_pairs"], n_epochs=s["n_epochs"], span_days=s["span_days"],
+            cold_start=s["cold_start"])
+        return SceneBundle(
+            bundle_id=m["bundle_id"], tile=TileSpec(m["tile"]["tile_id"], tuple(m["tile"]["bbox"])),
+            sensor=m["sensor"], product=m["product"], group=m["group"], epoch=m["epoch"],
+            grids={k: Grid.from_dict(v) for k, v in m["grids"].items()}, layers=layers,
+            layer_grid=m["layer_grid"], meta=m["meta"], stack=stack, corrections=m["corrections"],
+            quality=m["quality"], routing=m["routing"], flags=tuple(m["flags"]),
+            cold_start=m["cold_start"], degraded_mode=m["degraded_mode"],
+            provenance=m["provenance"], schema_version=m["schema_version"])

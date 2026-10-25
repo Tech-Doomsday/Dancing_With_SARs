@@ -1,82 +1,86 @@
-# P07 — record applied tropo/iono/tide correction flags, never apply silently
-"""What could be removed from the LOS signal, recorded - never applied.
+"""P07 - correction audit: RECORD corrections, never apply them silently.
 
-For every pair this step converts each correction layer the product provides (ionosphere phase screen,
-hydrostatic and wet troposphere, solid-earth tide) into the same units and sign as `los_m`, i.e. "how much
-apparent displacement does this effect contribute", and stores it as a diagnostic layer. The audit also states
-whether the product generator already applied it (an assumption from config: the clip carries no processing
-metadata) and always `applied_by_engine=False`.
-
-`residual_los_m` = `los_m` minus every available diagnostic the product did not apply. It is offered as a layer
-for pipelines that want it (land_subsidence uses it); `los_m` itself is never altered, so no pipeline can receive
-a silently corrected field.
+For every correction layer the product ships (ionosphere, troposphere, solid-earth
+tide) we convert it to LOS metres as a diagnostic layer, report its magnitude and
+whether the *product* already applied it. The engine itself applies nothing:
+``engine_applied`` is always False. A residual planar ramp and (once the DEM is
+aligned, in P09) the phase/elevation correlation are recorded the same way.
 """
 from __future__ import annotations
 
-import math
+from typing import Dict, Optional
 
 import numpy as np
 
-from .context import BuildContext
-from .p05_geometry import collapse_height
-from .scene_bundle import CorrectionAudit, CorrectionItem
-from .terrain_set import get_terrain
+from .p06_phase_to_los import phase_to_los_m
+from .state import BundleBuilder
 
-# correction name -> (layer role, is it a height cube?)
-SOURCES = {
-    "iono": ("iono_phase", False),
-    "tropo_hydrostatic": ("tropo_hydro_phase", True),
-    "tropo_wet": ("tropo_wet_phase", True),
-    "solid_earth_tide": ("tide_phase", True),
+STAGE = "P07"
+
+SCREENS = {
+    "iono_phase": ("iono_los_m", "ionosphere"),
+    "wet_tropo_phase": ("wet_tropo_los_m", "wet_troposphere"),
+    "hydro_tropo_phase": ("hydro_tropo_los_m", "hydrostatic_troposphere"),
+    "solid_earth_tide_phase": ("tide_los_m", "solid_earth_tide"),
 }
 
 
-def run(ctx: BuildContext) -> None:
-    r = ctx.cfg.radar
-    k = r.phase_sign * r.wavelength_m / (4.0 * math.pi)
-    flags = r.corrections_applied_by_product
-    ctx.assume("correction screens (iono / tropo / tide) are interferometric phase in radians and are NOT already applied "
-               "to unwrappedPhase (config radar.corrections_applied_by_product) - unverified on real NISAR data")
-    terrain = get_terrain(ctx) if any(w.units for w in ctx.ifg.values()) else None
-    for key, w in ctx.ifg.items():
-        if w.los_m is None:
+def planar_ramp_mm(disp: np.ndarray, dx: float, dy: float, max_px: int = 50000) -> Optional[Dict[str, float]]:
+    ok = np.isfinite(disp)
+    if ok.sum() < 100:
+        return None
+    rr, cc = np.nonzero(ok)
+    if rr.size > max_px:
+        sel = np.random.default_rng(0).choice(rr.size, max_px, replace=False)
+        rr, cc = rr[sel], cc[sel]
+    z = disp[rr, cc].astype(np.float64)
+    X = np.column_stack([np.ones(rr.size), cc * dx / 1000.0, rr * dy / 1000.0])  # km
+    coef, *_ = np.linalg.lstsq(X, z, rcond=None)
+    ny, nx = disp.shape
+    corners = np.array([[0, 0], [nx * dx / 1000.0, 0], [0, ny * dy / 1000.0], [nx * dx / 1000.0, ny * dy / 1000.0]])
+    plane = coef[1] * corners[:, 0] + coef[2] * corners[:, 1]
+    return {"gradient_x_mm_per_km": float(coef[1] * 1e3), "gradient_y_mm_per_km": float(coef[2] * 1e3),
+            "amplitude_mm": float((plane.max() - plane.min()) * 1e3)}
+
+
+def elevation_audit(state: BundleBuilder) -> None:
+    """Called by P09 once a DEM is on G80: Pearson r between LOS displacement and elevation."""
+    dem, disp = state.layers.get("dem_m"), state.layers.get("los_disp_m")
+    if dem is None or disp is None:
+        return
+    ok = np.isfinite(dem) & np.isfinite(disp)
+    if ok.sum() < 100 or np.std(dem[ok]) == 0 or np.std(disp[ok]) == 0:
+        state.audit["elevation_correlation"] = {"r": None, "n": int(ok.sum())}
+        return
+    r = float(np.corrcoef(dem[ok].astype(np.float64), disp[ok].astype(np.float64))[0, 1])
+    state.audit["elevation_correlation"] = {"r": r, "n": int(ok.sum()), "engine_applied": False}
+
+
+def run(state: BundleBuilder) -> Dict:
+    cfg, w = state.cfg, state.work
+    wl = state.meta["wavelength_m"]
+    applied_in_product = (state.clip.attrs.get("corrections_applied") or {}) if state.clip else {}
+    entries: Dict[str, Dict] = {}
+    for src, (layer_name, label) in SCREENS.items():
+        if src not in w:
+            entries[label] = {"available": False, "applied_in_product": applied_in_product.get(label),
+                              "engine_applied": False}
             continue
-        P = w.los_m.shape[0]
-        shape = w.los_m.shape[1:]
-        items = {}
-        residual = w.los_m.copy()
-        used = []
-        for name, (role, cube) in SOURCES.items():
-            layer = np.full((P,) + shape, np.nan, np.float32)
-            have = False
-            for i, u in enumerate(w.units):
-                arr = next((a for (rr, _p), a in u.layers.items() if rr == role), None)
-                if arr is None:
-                    continue
-                if cube and arr.ndim == 3:
-                    at = terrain.elevation["G80"] if terrain is not None and terrain.available else r_fallback(ctx)
-                    arr = collapse_height(arr, u.heights, at)
-                layer[i] = (w.sign[i] * k) * arr
-                have = True
-            applied = bool(flags.get(name, False))
-            if have:
-                rms = tuple(float(np.sqrt(np.nanmean(layer[i] ** 2))) if np.isfinite(layer[i]).any() else float("nan")
-                            for i in range(P))
-                items[name] = CorrectionItem(name, True, applied, False, layer, rms,
-                                             "diagnostic only: not removed from los_m")
-                if not applied:
-                    used.append(name)
-                    residual = residual - np.nan_to_num(layer, nan=0.0)
-            else:
-                items[name] = CorrectionItem(name, False, None, False, None, (),
-                                             "layer absent from the retrieved clips")
-        missing = [n for n, it in items.items() if not it.available]
-        if missing:
-            ctx.flag("corrections_missing", "info", "P07", f"{key}: no diagnostic layer for {', '.join(missing)}", stack=key,
-                     missing=missing)
-        w.corrections = CorrectionAudit(items, residual.astype(np.float32) if used else None, tuple(used),
-                                        "residual = los_m - sum(diagnostics not applied by the product); los_m is untouched")
-
-
-def r_fallback(ctx: BuildContext) -> float:
-    return ctx.cfg.geometry.fallback_height_m
+        los = phase_to_los_m(w[src], wl, cfg)
+        state.put(layer_name, los)
+        ok = np.isfinite(los)
+        rms = float(np.sqrt(np.mean(los[ok].astype(np.float64) ** 2)) * 1e3) if ok.any() else None
+        p95 = float(np.percentile(np.abs(los[ok]), 95) * 1e3) if ok.any() else None
+        entries[label] = {"available": True, "layer": layer_name, "rms_mm": rms, "p95_abs_mm": p95,
+                          "valid_fraction": float(ok.mean()),
+                          "applied_in_product": applied_in_product.get(label), "engine_applied": False,
+                          "significant": bool(rms is not None and rms > cfg.audit_flag_mm)}
+    state.audit["corrections"] = entries
+    g = state.grids["G80"]
+    ramp = planar_ramp_mm(state.layers["los_disp_m"], g.dx, g.dy, cfg.audit_max_fit_pixels)
+    if ramp is not None:
+        ramp["significant"] = bool(ramp["amplitude_mm"] > cfg.ramp_flag_mm)
+        ramp["engine_applied"] = False
+    state.audit["residual_ramp"] = ramp
+    return {"corrections_available": [k for k, v in entries.items() if v["available"]],
+            "ramp_mm": ramp["amplitude_mm"] if ramp else None}

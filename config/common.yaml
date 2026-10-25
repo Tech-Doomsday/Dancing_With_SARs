@@ -2,7 +2,7 @@
 # engine/common/config.py. Any value can also be overridden by an env var / .env entry named
 # NISAR_COMMON_<SECTION>_<KEY> (e.g. NISAR_COMMON_RADAR_WAVELENGTH_M=0.2384).
 #
-# Entries marked UNVERIFIED are conventions that could not be checked against a real NISAR granule
+# Conventions below are documented in the NISAR specs; the ones that could not be checked end to end say so.
 # while this was written. They are recorded in every bundle's provenance.assumptions.
 
 grids:
@@ -22,8 +22,9 @@ products:
 
 radar:
   wavelength_m: 0.2384          # NISAR L-band; centerFrequency is not carried by the retrieved clip
-  phase_sign: -1                # UNVERIFIED: ref*conj(sec) convention, ref earlier -> toward-sensor = -lambda/4pi * phase
-  los_vector_points: ground_to_sensor   # UNVERIFIED: direction of losUnitVectorX/Y
+  phase_sign: -1                # ref*conj(sec), ref earlier -> toward-sensor = -lambda/4pi * phase (consistent with NISAR ATBD JPL D-95677; no ground-truth check)
+  los_vector_points: ground_to_sensor   # NISAR L2 GUNW spec: "from target to sensor"; matched numerically on one real product
+  look_side: null               # "left" | "right" when known (identification/lookDirection): lets P05 catch a flipped LOS convention
   gunw_effective_looks: 100     # assumption (number of looks is not carried by the clip)
 
 temporal:
