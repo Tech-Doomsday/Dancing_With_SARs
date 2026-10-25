@@ -81,7 +81,7 @@ def test_concurrent_processes_share_one_data_dir_without_corruption(tmp_path, se
             "selftest": True}
     server.latency = 0.02
     with mp.get_context("spawn").Pool(4) as pool:
-        outs = pool.map(checks.fetch_worker, [args] * 4)
+        outs = pool.map_async(checks.fetch_worker, [args] * 4).get(timeout=180)
     assert all(not o["errors"] and o["clips"] == 1 for o in outs), outs
     assert {o["hash"] for o in outs} == {truth_hash}
     assert not list(data.rglob("*.tmp*"))                                           # no leftover temp files

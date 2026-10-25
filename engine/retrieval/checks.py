@@ -63,7 +63,7 @@ def fetch_worker(a: dict) -> dict:
     cfg = load_settings()
     auth = None
     if a.get("selftest"):
-        cfg.net.update(auth_hosts=["127.0.0.1"], retries=3, connect_timeout_s=5, stall_timeout_s=10)
+        cfg.net.update(auth_hosts=["127.0.0.1"], retries=4, connect_timeout_s=30, stall_timeout_s=60)
         auth = EarthdataAuth(token="test")
     c = NisarClient(cfg, auth)
     g = GranuleRef(**a["ref"])

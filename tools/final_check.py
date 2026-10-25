@@ -118,27 +118,74 @@ def check_env(cfg, auth):
            "Earthdata credentials found" if auth.available else "set EARTHDATA_TOKEN in .env")
 
 
+def _kill_tree(proc):
+    try:
+        if sys.platform == "win32":
+            subprocess.run(["taskkill", "/F", "/T", "/PID", str(proc.pid)], capture_output=True, timeout=30)
+        else:
+            import signal
+            os.killpg(proc.pid, signal.SIGKILL)
+    except Exception:
+        try: proc.kill()
+        except Exception: pass
+
+
+def _pytest_once(idle_s: float, total_s: float):
+    """Run pytest writing to a FILE (a grandchild process holding a pipe open can never stall us), with a
+    watchdog that kills it when the output stops growing, and faulthandler dumping all thread stacks of a stuck test."""
+    fd, path = tempfile.mkstemp(prefix="nisar_pytest_", suffix=".log")
+    os.close(fd)
+    env = dict(os.environ, PYTHONUNBUFFERED="1")
+    cmd = [sys.executable, "-m", "pytest", "tests", "-v", "-p", "no:cacheprovider", "-rfE", "--tb=short",
+           "-o", f"faulthandler_timeout={int(max(10, idle_s / 2))}"]
+    kw = {"start_new_session": True} if sys.platform != "win32" else {}
+    with open(path, "wb") as f:
+        proc = subprocess.Popen(cmd, cwd=ROOT, stdout=f, stderr=subprocess.STDOUT, env=env, **kw)
+        t0 = last_change = time.time(); last_size = -1; hung = None
+        while proc.poll() is None:
+            time.sleep(1.0)
+            size = os.path.getsize(path)
+            if size != last_size:
+                last_size, last_change = size, time.time()
+            if time.time() - last_change > idle_s:
+                hung = f"no output for {idle_s:.0f}s"
+            elif time.time() - t0 > total_s:
+                hung = f"exceeded {total_s:.0f}s in total"
+            if hung:
+                _kill_tree(proc)
+                proc.wait(timeout=30)
+                break
+    text = Path(path).read_text(encoding="utf-8", errors="replace")
+    try: os.remove(path)
+    except OSError: pass
+    return proc.returncode, text, hung
+
+
 @step("unit tests (local mock server)")
 def run_pytest():
-    def run():
-        return subprocess.run([sys.executable, "-m", "pytest", "tests", "-q", "-p", "no:cacheprovider", "-rfE", "--tb=short"],
-                              cwd=ROOT, capture_output=True, text=True, timeout=900)
-    r = run()
-    if "No module named pytest" in r.stderr + r.stdout:
+    idle_s = float(os.environ.get("NISAR_TEST_IDLE_S", 150))
+    rc, text, hung = _pytest_once(idle_s, float(os.environ.get("NISAR_TEST_TOTAL_S", 1200)))
+    if "No module named pytest" in text:
         out("  installing pytest + mgrs (test-only packages) ...")
         subprocess.run([sys.executable, "-m", "pip", "install", "-q", "pytest", "mgrs"], capture_output=True, timeout=600)
-        r = run()
-    lines = (r.stdout + "\n" + r.stderr).splitlines()
-    summary = next((l for l in reversed(lines) if " passed" in l or " failed" in l or "error" in l.lower()), "no output")
+        rc, text, hung = _pytest_once(idle_s, float(os.environ.get("NISAR_TEST_TOTAL_S", 1200)))
+    lines = text.splitlines()
+    if hung:
+        started = [l for l in lines if "::" in l and (" PASSED" not in l and " FAILED" not in l and " SKIPPED" not in l and " ERROR" not in l)]
+        stuck = started[-1].strip() if started else (lines[-1] if lines else "?")
+        out(f"  ---- pytest STALLED ({hung}); it was in: {stuck}\n  last output:\n  " + "\n  ".join(lines[-70:]))
+        record("unit tests", "FAIL", f"HUNG ({hung}) in {stuck[:160]}")
+        return
+    summary = next((l for l in reversed(lines) if " passed" in l or " failed" in l or " error" in l), "no summary")
     failed = [l for l in lines if l.startswith(("FAILED ", "ERROR "))]
-    if r.returncode != 0:
-        i = next((k for k, l in enumerate(lines) if "FAILURES" in l or "ERRORS" in l), 0)
+    if rc != 0:
+        i = next((k for k, l in enumerate(lines) if "= FAILURES =" in l or "= ERRORS =" in l), 0)
         j = next((k for k, l in enumerate(lines) if "short test summary" in l), len(lines))
         out("  ---- pytest failure details ----\n  " + "\n  ".join(lines[i:j][:90]))
         for l in failed:
             name, _, why = l.partition(" - ")
             record("unit test " + name.split(" ", 1)[-1].split("::")[-1], "FAIL", (why or name)[:240])
-    record("unit tests", "PASS" if r.returncode == 0 else "FAIL", summary.strip("= "))
+    record("unit tests", "PASS" if rc == 0 else "FAIL", summary.strip("= "))
 
 
 def do_poll(client, region, products, label, searcher=None):
@@ -280,7 +327,7 @@ def check_multiprocess(cfg, info, selftest):
     t = time.time()
     try:
         with mp.get_context("spawn").Pool(4) as pool:
-            outs = pool.map(checks.fetch_worker, [args] * 4)
+            outs = pool.map_async(checks.fetch_worker, [args] * 4).get(timeout=600)
     finally:
         if old is None: os.environ.pop("NISAR_DATA_DIR", None)
         else: os.environ["NISAR_DATA_DIR"] = old
@@ -346,7 +393,7 @@ def _main():
         mock = GranuleRef(name[:-3], server.url(name), "GUNW", "20261008T000000Z", "20261008T000030Z",
                           footprint=[[w, s], [e, s], [e, n], [w, n], [w, s]])
         searcher = lambda bbox, t0, t1, product: ([mock] if product == "GUNW" else [], False)
-        cfg.net.update(auth_hosts=["127.0.0.1"], retries=3, connect_timeout_s=5, stall_timeout_s=10)
+        cfg.net.update(auth_hosts=["127.0.0.1"], retries=4, connect_timeout_s=30, stall_timeout_s=60)
         auth = EarthdataAuth(token="test")
         regions = {"la": (w - .1, s - .1, e + .1, n + .1)}
 

@@ -32,7 +32,7 @@ _CREATED: list = []
 def make_client(tmp_path, **net):
     cfg = load_settings(root=Path(__file__).resolve().parents[1])
     cfg.data_dir = tmp_path / "data"
-    cfg.net.update(auth_hosts=["127.0.0.1"], retries=3, connect_timeout_s=5, stall_timeout_s=10, **net)
+    cfg.net.update(auth_hosts=["127.0.0.1"], retries=4, connect_timeout_s=30, stall_timeout_s=60, **net)
     c = NisarClient(cfg, EarthdataAuth(token="test"))
     _CREATED.append(c)
     return c

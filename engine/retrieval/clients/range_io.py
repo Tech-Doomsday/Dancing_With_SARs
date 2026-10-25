@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import asyncio
 import random
+import sys
 import threading
 import time
 from dataclasses import dataclass, field
@@ -38,11 +39,12 @@ class LoopThread:
         asyncio.set_event_loop(self.loop)
         try:
             self.loop.run_forever()
-        finally:                                  # release the loop's self-pipe sockets
-            try:
-                self.loop.run_until_complete(self.loop.shutdown_asyncgens())
-            finally:
-                self.loop.close()
+        finally:
+            if sys.platform != "win32":           # release the loop's self-pipe sockets (a leak otherwise);
+                try:                              # not on Windows: ProactorEventLoop.close() can spin on open sockets
+                    self.loop.run_until_complete(self.loop.shutdown_asyncgens())
+                finally:
+                    self.loop.close()
 
     def run(self, coro, timeout: float | None = None):
         return asyncio.run_coroutine_threadsafe(coro, self.loop).result(timeout)
