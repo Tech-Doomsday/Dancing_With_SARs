@@ -200,6 +200,7 @@ def import_test() -> list:
 
 
 # ------------------------------------------------------------------------------------------------ independence
+<<<<<<< HEAD
 ADAPTERS_PKG = ".".join((ENGINE / "retrieval" / "clients" / "adapters").relative_to(REPO).parts)   # engine.retrieval.clients.adapters
 INDEPENDENCE_RULE = (
     "A pipeline may import its own package, engine.lib, and the bundle types/contract from engine.common. "
@@ -221,6 +222,13 @@ def independence(pipelines_dir: Path | None = None) -> dict:
     pdir = Path(pipelines_dir) if pipelines_dir else ENGINE / "pipelines"
     names = {d.name for d in pdir.iterdir() if d.is_dir() and not d.name.startswith((".", "__"))}
     bad, scanned, adapter_uses = [], 0, {}
+=======
+def independence() -> dict:
+    """Static: does any pipeline import another pipeline, the retrieval layer, or the preprocessing chain?"""
+    pdir = ENGINE / "pipelines"
+    names = {d.name for d in pdir.iterdir() if d.is_dir() and not d.name.startswith((".", "__"))}
+    bad, scanned = [], 0
+>>>>>>> 8200fa0 (Integrate MOTUS earthquake analysis into Dancing With SARs)
     for d in sorted(pdir.iterdir()):
         if not d.is_dir() or d.name.startswith((".", "__")):
             continue
@@ -231,7 +239,11 @@ def independence(pipelines_dir: Path | None = None) -> dict:
             try:
                 tree = ast.parse(f.read_text(encoding="utf-8"))
             except SyntaxError as ex:
+<<<<<<< HEAD
                 bad.append({"file": _rel(f), "problem": f"syntax error line {ex.lineno}"})
+=======
+                bad.append({"file": str(f.relative_to(REPO)), "problem": f"syntax error line {ex.lineno}"})
+>>>>>>> 8200fa0 (Integrate MOTUS earthquake analysis into Dancing With SARs)
                 continue
             for n in ast.walk(tree):
                 targets = []
@@ -246,6 +258,7 @@ def independence(pipelines_dir: Path | None = None) -> dict:
                 for t in targets:
                     parts = t.split(".")
                     if parts[:2] == ["engine", "pipelines"] and len(parts) > 2 and parts[2] in names and parts[2] != d.name:
+<<<<<<< HEAD
                         bad.append({"file": _rel(f), "problem": f"imports another pipeline ({parts[2]})"})
                     elif parts[:2] == ["engine", "retrieval"]:
                         if t == ADAPTERS_PKG or t.startswith(ADAPTERS_PKG + "."):
@@ -277,6 +290,14 @@ def pipeline_entry_contract() -> dict:
                         + ("it also refers to a 'fetch' module." if "fetch" in names else
                            "nothing in the registry imports or calls a pipeline's fetch.py, so a pipeline's own_fetch can only happen "
                            "inside run(bundle) (or something it imports)."))}
+=======
+                        bad.append({"file": str(f.relative_to(REPO)), "problem": f"imports another pipeline ({parts[2]})"})
+                    elif parts[:2] == ["engine", "retrieval"]:
+                        bad.append({"file": str(f.relative_to(REPO)), "problem": "imports the retrieval layer (pipelines see only the bundle)"})
+                    elif parts[:2] == ["engine", "common"] and len(parts) > 2 and re.match(r"(chain|p\d\d_|context|runner|state)", parts[2]):
+                        bad.append({"file": str(f.relative_to(REPO)), "problem": f"imports the preprocessing chain ({parts[2]})"})
+    return {"scanned_files": scanned, "pipelines": len(names), "violations": bad}
+>>>>>>> 8200fa0 (Integrate MOTUS earthquake analysis into Dancing With SARs)
 
 
 # ------------------------------------------------------------------------------------------------ producers & needs
@@ -321,6 +342,7 @@ def ancillary_files(data_dir: Path) -> dict:
     return out
 
 
+<<<<<<< HEAD
 def s_channel_check() -> dict:
     """Is each S_CHANNEL entry really a name used by engine/common/ancillary.py? (textual presence, not a hand-kept claim)"""
     try:
@@ -331,11 +353,17 @@ def s_channel_check() -> dict:
             for c, ch in S_CHANNEL.items()}
 
 
+=======
+>>>>>>> 8200fa0 (Integrate MOTUS earthquake analysis into Dancing With SARs)
 def needs_matrix(data_dir: Path) -> dict:
     """pipeline x code: where would each declared input come from, and does that source exist?"""
     from engine.registry import scan_pipelines
     mans, _ = scan_pipelines(ENGINE / "pipelines")
+<<<<<<< HEAD
     prod, anc, schk = producers(), ancillary_files(data_dir), s_channel_check()
+=======
+    prod, anc = producers(), ancillary_files(data_dir)
+>>>>>>> 8200fa0 (Integrate MOTUS earthquake analysis into Dancing With SARs)
     cols: list = []
     rows = []
 
@@ -347,14 +375,21 @@ def needs_matrix(data_dir: Path) -> dict:
             ch = S_CHANNEL.get(code)
             if ch is None:
                 return {"state": "missing", "why": f"no channel in the bundle for {code} ({S_NAMES.get(code, '?')})"}
+<<<<<<< HEAD
             if not schk[code]["found_in_ancillary_py"]:
                 return {"state": "missing", "why": f"channel '{ch}' is not named anywhere in engine/common/ancillary.py"}
+=======
+>>>>>>> 8200fa0 (Integrate MOTUS earthquake analysis into Dancing With SARs)
             have = anc.get(ch, {}).get("files", 0) if not ch.startswith("fact:") else int(anc["_facts.json"]["files"] or anc["_S7_volcanoes.geojson"]["files"])
             return {"state": "ok" if have else "empty", "why": f"bundle channel '{ch}' exists; {have} file(s) in data/ancillary, and nothing in the repo downloads them" if not have else f"{have} file(s) in data/ancillary/{ch}"}
         if code.startswith("R"):
             p = prod.get(code, {"produced": False, "how": "no adapter file"})
+<<<<<<< HEAD
             who = "fetched by the pipeline itself (own_fetch)" if role == "fetch" else "declared in uses_codes"
             return {"state": "ok" if p["produced"] else "missing", "why": f"{who}: {p['how']}"}
+=======
+            return {"state": "no_channel" if p["produced"] else "missing", "why": p["how"] + "; pipelines receive only the bundle, which has no field for reference data"}
+>>>>>>> 8200fa0 (Integrate MOTUS earthquake analysis into Dancing With SARs)
         return {"state": "missing", "why": "unknown code"}
 
     for m in mans:
@@ -461,5 +496,9 @@ def run_tests(timeout: int = 600) -> dict:
 def health_snapshot(settings) -> dict:
     return {"environment": environment(settings), "dependencies": dependencies(), "code": code_readiness(),
             "pipelines": pipeline_code_state(), "imports": import_test(), "independence": independence(),
+<<<<<<< HEAD
             "needs": needs_matrix(Path(settings.data_dir)), "contract": pipeline_entry_contract(),
             "s_channel_check": s_channel_check(), "generated": time.time()}
+=======
+            "needs": needs_matrix(Path(settings.data_dir)), "generated": time.time()}
+>>>>>>> 8200fa0 (Integrate MOTUS earthquake analysis into Dancing With SARs)

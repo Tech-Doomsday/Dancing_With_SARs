@@ -5,7 +5,14 @@ import hashlib, json, sys
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
+<<<<<<< HEAD
 SKIP_DIRS = {"__pycache__", ".pytest_cache", "data", ".git", "catalog"}
+=======
+# "app" is excluded: the web application manages its own files (and its
+# node_modules / .next build tree) — hashing it here would balloon the
+# manifest and go stale on every install.
+SKIP_DIRS = {"__pycache__", ".pytest_cache", "data", ".git", "catalog", "app", ".github"}
+>>>>>>> 8200fa0 (Integrate MOTUS earthquake analysis into Dancing With SARs)
 
 
 def files():

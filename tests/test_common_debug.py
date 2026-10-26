@@ -1,6 +1,11 @@
 """P05's look-side check, the step tracer, the HTML report, and (when the sample is on disk) a real GUNW.
 
+<<<<<<< HEAD
 The real-data tests need dancing-with-sars-eq next to this repo (or EQ_SAMPLE_DIR); they skip otherwise.
+=======
+The real-data tests use the integrated sample committed with the web application
+(app/data/derived/nisar-la-2008, or EQ_SAMPLE_DIR); they skip otherwise.
+>>>>>>> 8200fa0 (Integrate MOTUS earthquake analysis into Dancing With SARs)
 """
 import dataclasses
 import json
@@ -136,11 +141,19 @@ def test_report_javascript_parses(traced, tmp_path):
 # ---------------------------------------------------------------------------------------------
 def _sample_dir():
     import os
+<<<<<<< HEAD
     d = Path(os.environ.get("EQ_SAMPLE_DIR", Path(__file__).resolve().parents[2] / "dancing-with-sars-eq" / "data" / "derived" / "nisar-la-2008"))
     return d if (d / "meta.json").is_file() and (d / "phase.f32").is_file() else None
 
 
 real = pytest.mark.skipif(_sample_dir() is None, reason="dancing-with-sars-eq sample not found (set EQ_SAMPLE_DIR)")
+=======
+    d = Path(os.environ.get("EQ_SAMPLE_DIR", Path(__file__).resolve().parents[1] / "app" / "data" / "derived" / "nisar-la-2008"))
+    return d if (d / "meta.json").is_file() and (d / "phase.f32").is_file() else None
+
+
+real = pytest.mark.skipif(_sample_dir() is None, reason="integrated LA-2008 sample not found (set EQ_SAMPLE_DIR)")
+>>>>>>> 8200fa0 (Integrate MOTUS earthquake analysis into Dancing With SARs)
 
 
 @pytest.fixture(scope="module")

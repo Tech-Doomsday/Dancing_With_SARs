@@ -1,0 +1,88 @@
+name: CI
+
+# Continuous integration for the integrated repository:
+#   - app/  — the Next.js web application (engine overview + MOTUS earthquake
+#             analysis module), adapted from the original MOTUS CI.
+#   - engine/ — the Python nisar-hazard-engine, curated test suite.
+#
+# Design constraints (unchanged from the original MOTUS CI):
+#   - NO private credentials and NO untracked real-data files are required:
+#     every job below runs on a clean checkout with only the committed
+#     repository content. The scientific datasets that live outside git
+#     (large HDF5 granules) are OPTIONAL: the offline test suite verifies
+#     clean-clone behaviour explicitly, and data-dependent tests skip
+#     themselves with a visible message when the local data is absent.
+#   - The production build runs with TypeScript build errors ENABLED
+#     (next.config.ts does not set ignoreBuildErrors).
+#   - The engine job runs the curated pytest allowlist. Running bare
+#     `pytest tests/` is NOT green: the tree contains pre-existing DevFlock
+#     test orphans whose `src/` dependency was never committed (see
+#     docs/READINESS.md).
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  app:
+    name: Web app (app/)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: app
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+
+      - name: Install dependencies
+        run: bun install --frozen-lockfile
+
+      - name: Lint
+        run: bun run lint
+
+      - name: Type check (strict, no ignoreBuildErrors)
+        run: bun run typecheck
+
+      - name: Offline test suite (no credentials, no real-data files)
+        run: bun test
+        env:
+          DATABASE_URL: "file:./db/custom.db"
+
+      - name: Python extractor tests (offline synthetic HDF5 fixtures)
+        run: |
+          python3 -m pip install --quiet h5py numpy
+          python3 tools/test_extract_gunw.py
+
+      - name: Production build (TypeScript errors fail the build)
+        run: bun run build
+        env:
+          DATABASE_URL: "file:./db/custom.db"
+
+  engine:
+    name: Python engine (curated tests)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements-retrieval.txt pytest mgrs
+
+      - name: Curated engine test suite
+        run: >
+          pytest tests/test_mgrs.py tests/test_retrieval.py tests/test_poller.py
+          tests/test_robustness.py tests/test_regressions.py tests/test_common_chain.py
+          tests/test_common_foundation.py tests/test_common_truth.py tests/test_common_debug.py
+          tests/test_scene_bundle_contract.py tests/test_pipeline_independence.py
+          tests/test_debug_hub.py -v

@@ -7,7 +7,10 @@
 from __future__ import annotations
 
 import asyncio
+<<<<<<< HEAD
 import logging
+=======
+>>>>>>> 8200fa0 (Integrate MOTUS earthquake analysis into Dancing With SARs)
 import json
 import os
 import re
@@ -206,7 +209,10 @@ class NisarClient:
                     res.degraded |= clip.source.startswith("stale")
             except Exception as ex:  # reported, never swallowed
                 res.errors[g.granule_id] = f"{type(ex).__name__}: {ex}"
+<<<<<<< HEAD
                 logging.getLogger("nisar.client").error("granule %s failed", g.granule_id, exc_info=True)   # keep the traceback
+=======
+>>>>>>> 8200fa0 (Integrate MOTUS earthquake analysis into Dancing With SARs)
 
         await asyncio.gather(*(one(g) for g in granules))
         order = {g.granule_id: i for i, g in enumerate(granules)}
@@ -326,9 +332,15 @@ class NisarClient:
         self._catalogs[g.product] = cat
 
     def _full_walk(self, g: GranuleRef) -> GranuleIndex:
+<<<<<<< HEAD
         rf, h5 = self._fallback_pair(g)                       # use the pair we were handed: another thread may evict the cache entry
         with self._fb_lock:
             ix = build_index(h5, g.granule_id, rf.size)
+=======
+        h5 = self._fallback_file(g)
+        with self._fb_lock:
+            ix = build_index(h5, g.granule_id, self._fb[g.granule_id][0].size)
+>>>>>>> 8200fa0 (Integrate MOTUS earthquake analysis into Dancing With SARs)
         self._save_catalog(g, ix)
         return ix
 
@@ -337,8 +349,13 @@ class NisarClient:
         cat = self._catalog(g)
         ix = None
         if cat:
+<<<<<<< HEAD
             rf, h5 = self._fallback_pair(g)
             ix = GranuleIndex(g.granule_id, rf.size, {}, {})
+=======
+            h5 = self._fallback_file(g)
+            ix = GranuleIndex(g.granule_id, self._fb[g.granule_id][0].size, {}, {})
+>>>>>>> 8200fa0 (Integrate MOTUS earthquake analysis into Dancing With SARs)
             try:
                 with self._fb_lock:
                     extend_index(ix, h5, cat, pat)
@@ -499,6 +516,7 @@ class NisarClient:
         decode_place(job, mv)
 
     def _fallback_file(self, g: GranuleRef):
+<<<<<<< HEAD
         return self._fallback_pair(g)[1]
 
     def _fallback_pair(self, g: GranuleRef):
@@ -506,6 +524,9 @@ class NisarClient:
         block cache. The LRU must hold more entries than there are worker threads: evicting closes the handle, and a
         thread that is still using it (or looks it up again after waiting for the lock) would fail with a bare
         KeyError(granule_id)."""
+=======
+        """One open h5py handle per granule (LRU of 6) so repeated fallback reads reuse its block cache."""
+>>>>>>> 8200fa0 (Integrate MOTUS earthquake analysis into Dancing With SARs)
         import h5py
         with self._fb_lock:
             hit = self._fb.pop(g.granule_id, None)
@@ -522,13 +543,21 @@ class NisarClient:
                     h5 = h5py.File(rf, "r")
                 hit = (rf, h5)
             self._fb[g.granule_id] = hit
+<<<<<<< HEAD
             while len(self._fb) > max(16, 2 * getattr(self.blocking, "_max_workers", 8)):
+=======
+            while len(self._fb) > 6:
+>>>>>>> 8200fa0 (Integrate MOTUS earthquake analysis into Dancing With SARs)
                 _, (_, old) = self._fb.popitem(last=False)
                 try:
                     old.close()
                 except Exception:
                     pass
+<<<<<<< HEAD
             return hit
+=======
+            return hit[1]
+>>>>>>> 8200fa0 (Integrate MOTUS earthquake analysis into Dancing With SARs)
 
     def _fallback_layers(self, g: GranuleRef, slow):
         """Contiguous / exotic-filter layers: plain h5py over the same ranged file object."""

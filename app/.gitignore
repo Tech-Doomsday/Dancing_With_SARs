@@ -1,0 +1,81 @@
+# See https://help.github.com/articles/ignoring-files/ for more about files.
+
+# dependencies
+node_modules
+/.pnp
+.pnp.*
+.yarn/*
+!.yarn/patches
+!.yarn/plugins
+!.yarn/releases
+!.yarn/versions
+
+# testing
+/coverage
+
+# next.js
+/.next/
+/out/
+
+# production
+/build
+/dist
+
+# misc
+.DS_Store
+*.pem
+
+# debug
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+.pnpm-debug.log*
+
+# env files — placeholders only; real secrets never enter git
+.env*
+!.env.example
+.env*.local
+
+# vercel
+.vercel
+
+# typescript
+*.tsbuildinfo
+next-env.d.ts
+local-*
+.claude
+.z-ai-config
+*.log
+dev.log
+dev.out.log
+server.log
+test
+prompt
+
+# Science data: RUNTIME products (raw granule downloads, disk caches,
+# tsunami run outputs) are never committed — and Tailwind 4's automatic
+# content scanner respects these ignores (a 2.58 GB granule in data/raw
+# once OOM-killed the dev server's CSS build).
+# The COMMITTED science artifacts (derived rasters for the LA-2008 sample,
+# the recorded Mojave run, the Panama evidence caches, official browse
+# imagery, sample product documents) live under data/ too and are
+# deliberately visible to git — see docs/data-manifest.md.
+/data/cache/
+/data/raw/
+/data/derived/tsunami/
+
+# runtime SQLite database — created by `bun run db:push`; the reference
+# registry self-seeds on first request (prisma/schema.prisma), so the db
+# file itself is never committed (run history stays machine-local).
+/db/*.db
+/db/*.db-journal
+
+# python tooling
+/tools/venv/
+__pycache__/
+bundle_debug.html
+
+# sandbox scaffolding that must never be committed
+/.zscripts/
+/dev.pid
+/skills/

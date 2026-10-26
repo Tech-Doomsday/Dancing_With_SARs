@@ -10,11 +10,16 @@ yet implementable end to end, because of five gaps that sit upstream of the pipe
 
 * P01..P13 + `SceneBundle` + `check_bundle(deep=True)`: all 13 steps run and the contract is clean on a full synthetic scene.
 * `Registry.plan` routes and gates correctly, and says *why* (`NOT_APPLICABLE` vs `BLOCKED` vs `INSUFFICIENT_EVIDENCE`).
+<<<<<<< HEAD
 * Pipeline independence: 136 files scanned, no pipeline imports another pipeline, the chain, or anything from retrieval (no adapter imports yet, because every pipeline file is a stub).
+=======
+* Pipeline independence: 136 files scanned, no pipeline imports another pipeline, the retrieval layer, or the chain.
+>>>>>>> 8200fa0 (Integrate MOTUS earthquake analysis into Dancing With SARs)
 * M1 (GUNW), M2 (GCOV), M3 (offsets), geometry, corrections audit (P07) have a real producer.
 
 ## Gaps, in the order they block work
 
+<<<<<<< HEAD
 **1. Reference data (R\*): decided, but the contract and the adapters are not there yet.**
 Decision (yours): a pipeline retrieves its own context data (ComCat, ERA5, FIRMS, ...) itself; the bundle carries measurements,
 common preprocessed products, raw layers and static ancillary, not R\* data. The manifests' `own_fetch` and each folder's `fetch.py`
@@ -34,6 +39,14 @@ common preprocessed products, raw layers and static ancillary, not R\* data. The
   `retrieval/clients/cache.py` (TTL disk cache). Adapters should use it.
 * **Scheduler path is separate.** ComCat is also meant to be polled by `scheduler/event_pollers/comcat.py` to raise the `triggers={"quake": ...}` that P12 routes on
   (`RequestInfo.triggers`). That poller is a stub too. Routing on a trigger and a pipeline's own R1 fetch are two different uses.
+=======
+**1. Reference-data delivery has no channel (decision needed).**
+Manifests declare `own_fetch` (R1 ComCat, R2 ShakeMap, R4 IMERG, R5 ERA5, R6 FIRMS, ...). The registry gives a pipeline *only the
+bundle* ("no retriever"), and `SceneBundle` has no field for reference data. All 14 `adapters/r*_*.py` are comment-only stubs.
+Pick one: (a) a `ReferenceProvider` protocol beside `AncillaryProvider`, filled by retrieval *before* the bundle is built and carried in the
+bundle (keeps pipelines retrieval-free and testable offline), or (b) let a pipeline's `fetch.py` run inside its worker. (a) matches the
+architecture doc's independence rule; (b) is quicker but reintroduces network inside the process pool.
+>>>>>>> 8200fa0 (Integrate MOTUS earthquake analysis into Dancing With SARs)
 
 **2. Static ancillary layers are readable but never produced.**
 `DirectoryAncillary` reads `data/ancillary/<name>/*.npz|tif`; nothing in the repo writes them. Effect, measured on a complete
@@ -60,7 +73,10 @@ only `earthquake_coseismic` was `READY` (needs M1 only), `flood_inundation` laun
 
 * **Dead modules:** `engine/common/runner.py`, `state.py`, `_raster.py` import `PreprocConfig`, which no longer exists. They fail to import and
   nothing in the live path imports them. Delete, or the import test in HEALTH stays red.
+<<<<<<< HEAD
 * **Hand-kept labels:** the hub's `S_CHANNEL` / `S_NAMES` / `MEASUREMENT_NAMES` are labels written by hand; `S_CHANNEL` entries are now checked for presence in `engine/common/ancillary.py` (HEALTH shows the result).
+=======
+>>>>>>> 8200fa0 (Integrate MOTUS earthquake analysis into Dancing With SARs)
 * **Undeclared dependencies:** `scipy` (top-level import in `_terrain.py`, `grids.py`) and `rasterio` (lazy) were not in any requirements file;
   `pyproject.toml` lists no dependencies. `scipy` is now in `requirements-retrieval.txt`; the file name is also misleading, since `engine.common` needs `pyproj`/`shapely` too.
 * **Credentials:** the archive you sent contained `.env` with a real Earthdata username and password. `.gitignore` protects git, not a zip.

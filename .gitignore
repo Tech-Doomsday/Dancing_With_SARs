@@ -1,7 +1,45 @@
+<<<<<<< HEAD
 .env
 data/
+=======
+# --- Python engine -----------------------------------------------------------------
+.env
+# The engine's runtime data directory at the repository root (clips, caches,
+# bundles, state). Root-anchored on purpose: the web application's committed
+# science artifacts live under app/data/ and must stay visible to git.
+/data/
+>>>>>>> 8200fa0 (Integrate MOTUS earthquake analysis into Dancing With SARs)
 __pycache__/
 .pytest_cache/
 *.pyc
 _backup_before_install_*/
 .devflock
+<<<<<<< HEAD
+=======
+.venv/
+venv/
+bundle_debug.html
+
+# --- Web application (app/) ---------------------------------------------------------
+/app/node_modules/
+/app/.next/
+/app/out/
+/app/build/
+/app/dist/
+/app/.env
+/app/.env.*
+!/app/.env.example
+/app/.env*.local
+/app/*.log
+/app/*.tsbuildinfo
+/app/next-env.d.ts
+# app runtime data: caches, raw granule downloads, tsunami run outputs
+/app/data/cache/
+/app/data/raw/
+/app/data/derived/tsunami/
+/app/tools/venv/
+# z-ai sandbox scaffolding that must never be committed
+/app/.zscripts/
+/app/.z-ai-config/
+/app/dev.pid
+>>>>>>> 8200fa0 (Integrate MOTUS earthquake analysis into Dancing With SARs)

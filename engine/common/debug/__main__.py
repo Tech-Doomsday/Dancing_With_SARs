@@ -1,7 +1,18 @@
+<<<<<<< HEAD
 """python -m engine.common.debug --sample ../dancing-with-sars-eq/data/derived/nisar-la-2008 --out bundle_debug.html
 
 Runs P01..P13 on a REAL extracted GUNW and writes a self-contained HTML report of everything that was loaded.
 No network, no credentials, nothing under engine/retrieval is touched.
+=======
+"""python -m engine.common.debug --sample app/data/derived/nisar-la-2008 --out bundle_debug.html
+
+Runs P01..P13 on a REAL extracted GUNW and writes a self-contained HTML report of everything that was loaded.
+No network, no credentials, nothing under engine/retrieval is touched.
+
+The default sample is the one committed with the integrated web application
+(app/data/derived/nisar-la-2008, extracted from the real 2008 NISAR-format
+sample product by app/tools/extract_gunw.py).
+>>>>>>> 8200fa0 (Integrate MOTUS earthquake analysis into Dancing With SARs)
 """
 from __future__ import annotations
 
@@ -16,7 +27,14 @@ from engine.common.debug.report import write_report
 from engine.common.debug.trace import traced_build
 from engine.tiling.mgrs import tile_at
 
+<<<<<<< HEAD
 DEFAULT = Path(__file__).resolve().parents[3].parent / "dancing-with-sars-eq" / "data" / "derived" / "nisar-la-2008"
+=======
+# The integrated web application ships the extracted 2008 sample product
+# inside this repository (app/data/derived/nisar-la-2008); EQ_SAMPLE_DIR can
+# still point anywhere else.
+DEFAULT = Path(__file__).resolve().parents[3] / "app" / "data" / "derived" / "nisar-la-2008"
+>>>>>>> 8200fa0 (Integrate MOTUS earthquake analysis into Dancing With SARs)
 
 
 def main(argv=None) -> int:
@@ -29,7 +47,11 @@ def main(argv=None) -> int:
     ap.add_argument("--list-tiles", action="store_true", help="print every usable tile with its valid-phase fraction and exit")
     a = ap.parse_args(argv)
     if not (Path(a.sample) / "meta.json").is_file():
+<<<<<<< HEAD
         print(f"no meta.json in {a.sample}: pass --sample <dancing-with-sars-eq>/data/derived/<slug>", file=sys.stderr)
+=======
+        print(f"no meta.json in {a.sample}: pass --sample app/data/derived/<slug>", file=sys.stderr)
+>>>>>>> 8200fa0 (Integrate MOTUS earthquake analysis into Dancing With SARs)
         return 2
     r = EqSampleRetriever(a.sample)
     if a.list_tiles:

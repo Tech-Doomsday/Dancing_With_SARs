@@ -1,9 +1,46 @@
 # nisar-hazard-engine
 
+<<<<<<< HEAD
 Global SAR (NISAR primary, Sentinel-1 fallback) hazard detection engine: retrieval → common preprocessing → 16 independent, parallel hazard pipelines → verdict → serving/UI, with validation and cross-cutting support.
 
 Full design rationale, the current data-reality check, and the pipeline-by-pipeline open-source mapping live in [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md). The diagram below is the same shape as `SARs_full_workflow.html`.
 
+=======
+Global SAR (NISAR primary, Sentinel-1 fallback) hazard detection engine: retrieval → common preprocessing → 16 independent, parallel hazard pipelines → verdict → serving/UI, with validation and cross-cutting support — **plus the `app/` web application** (an honest engine overview and the MOTUS earthquake-analysis module, making pipelines 3.01/3.14 interactive on real data today).
+
+Full design rationale, the current data-reality check, and the pipeline-by-pipeline open-source mapping live in [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md). The diagram below is the same shape as `SARs_full_workflow.html`.
+
+## Quick start
+
+**Web application** (the serving/UI layer, Next.js 16 + TypeScript):
+
+```bash
+cd app
+bun install                 # or: npm/pnpm/yarn install
+cp .env.example .env        # defaults work out of the box (SQLite, no credentials required)
+bun run dev                 # http://localhost:3000
+```
+
+The app opens on an **Engine overview** generated live from `engine/pipelines/*/manifest.yaml` (what is built, what is scaffolded — no pretending), with the **Earthquake analysis** module one click away: event selection, InSAR deformation analysis with honest uncertainty, seismic evidence, exports, and the tsunami check. Optional NASA Earthdata credentials unlock gated datasets; without them the app degrades honestly. Full documentation: [`app/README.md`](app/README.md).
+
+**Python engine** (retrieval + preprocessing are built; the 16 pipelines are scaffolded manifests):
+
+```bash
+python3 -m venv .venv && source .venv/bin/activate   # Python ≥ 3.11
+pip install -r requirements-retrieval.txt pytest mgrs
+cp .env.example .env        # add your Earthdata token for live retrieval (optional)
+pytest tests/test_mgrs.py tests/test_retrieval.py tests/test_poller.py tests/test_robustness.py \
+       tests/test_regressions.py tests/test_common_chain.py tests/test_common_foundation.py \
+       tests/test_common_truth.py tests/test_common_debug.py tests/test_scene_bundle_contract.py \
+       tests/test_pipeline_independence.py tests/test_debug_hub.py   # the curated engine suite
+python -m engine.common.debug    # P01–P13 on the real integrated sample (app/data/derived/nisar-la-2008)
+```
+
+> `pytest tests/` as a whole is **not** green yet: the tree also contains pre-existing DevFlock test orphans (`test_cli_*`, `test_gateway_live`, …) whose `src/` dependency was never committed. Run the curated list above; see `docs/READINESS.md`.
+
+Environment variables for both halves are documented in [`.env.example`](.env.example) (engine) and [`app/.env.example`](app/.env.example) (web app).
+
+>>>>>>> 8200fa0 (Integrate MOTUS earthquake analysis into Dancing With SARs)
 ## Workflow
 
 ```mermaid
@@ -178,6 +215,7 @@ Every folder has the same 8 files. Pipelines never import each other — only `e
 
 | File | Purpose |
 |---|---|
+<<<<<<< HEAD
 | `api/main.py` | FastAPI entrypoint |
 | `api/routes_tiles.py` | `/tiles`, `/tiles/:id/verdicts` |
 | `api/routes_pipelines.py` | `/pipelines` — drawer built from manifests |
@@ -185,6 +223,17 @@ Every folder has the same 8 files. Pipelines never import each other — only `e
 | `api/routes_scanner.py` | `/scanner/status` |
 | `api/routes_datasets.py` | `/datasets` |
 | `app/` | existing Next.js — map, panel, time slider |
+=======
+| `app/` | **Next.js web application (built)** — engine overview generated from the pipeline manifests + the MOTUS earthquake-analysis module (map with before/after swipe, results panel, pair finder, tsunami check); see `app/README.md` |
+| `app/src/app/api/engine/pipelines` | `GET` — the real pipeline catalog, read live from the manifests (the web counterpart of the planned `/pipelines`) |
+| `app/src/app/api/engine/status` | `GET` — honest filesystem facts about the engine's runtime state (the counterpart of the planned `/scanner/status`) |
+| `api/main.py` | FastAPI entrypoint (stub — the Next.js app serves the UI layer today) |
+| `api/routes_tiles.py` | `/tiles`, `/tiles/:id/verdicts` (stub — awaits verdict producers) |
+| `api/routes_pipelines.py` | `/pipelines` — drawer built from manifests (stub — served by `app/` meanwhile) |
+| `api/routes_events.py` | `/events` — linked events from 4.3 (stub) |
+| `api/routes_scanner.py` | `/scanner/status` (stub — `app/`'s `/api/engine/status` meanwhile) |
+| `api/routes_datasets.py` | `/datasets` (stub — `app/`'s `/api/datasets` meanwhile) |
+>>>>>>> 8200fa0 (Integrate MOTUS earthquake analysis into Dancing With SARs)
 
 </details>
 
@@ -209,7 +258,10 @@ Every folder has the same 8 files. Pipelines never import each other — only `e
 | `tests/test_scene_bundle_contract.py` | fields every pipeline can rely on |
 | `tests/test_common_truth.py` | engine/common against analytic truth (terrain, HAND, UTM zones, fills, ramps) |
 | `tools/debug_hub/` | **unified local debug layer** (`python tools/hub.py`): DATA RETRIEVAL · HEALTH · DATA PROCESSING, live over the real engine path, see `tools/debug_hub/README.md` |
+<<<<<<< HEAD
 | `tools/sar_debug/` | standalone HTML debug report for retrieval, files and the engine checkout (`cd tools && python -m sar_debug --demo`); engine-independent by design |
+=======
+>>>>>>> 8200fa0 (Integrate MOTUS earthquake analysis into Dancing With SARs)
 | `config/tiling.yaml` | grid scheme — still an open decision, see docs |
 | `docs/ARCHITECTURE.md` | full vision, data-reality check, OSS library map |
 

@@ -122,6 +122,7 @@ def test_server_end_to_end_image_and_pixel_probe_come_from_the_stored_array():
         assert code == 200 and p["finite"] == bool(e.data[p["row"], p["col"]] == e.data[p["row"], p["col"]])
     finally:
         httpd.shutdown()
+<<<<<<< HEAD
 
 
 def test_independence_scan_allows_reference_adapters_and_flags_the_rest(tmp_path):
@@ -157,3 +158,5 @@ def test_reference_data_is_a_pipeline_own_fetch_not_a_bundle_gap():
     assert r_cells and all("no field" not in c["why"] and c["state"] in ("ok", "missing") for c in r_cells)
     assert all("own_fetch" in c["why"] for c in r_cells)
     assert cells
+=======
+>>>>>>> 8200fa0 (Integrate MOTUS earthquake analysis into Dancing With SARs)

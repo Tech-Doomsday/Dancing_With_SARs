@@ -1,9 +1,18 @@
 """Serve a REAL extracted NISAR-format GUNW through the same two calls the chain uses on the retrieval client.
 
+<<<<<<< HEAD
 The source is the `data/derived/<slug>/` folder written by dancing-with-sars-eq's `tools/extract_gunw.py`:
 `meta.json` + raw `phase.f32` / `coherence.f32` / `components.u16` (row-major, north-up, pixel-centre axes).
 
     r = EqSampleRetriever("../dancing-with-sars-eq/data/derived/nisar-la-2008")
+=======
+The source is the `app/data/derived/<slug>/` folder written by the web application's
+`app/tools/extract_gunw.py` (originally authored in the dancing-with-sars-eq project,
+now integrated in this repository): `meta.json` + raw `phase.f32` / `coherence.f32` /
+`components.u16` (row-major, north-up, pixel-centre axes).
+
+    r = EqSampleRetriever("app/data/derived/nisar-la-2008")
+>>>>>>> 8200fa0 (Integrate MOTUS earthquake analysis into Dancing With SARs)
     tile = r.best_tile()                       # a 10 km tile fully inside the product with the most valid phase
     bundle = build_scene_bundle(tile, r, as_of=r.as_of, cfg=r.config())
 

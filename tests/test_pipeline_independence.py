@@ -117,6 +117,7 @@ def test_relative_imports_are_resolved(tmp_path):
     for f in _files(root):
         for _ln, mod, _n in _imports(f):
             assert not mod.startswith("."), (f, mod)
+<<<<<<< HEAD
 
 
 # ---------------------------------------------------------------------------------------------------------------------
@@ -163,3 +164,5 @@ def test_the_retrieval_checker_itself_detects_a_violation(tmp_path):
                  "import engine.retrieval.clients.adapters.r2_shakemap\n")
     bad = _retrieval_violations(f)
     assert len(bad) == 1 and "nisar_client" in bad[0]
+=======
+>>>>>>> 8200fa0 (Integrate MOTUS earthquake analysis into Dancing With SARs)
