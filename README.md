@@ -208,7 +208,8 @@ Every folder has the same 8 files. Pipelines never import each other — only `e
 | `tests/test_pipeline_independence.py` | static check: no cross-pipeline imports |
 | `tests/test_scene_bundle_contract.py` | fields every pipeline can rely on |
 | `tests/test_common_truth.py` | engine/common against analytic truth (terrain, HAND, UTM zones, fills, ramps) |
-| `tools/sar_debug/` | standalone HTML debug report for retrieval, files and the engine checkout (`cd tools && python -m sar_debug --demo`) |
+| `tools/debug_hub/` | **unified local debug layer** (`python tools/hub.py`): DATA RETRIEVAL · HEALTH · DATA PROCESSING, live over the real engine path, see `tools/debug_hub/README.md` |
+| `tools/sar_debug/` | standalone HTML debug report for retrieval, files and the engine checkout (`cd tools && python -m sar_debug --demo`); engine-independent by design |
 | `config/tiling.yaml` | grid scheme — still an open decision, see docs |
 | `docs/ARCHITECTURE.md` | full vision, data-reality check, OSS library map |
 

@@ -9,3 +9,5 @@ pyyaml
 python-dotenv
 asf_search>=7      # search only; pip install pytest for the tests
 # tests only: pytest, mgrs (reference MGRS library the tile tests compare against)
+scipy>=1.11   # engine/common: terrain + resampling (imported at top level, was undeclared)
+# optional: rasterio (GeoTIFF ancillary rasters; lazy import in engine/common/ancillary.py)
