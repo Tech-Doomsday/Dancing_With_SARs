@@ -43,8 +43,8 @@ def _input_state(b, code: str, prod: dict) -> dict:
                 "why": f"ancillary '{ch}' " + ("available" if ok else "not available (nothing in data/ancillary)")}
     if code.startswith("R"):
         p = prod.get(code, {})
-        return {"code": code, "name": name, "state": "no_channel" if p.get("produced") else "no_producer",
-                "why": f"{p.get('how', 'no adapter')}; the bundle has no field for reference data"}
+        return {"code": code, "name": name, "state": "present" if p.get("produced") else "no_producer",
+                "why": f"the pipeline fetches this itself (own_fetch): {p.get('how', 'no adapter')}"}
     return {"code": code, "name": name, "state": "absent", "why": "unknown code"}
 
 

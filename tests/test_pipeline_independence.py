@@ -117,3 +117,49 @@ def test_relative_imports_are_resolved(tmp_path):
     for f in _files(root):
         for _ln, mod, _n in _imports(f):
             assert not mod.startswith("."), (f, mod)
+
+
+# ---------------------------------------------------------------------------------------------------------------------
+# retrieval from a pipeline: measurements come from the bundle; own_fetch context data may only come through adapters
+# ---------------------------------------------------------------------------------------------------------------------
+RETRIEVAL_ALLOWED = "engine.retrieval.clients.adapters"
+
+
+def _retrieval_imports(f: Path):
+    for ln, mod, names in _imports(f):
+        if mod == "engine.retrieval" or mod.startswith("engine.retrieval."):
+            yield ln, mod, names
+    for ln, mod in _dynamic_imports(f):
+        if mod.startswith("engine.retrieval"):
+            yield ln, mod, ()
+
+
+def _retrieval_violations(f: Path) -> list:
+    bad = []
+    for ln, mod, names in _retrieval_imports(f):
+        full = [mod] + [f"{mod}.{n}" for n in names]
+        if any(m == RETRIEVAL_ALLOWED or m.startswith(RETRIEVAL_ALLOWED + ".") for m in full):
+            continue
+        if mod in ("engine.retrieval", "engine.retrieval.clients") and names and all(n in ("adapters",) for n in names):
+            continue
+        bad.append(f"{f.name}:{ln} imports {mod} {names}")
+    return bad
+
+
+@pytest.mark.parametrize("pdir", _pipeline_dirs(), ids=lambda p: p.name)
+def test_pipeline_uses_retrieval_only_through_reference_adapters(pdir):
+    bad = []
+    for f in _files(pdir):
+        if "tests" in f.relative_to(pdir).parts:
+            continue
+        bad += [f"{f.relative_to(ROOT)}: {b}" for b in _retrieval_violations(f)]
+    assert not bad, "\n".join(bad) + "\n(measurements come from the bundle; only engine.retrieval.clients.adapters.* may be imported)"
+
+
+def test_the_retrieval_checker_itself_detects_a_violation(tmp_path):
+    f = tmp_path / "x.py"
+    f.write_text("from engine.retrieval.clients.nisar_client import NisarClient\n"
+                 "from engine.retrieval.clients.adapters import r1_comcat\n"
+                 "import engine.retrieval.clients.adapters.r2_shakemap\n")
+    bad = _retrieval_violations(f)
+    assert len(bad) == 1 and "nisar_client" in bad[0]
