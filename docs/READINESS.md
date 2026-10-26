@@ -10,30 +10,31 @@ yet implementable end to end, because of five gaps that sit upstream of the pipe
 
 * P01..P13 + `SceneBundle` + `check_bundle(deep=True)`: all 13 steps run and the contract is clean on a full synthetic scene.
 * `Registry.plan` routes and gates correctly, and says *why* (`NOT_APPLICABLE` vs `BLOCKED` vs `INSUFFICIENT_EVIDENCE`).
-* Pipeline independence: 136 files scanned, no pipeline imports another pipeline, the chain, or anything from retrieval (no adapter imports yet, because every pipeline file is a stub).
+* Pipeline independence (import rules of `tests/test_pipeline_independence.py`, relative imports resolved; the hub does not mirror that test's dynamic-import and adapters-only rules): 136 files scanned, no violations.
 * M1 (GUNW), M2 (GCOV), M3 (offsets), geometry, corrections audit (P07) have a real producer.
 
 ## Gaps, in the order they block work
 
-**1. Reference data (R\*): decided, but the contract and the adapters are not there yet.**
-Decision (yours): a pipeline retrieves its own context data (ComCat, ERA5, FIRMS, ...) itself; the bundle carries measurements,
-common preprocessed products, raw layers and static ancillary, not R\* data. The manifests' `own_fetch` and each folder's `fetch.py`
-("reference adapters / ancillary this pipeline pulls on demand") say the same. What is missing, read from the code by the HEALTH tab:
-* **No caller.** `engine/registry.py` imports `engine.pipelines.<name>.verdict` and calls `run(bundle)`; nothing imports or calls `fetch.py`.
-  So an own_fetch can only happen inside `run(bundle)` or something it imports. The registry docstring still says "a pipeline sees ONLY the bundle: no retriever".
-  One of the two has to change (docstring, or a defined `fetch` step).
-* **No adapters.** All 14 `engine/retrieval/clients/adapters/r*_*.py` are comment-only stubs. They live in the shared retrieval layer, so a pipeline can reach them
-  only if the independence rule allows it. HEALTH now applies this rule and prints it: own package, `engine.lib`, bundle types from `engine.common`,
-  and from retrieval ONLY `engine.retrieval.clients.adapters.*` (never `NisarClient`, scheduler or the chain). `tests/test_pipeline_independence.py` enforces it.
-  The adapter allowance is my reading of your decision plus the manifests, not a sentence in ARCHITECTURE.md: please confirm it.
-* **Who declares what (manifests, not opinion).** R1 (ComCat) is declared by **five** pipelines, not one: earthquake_coseismic, landslide ("R1 shaking trigger"),
-  tsunami_inundation ("R1 trigger"), urban_damage ("R1 / R10 / R9 trigger context") and volcanic_deformation ("R1 low-magnitude seismicity"). If only the earthquake
-  pipeline should use ComCat, the other four manifests need editing; the HEALTH matrix follows the manifests automatically.
-  R5 (ERA5) is declared by six, R4 (IMERG) by four, R10 by four.
-* **Parallel duplicates.** Pipelines run in separate processes, so two pipelines that declare the same R-source fetch it twice unless the adapters share
-  `retrieval/clients/cache.py` (TTL disk cache). Adapters should use it.
-* **Scheduler path is separate.** ComCat is also meant to be polled by `scheduler/event_pollers/comcat.py` to raise the `triggers={"quake": ...}` that P12 routes on
-  (`RequestInfo.triggers`). That poller is a stub too. Routing on a trigger and a pipeline's own R1 fetch are two different uses.
+**1. Pipeline-owned data: the adapters it relies on do not exist.**
+Design (confirmed): the bundle carries the common preprocessed products plus raw data; reference and event data is pulled by the one
+pipeline that needs it, from its own `fetch.py` (manifest `own_fetch`), so nothing is fetched for a tile that no pipeline will use.
+The repo's independence test allows this: pipelines may not import another pipeline or the P01-P13 chain, and
+`test_pipeline_uses_retrieval_only_through_reference_adapters` lets them import only `engine.retrieval.clients.adapters.*` from the retrieval
+layer (so a `fetch.py` has to go through an adapter, never `NisarClient` directly). What is missing is the adapters: all 14 `adapters/r*_*.py` are comment-only stubs, and no S-source downloader exists.
+Points to settle when writing the first `fetch.py`:
+* **R1 (ComCat) is declared by five pipelines, not one.** The manifest `own_fetch` text for R1, as read from each manifest:
+  earthquake_coseismic: "R1 (bbox+0.5 deg, M>=4, window +-1 day, within 400 km, nodal planes)";
+  volcanic_deformation: "R1 low-magnitude seismicity (M>=2 within 30 km)";
+  landslide: "R1 shaking trigger" (no query parameters stated);
+  tsunami_inundation: "R1 trigger (shallow, offshore/near-coast, M>=7.0 or tsunami flag, nodal plane)";
+  urban_damage: "R1 / R10 / R9 trigger context" (R1 grouped with R10 and R9; no query parameters stated).
+  Only three manifests state query parameters; for landslide and urban_damage the query is not specified anywhere read. If they do not
+  really need R1, trim their manifests. Either way each pipeline fetches for itself; duplicate calls are absorbed by a request-keyed cache
+  in the adapter, never by sharing results between pipelines.
+* **Testability:** `run(bundle)` has a fixed signature, so each `fetch.py` needs an injectable provider (module-level seam) so tests run offline.
+* **Failure must be a result, not an exception:** a failed or empty fetch should map to `INSUFFICIENT_EVIDENCE` with the reason, never to "no event".
+* **Not everything pipeline-specific can be deferred:** P12 decides *before* any pipeline runs whether it applies, using bundle-level ancillary
+  (land cover, S12 permafrost, S8 glacier, S4 tree cover, S9 built-up, S11 river buffer, S7 volcano distance). Those stay in the bundle.
 
 **2. Static ancillary layers are readable but never produced.**
 `DirectoryAncillary` reads `data/ancillary/<name>/*.npz|tif`; nothing in the repo writes them. Effect, measured on a complete
@@ -56,11 +57,24 @@ only `earthquake_coseismic` was `READY` (needs M1 only), `flood_inundation` laun
 **5. Everything after the pipelines is stub.** `engine/verdict/*` 0/5, `engine/api/*` 0/6, `engine/validation/*` 0/2,
 `engine/lib/*` 0/5 (`okada`, `flood_detect`, ...), event pollers and `triggers.py` stubs (scheduler 1/7 implemented: only `granule_poller`).
 
+## Registry contract gap (read by the hub with `ast`; HEALTH tab, "Registry contract")
+
+`engine/registry.py` sets `ENTRY_MODULE = "verdict"` and `ENTRY_FUNC = "run"`, and the worker imports `engine.pipelines.<name>.verdict` and calls
+`run(bundle)`. Nothing in the registry refers to a `fetch` module, so **no code calls a pipeline's `fetch.py`**. The registry docstring says
+"A pipeline sees ONLY the bundle: no retriever", which contradicts the `own_fetch` design (manifests and `_template`: `fetch.py` pulls reference
+data on demand). One of the two must change: either the registry/`verdict.run` flow is defined to call the pipeline's own `fetch.py`
+(and the docstring is corrected), or the `own_fetch` design is dropped. This was not changed here (registry.py is out of scope).
+
+## Hand-kept labels in the hub
+
+`MEASUREMENT_NAMES` and `S_NAMES` in `tools/debug_hub/health.py` are human-readable labels written by hand. `S_CHANNEL` (S-code -> bundle
+channel) is a hand-written mapping, verified at run time against `engine/common/ancillary.py` (`s_channel_check`, shown in the HEALTH payload;
+a channel not named there is reported `missing`). Counts and states in HEALTH are measured.
+
 ## Hygiene findings
 
 * **Dead modules:** `engine/common/runner.py`, `state.py`, `_raster.py` import `PreprocConfig`, which no longer exists. They fail to import and
   nothing in the live path imports them. Delete, or the import test in HEALTH stays red.
-* **Hand-kept labels:** the hub's `S_CHANNEL` / `S_NAMES` / `MEASUREMENT_NAMES` are labels written by hand; `S_CHANNEL` entries are now checked for presence in `engine/common/ancillary.py` (HEALTH shows the result).
 * **Undeclared dependencies:** `scipy` (top-level import in `_terrain.py`, `grids.py`) and `rasterio` (lazy) were not in any requirements file;
   `pyproject.toml` lists no dependencies. `scipy` is now in `requirements-retrieval.txt`; the file name is also misleading, since `engine.common` needs `pyproj`/`shapely` too.
 * **Credentials:** the archive you sent contained `.env` with a real Earthdata username and password. `.gitignore` protects git, not a zip.
@@ -72,5 +86,5 @@ only `earthquake_coseismic` was `READY` (needs M1 only), `flood_inundation` laun
 
 * **No live run.** The sandbox had no network, `aiohttp`, `h5py` or `zarr`, so `NisarClient` was never run against ASF. The first live RUN in the hub is
   that test; `sar_debug`'s README says the same about its own remote path.
-* The full `tests/` suite was not run (no `pytest`). The hub's own tests pass under a minimal runner; run `pytest tests/test_debug_hub.py` and the HEALTH tab's "run test suite".
+* The full `tests/` suite has not been run. `tests/test_debug_hub.py`, `tests/test_pipeline_independence.py` and `tests/test_retrieval.py` were run in a later session: the first two pass; `test_retrieval.py::test_chunk_tables_load_lazily_per_layer` fails (pre-existing, cause not investigated), and `tests/test_cli_cloudflare_e2e.py` cannot be collected (no module `devflock`).
 * `pyproj` was stood in for by the repo's own UTM code during verification, so tile coordinates were checked against that, not against `pyproj`.

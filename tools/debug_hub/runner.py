@@ -204,8 +204,14 @@ class LiveObserver:
 
 
 # ------------------------------------------------------------------------------------------------ sources
+SOURCES = ("live", "selftest")
+
+
 def make_source(kind: str, job: Job, tile, params: dict):
-    """-> (retriever, close_fn, metrics_fn, ancillary, info)"""
+    """-> (retriever, close_fn, metrics_fn, ancillary, info). Only "live" and "selftest" exist; anything else is an error
+    (a typo must never fall through to a live run)."""
+    if kind not in SOURCES:
+        raise ValueError(f"unknown source {kind!r}; valid sources: {', '.join(SOURCES)}")
     from engine.common.ancillary import DirectoryAncillary, NullAncillary
     from engine.common.config import data_root
     if kind == "selftest":

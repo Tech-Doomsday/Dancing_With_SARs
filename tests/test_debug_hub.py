@@ -124,36 +124,88 @@ def test_server_end_to_end_image_and_pixel_probe_come_from_the_stored_array():
         httpd.shutdown()
 
 
-def test_independence_scan_allows_reference_adapters_and_flags_the_rest(tmp_path):
+def test_independence_check_matches_the_repo_rule(tmp_path):
+    """A pipeline's own fetch.py may use the retrieval layer; importing another pipeline or a chain step is a violation."""
     from debug_hub.health import independence
-    p = tmp_path / "demo"
-    p.mkdir()
-    (tmp_path / "other").mkdir()
-    (p / "fetch.py").write_text("from engine.retrieval.clients.adapters import r1_comcat\n")
-    (p / "model.py").write_text("from engine.retrieval.clients.nisar_client import NisarClient\n"
-                                "from engine.pipelines.other import model\n")
-    r = independence(tmp_path)
-    problems = " | ".join(v["problem"] for v in r["violations"])
-    assert "nisar_client" in problems and "another pipeline" in problems
-    assert not any("r1_comcat" in v["problem"] for v in r["violations"])
-    assert any(a["file"].endswith("fetch.py") for a in r["reference_adapter_imports"])
-    assert r["rule"]
+    a, b = tmp_path / "alpha", tmp_path / "beta"
+    a.mkdir(); b.mkdir()
+    (a / "fetch.py").write_text("from engine.retrieval.clients.nisar_client import NisarClient\nfrom engine.common.scene_bundle import SceneBundle\n"
+                                "from engine.pipelines.alpha import model\n")
+    (b / "model.py").write_text("from engine.pipelines.alpha import fetch\nfrom engine.common.p05_geometry import run\n"
+                                "from engine.common import build_scene_bundle\n")
+    out = independence(tmp_path)
+    by = {}
+    for v in out["violations"]:
+        by.setdefault(v["file"].split("/")[0], []).append(v["problem"])
+    assert "alpha" not in by                                  # retrieval + bundle types + own package: all allowed
+    assert len(by["beta"]) == 3                               # other pipeline, chain step, chain entry point
 
 
-def test_registry_entry_contract_is_read_from_the_registry_source():
+def test_independence_resolves_relative_imports(tmp_path):
+    """Regression: relative imports used to be skipped, so `from ..beta import model` was never flagged."""
+    from debug_hub.health import independence
+    a, b = tmp_path / "alpha", tmp_path / "beta"
+    a.mkdir(); b.mkdir()
+    (b / "model.py").write_text("x = 1\n")
+    (a / "model.py").write_text("from ..beta import model\n")
+    out = independence(tmp_path)
+    assert [v["problem"] for v in out["violations"]] == ["imports another pipeline (beta)"]
+
+    (a / "model.py").write_text("from .. import beta\n")
+    out = independence(tmp_path)
+    assert len(out["violations"]) == 1 and out["violations"][0]["file"].startswith("alpha/")
+
+    (a / "model.py").write_text("from . import fetch\nfrom .prep import x\nfrom .. import alpha\n")
+    assert independence(tmp_path)["violations"] == []         # own package, however it is spelled
+
+
+def test_independence_real_repo_is_clean():
+    from debug_hub.health import independence
+    out = independence()
+    assert out["violations"] == [] and out["scanned_files"] > 0
+
+
+def test_make_source_rejects_unknown_kinds_without_touching_the_network():
+    from debug_hub.runner import make_source
+    import pytest
+    with pytest.raises(ValueError, match="unknown source 'nonsense'"):
+        make_source("nonsense", None, None, {})
+    with pytest.raises(ValueError):
+        make_source("", None, None, {})
+
+
+def test_pipeline_entry_contract_is_read_from_the_registry_source():
     from debug_hub.health import pipeline_entry_contract
     c = pipeline_entry_contract()
     assert c["entry_module"] == "verdict" and c["entry_func"] == "run"
-    assert c["registry_refers_to_fetch_module"] is False            # nothing in the registry calls a pipeline's fetch.py
+    assert c["registry_refers_to_fetch_module"] is False
     assert "fetch.py" in c["meaning"]
+    assert c["registry_docstring_says_bundle_only"] is True
 
 
-def test_reference_data_is_a_pipeline_own_fetch_not_a_bundle_gap():
-    from debug_hub.health import needs_matrix
-    from debug_hub.health import REPO
-    n = needs_matrix(REPO / "data")
-    cells = [c for r in n["rows"] for c in r["cells"].values() if c.get("role") == "fetch"]
-    r_cells = [c for r in n["rows"] for k, c in r["cells"].items() if k.startswith("R")]
-    assert r_cells and all("no field" not in c["why"] and c["state"] in ("ok", "missing") for c in r_cells)
-    assert all("own_fetch" in c["why"] for c in r_cells)
-    assert cells
+def test_pipeline_entry_contract_detects_a_fetch_reference(tmp_path):
+    from debug_hub.health import pipeline_entry_contract
+    f = tmp_path / "registry.py"
+    f.write_text('"""A pipeline sees ONLY the bundle."""\nENTRY_MODULE = "verdict"\nENTRY_FUNC = "run"\nMODS = ("fetch", "verdict")\n')
+    c = pipeline_entry_contract(f)
+    assert c["registry_refers_to_fetch_module"] is True and c["entry_module"] == "verdict"
+    f.write_text("x = 1\n")
+    c = pipeline_entry_contract(f)
+    assert c["entry_module"] is None and c["entry_func"] is None and c["registry_refers_to_fetch_module"] is False
+
+
+def test_every_s_channel_is_named_in_ancillary_py():
+    from debug_hub.health import S_CHANNEL, s_channel_check
+    rows = s_channel_check()
+    assert {r["code"] for r in rows} == set(S_CHANNEL)
+    assert all(r["found_in_ancillary_py"] is True for r in rows), [r for r in rows if not r["found_in_ancillary_py"]]
+
+
+def test_unknown_channel_is_reported_missing_in_the_needs_matrix(monkeypatch, tmp_path):
+    from debug_hub import health
+    monkeypatch.setitem(health.S_CHANNEL, "S3", "no_such_channel_xyz")
+    rows = {r["code"]: r for r in health.s_channel_check()}
+    assert rows["S3"]["found_in_ancillary_py"] is False
+    n = health.needs_matrix(tmp_path)
+    s3 = [c["S3"] for r in n["rows"] for c in [r["cells"]] if "S3" in c]
+    assert s3 and all(c["state"] == "missing" and "'no_such_channel_xyz' is not named anywhere in engine/common/ancillary.py" in c["why"] for c in s3)

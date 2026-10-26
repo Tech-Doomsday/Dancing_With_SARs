@@ -25,7 +25,7 @@ def _anc_available(b, channel: str) -> bool:
     return bool(d is not None and d.available)
 
 
-def _input_state(b, code: str, prod: dict) -> dict:
+def _input_state(b, code: str, prod: dict, role: str = "uses") -> dict:
     name = {**MEASUREMENT_NAMES, **S_NAMES}.get(code, "")
     if code in _BUNDLE_CAPS:
         ok = _BUNDLE_CAPS[code] in b.capabilities
@@ -37,14 +37,16 @@ def _input_state(b, code: str, prod: dict) -> dict:
     if code.startswith("S"):
         ch = S_CHANNEL.get(code)
         if ch is None:
-            return {"code": code, "name": name, "state": "no_channel", "why": f"the bundle has no field that can carry {code}"}
+            return {"code": code, "name": name, "state": "no_producer" if role == "fetch" else "no_channel",
+                    "why": f"no source or downloader for {code} exists in the repo" if role == "fetch" else f"the bundle has no field that can carry {code}"}
         ok = _anc_available(b, ch)
         return {"code": code, "name": name, "state": "present" if ok else "absent",
                 "why": f"ancillary '{ch}' " + ("available" if ok else "not available (nothing in data/ancillary)")}
     if code.startswith("R"):
         p = prod.get(code, {})
-        return {"code": code, "name": name, "state": "present" if p.get("produced") else "no_producer",
-                "why": f"the pipeline fetches this itself (own_fetch): {p.get('how', 'no adapter')}"}
+        ok = bool(p.get("produced"))
+        return {"code": code, "name": name, "state": "present" if ok else "no_producer",
+                "why": f"{p.get('how', 'no adapter')}; the pipeline pulls this itself (fetch.py)"}
     return {"code": code, "name": name, "state": "absent", "why": "unknown code"}
 
 
@@ -59,9 +61,10 @@ def pipeline_feed(bundle, registry=None) -> dict:
         d = bundle.routing.decisions.get(m.name) if bundle.routing else None
         r = results.get(m.name)
         uses = [_input_state(bundle, c, prod) for c in m.uses_codes]
-        own = [_input_state(bundle, c, prod) for c in m.fetch_codes]
+        own = [_input_state(bundle, c, prod, "fetch") for c in m.fetch_codes]
         vstate = module_state(m.path.parent / "verdict.py")
         missing = [u["code"] for u in uses if u["state"] != "present"]
+        own_missing = [u["code"] for u in own if u["state"] != "present"]
         if m.name in launch:
             feed = "LAUNCHES_WITH_GAPS" if missing else "READY"
         elif r is not None:
@@ -73,7 +76,7 @@ def pipeline_feed(bundle, registry=None) -> dict:
             "routing": plain(d) if d is not None else None,
             "registry_status": r.status if r is not None else "WOULD_LAUNCH",
             "reasons": [e.get("reason") for e in (r.evidence if r is not None else []) if isinstance(e, dict)],
-            "feed": feed, "uses": uses, "own_fetch": own, "missing_uses": missing,
+            "feed": feed, "uses": uses, "own_fetch": own, "missing_uses": missing, "own_missing": own_missing,
             "implemented": bool(vstate.get("has_run")), "verdict_state": vstate["state"],
             "gate": r.detail.get("min_epochs") if r is not None and isinstance(r.detail, dict) else None,
         })

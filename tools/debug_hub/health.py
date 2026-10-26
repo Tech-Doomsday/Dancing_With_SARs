@@ -26,12 +26,12 @@ from .util import short_exc
 REPO = Path(__file__).resolve().parents[2]
 ENGINE = REPO / "engine"
 
-# measurement codes: what each one is, and whether the retrieval layer can produce it. The "producer" column is
-# NOT hard-coded: it is looked up in the code (see `producers()`).
+# HAND-WRITTEN human-readable labels (names only). Whether a code is produced is NOT hard-coded: see `producers()`.
 MEASUREMENT_NAMES = {"M1": "GUNW unwrapped interferograms", "M2": "GCOV backscatter", "M3": "pixel offsets (GUNW/GOFF)",
                      "M4": "soil moisture", "M5": "GSLC", "M6": "Sentinel-1", "M7": "OPERA cross-check products",
                      "P07": "correction audit (tropo / iono / tide layers)"}
-# S-code -> the bundle channel that can carry it (engine/common/ancillary.py docstring); None = no channel exists
+# HAND-WRITTEN mapping S-code -> the bundle channel that can carry it (from the engine/common/ancillary.py docstring); a code
+# absent here = no channel. Verified against ancillary.py at run time by `s_channel_check()`.
 S_CHANNEL = {"S3": "water_occurrence", "S4": "tree_cover", "S8": "glacier", "S9": "builtup", "S10": "shoreline_distance_m",
              "S11": "river_buffer", "S12": "permafrost", "S7": "fact:volcano_distance_km"}
 S_NAMES = {"S1": "cross-check layer", "S3": "JRC water occurrence", "S4": "tree cover / loss year", "S5": "fault prior",
@@ -200,27 +200,43 @@ def import_test() -> list:
 
 
 # ------------------------------------------------------------------------------------------------ independence
-ADAPTERS_PKG = ".".join((ENGINE / "retrieval" / "clients" / "adapters").relative_to(REPO).parts)   # engine.retrieval.clients.adapters
-INDEPENDENCE_RULE = (
-    "A pipeline may import its own package, engine.lib, and the bundle types/contract from engine.common. "
-    "It may NOT import another pipeline or the preprocessing chain (P01..P13). From the retrieval layer it may import ONLY the "
-    f"reference adapters ({ADAPTERS_PKG}.*), because manifests declare its own_fetch (R*/S* context such as ComCat) and measurements "
-    "must come from the bundle, never from NisarClient. The adapter allowance is derived from the manifests' own_fetch and your "
-    "decision that a pipeline retrieves its own context data; the registry docstring ('a pipeline sees ONLY the bundle') says otherwise.")
+ALLOWED_COMMON = {"scene_bundle", "contract", "frozen", "bundle_io", "layers", "ancillary", "config"}   # = tests/test_pipeline_independence.py
+FORBIDDEN_COMMON_NAMES = {"build_scene_bundle", "run_steps", "assemble", "STEPS"}
 
 
-def _rel(f: Path) -> str:
-    try:
-        return str(f.relative_to(REPO))
-    except ValueError:                                    # a scratch directory outside the repo (tests)
-        return str(f)
+def _imports(path: Path, package: str):
+    """Yield (absolute dotted module, imported names) for every import statement in `path`, resolving relative imports.
+    Same algorithm as `_imports` in tests/test_pipeline_independence.py (re-implemented: the hub must not import from tests/).
+    `package` = dotted package of the file (parts of its path without the file name)."""
+    tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Import):
+            for a in node.names:
+                yield a.name, ()
+        elif isinstance(node, ast.ImportFrom):
+            if node.level:
+                base = package.split(".")
+                base = base[: len(base) - (node.level - 1)]
+                mod = ".".join(base + ([node.module] if node.module else []))
+            else:
+                mod = node.module or ""
+            yield mod, tuple(a.name for a in node.names)
+
+
+def _package_of(f: Path, pipeline_dir: Path) -> str:
+    """Dotted package of a pipeline file, derived as engine.pipelines.<folder>[.<subfolders>] from the folder name,
+    so it is the same for the real repo and for a scratch directory (tests pass tmp_path)."""
+    return ".".join(["engine", "pipelines", pipeline_dir.name, *f.relative_to(pipeline_dir).parts[:-1]])
 
 
 def independence(pipelines_dir: Path | None = None) -> dict:
-    """Static: does any pipeline import another pipeline, the preprocessing chain, or retrieval beyond the reference adapters?"""
-    pdir = Path(pipelines_dir) if pipelines_dir else ENGINE / "pipelines"
+    """The static import rules of tests/test_pipeline_independence.py (relative imports resolved): a pipeline may not import
+    another pipeline, nor the P01-P13 chain (engine.common modules outside ALLOWED_COMMON, nor build_scene_bundle etc.).
+    NOT mirrored here: that test's dynamic import_module() scan and its rule limiting engine.retrieval imports to
+    engine.retrieval.clients.adapters (added to the test after the rule this hub was written against)."""
+    pdir = pipelines_dir or ENGINE / "pipelines"
     names = {d.name for d in pdir.iterdir() if d.is_dir() and not d.name.startswith((".", "__"))}
-    bad, scanned, adapter_uses = [], 0, {}
+    bad, scanned = [], 0
     for d in sorted(pdir.iterdir()):
         if not d.is_dir() or d.name.startswith((".", "__")):
             continue
@@ -228,55 +244,61 @@ def independence(pipelines_dir: Path | None = None) -> dict:
             if "__pycache__" in f.parts:
                 continue
             scanned += 1
+            rel = str(f.relative_to(REPO)) if REPO in f.parents else f"{d.name}/{f.relative_to(d)}"
             try:
-                tree = ast.parse(f.read_text(encoding="utf-8"))
+                imports = list(_imports(f, _package_of(f, d)))
             except SyntaxError as ex:
-                bad.append({"file": _rel(f), "problem": f"syntax error line {ex.lineno}"})
+                bad.append({"file": rel, "problem": f"syntax error line {ex.lineno}"})
                 continue
-            for n in ast.walk(tree):
-                targets = []
-                if isinstance(n, ast.Import):
-                    targets = [a.name for a in n.names]
-                elif isinstance(n, ast.ImportFrom):
-                    base = n.module or ""
-                    if n.level:
-                        pkg = ".".join(["engine", "pipelines", d.name][: 3 - max(0, n.level - 1) if n.level > 1 else 3])
-                        base = f"{pkg}.{base}" if base else pkg
-                    targets = [base] + [f"{base}.{a.name}" for a in n.names]
-                for t in targets:
-                    parts = t.split(".")
-                    if parts[:2] == ["engine", "pipelines"] and len(parts) > 2 and parts[2] in names and parts[2] != d.name:
-                        bad.append({"file": _rel(f), "problem": f"imports another pipeline ({parts[2]})"})
-                    elif parts[:2] == ["engine", "retrieval"]:
-                        if t == ADAPTERS_PKG or t.startswith(ADAPTERS_PKG + "."):
-                            adapter_uses[(_rel(f), t)] = True
-                        elif t not in ("engine.retrieval", "engine.retrieval.clients"):      # a bare package prefix of an adapter import
-                            bad.append({"file": _rel(f), "problem": f"imports {t}: only reference adapters may be imported from the retrieval layer"})
-                    elif parts[:2] == ["engine", "common"] and len(parts) > 2 and re.match(r"(chain|p\d\d_|context|runner|state)", parts[2]):
-                        bad.append({"file": _rel(f), "problem": f"imports the preprocessing chain ({parts[2]})"})
-    return {"scanned_files": scanned, "pipelines": len(names), "violations": bad, "rule": INDEPENDENCE_RULE,
-            "reference_adapter_imports": [{"file": f, "module": m} for f, m in sorted(adapter_uses)]}
+            in_tests = "tests" in f.relative_to(d).parts
+            for mod, imported in imports:
+                parts = mod.split(".")
+                if parts[:2] == ["engine", "pipelines"]:
+                    other = parts[2] if len(parts) > 2 else None
+                    if other is None:
+                        if [x for x in imported if x != d.name] or not imported:
+                            bad.append({"file": rel, "problem": f"imports engine.pipelines {imported}"})
+                    elif other != d.name:
+                        bad.append({"file": rel, "problem": f"imports another pipeline ({other})"})
+                elif mod == "engine.common" and not in_tests and FORBIDDEN_COMMON_NAMES & set(imported):
+                    bad.append({"file": rel, "problem": f"imports {sorted(FORBIDDEN_COMMON_NAMES & set(imported))} from engine.common"})
+                elif parts[:2] == ["engine", "common"] and len(parts) > 2 and not in_tests and parts[2] not in ALLOWED_COMMON:
+                    bad.append({"file": rel, "problem": f"imports engine.common.{parts[2]} (the chain is not a pipeline dependency)"})
+    return {"scanned_files": scanned, "pipelines": len(names), "violations": bad}
 
 
-def pipeline_entry_contract() -> dict:
-    """What the registry really calls in a pipeline, read from engine/registry.py (AST), not asserted."""
-    src = (ENGINE / "registry.py").read_text(encoding="utf-8")
-    tree = ast.parse(src)
+def pipeline_entry_contract(registry_path: Path | None = None) -> dict:
+    """What engine/registry.py really calls in a pipeline, read with ast (the module is never imported here)."""
+    path = registry_path or ENGINE / "registry.py"
+    rel = str(path.relative_to(REPO)).replace(os.sep, "/") if REPO in path.parents else path.name
+    try:
+        tree = ast.parse(path.read_text(encoding="utf-8"))
+    except (OSError, SyntaxError) as ex:
+        return {"source": rel, "error": short_exc(ex), "entry_module": None, "entry_func": None,
+                "registry_refers_to_fetch_module": None, "registry_docstring_says_bundle_only": None,
+                "meaning": f"could not read {rel}: {short_exc(ex)}"}
     consts = {}
-    for n in ast.walk(tree):
-        if isinstance(n, ast.Assign) and len(n.targets) == 1 and isinstance(n.targets[0], ast.Name) \
-                and n.targets[0].id in ("ENTRY_MODULE", "ENTRY_FUNC") and isinstance(n.value, ast.Constant):
-            consts[n.targets[0].id] = n.value.value
-    names = {n.value for n in ast.walk(tree) if isinstance(n, ast.Constant) and isinstance(n.value, str)}
-    names |= {n.attr for n in ast.walk(tree) if isinstance(n, ast.Attribute)} | {n.id for n in ast.walk(tree) if isinstance(n, ast.Name)}
+    for n in tree.body:                                              # module-level NAME = "literal"
+        targets, value = (n.targets, n.value) if isinstance(n, ast.Assign) else ([n.target], n.value) if isinstance(n, ast.AnnAssign) else ([], None)
+        if isinstance(value, ast.Constant) and isinstance(value.value, str):
+            for t in targets:
+                if isinstance(t, ast.Name):
+                    consts[t.id] = value.value
+    mod, func = consts.get("ENTRY_MODULE"), consts.get("ENTRY_FUNC")
+    fetch = any((isinstance(n, ast.Constant) and n.value == "fetch") or (isinstance(n, ast.Attribute) and n.attr == "fetch")
+                or (isinstance(n, ast.Name) and n.id == "fetch") for n in ast.walk(tree))
     doc = ast.get_docstring(tree) or ""
-    return {"entry_module": consts.get("ENTRY_MODULE"), "entry_func": consts.get("ENTRY_FUNC"),
-            "registry_refers_to_fetch_module": "fetch" in names,
-            "registry_docstring_says_bundle_only": "sees ONLY the bundle" in doc,
-            "meaning": (f"the registry imports engine.pipelines.<name>.{consts.get('ENTRY_MODULE')} and calls {consts.get('ENTRY_FUNC')}(bundle); "
-                        + ("it also refers to a 'fetch' module." if "fetch" in names else
-                           "nothing in the registry imports or calls a pipeline's fetch.py, so a pipeline's own_fetch can only happen "
-                           "inside run(bundle) (or something it imports)."))}
+    bundle_only = "sees ONLY the bundle" in doc
+    if mod and func:
+        meaning = (f"The registry imports engine.pipelines.<name>.{mod} and calls {func}(bundle). "
+                   + ("It also refers to a 'fetch' module, so check how." if fetch else
+                      "It never refers to fetch.py, so a pipeline's own fetch.py is not called by the registry")
+                   + ("; its docstring says a pipeline sees only the bundle (no retriever), which contradicts the own_fetch design."
+                      if bundle_only and not fetch else "."))
+    else:
+        meaning = "ENTRY_MODULE / ENTRY_FUNC were not found as module-level string assignments in the registry; fetch.py handling not determined."
+    return {"source": rel, "entry_module": mod, "entry_func": func, "registry_refers_to_fetch_module": fetch,
+            "registry_docstring_says_bundle_only": bundle_only, "meaning": meaning}
 
 
 # ------------------------------------------------------------------------------------------------ producers & needs
@@ -321,21 +343,30 @@ def ancillary_files(data_dir: Path) -> dict:
     return out
 
 
-def s_channel_check() -> dict:
-    """Is each S_CHANNEL entry really a name used by engine/common/ancillary.py? (textual presence, not a hand-kept claim)"""
+def s_channel_check(ancillary_py: Path | None = None) -> list:
+    """For each hand-written S_CHANNEL entry: is the channel name (without any `fact:` prefix) a whole word in
+    engine/common/ancillary.py? This verifies the mapping against the code at run time."""
+    path = ancillary_py or ENGINE / "common" / "ancillary.py"
     try:
-        src = (ENGINE / "common" / "ancillary.py").read_text(encoding="utf-8")
-    except OSError:
-        src = ""
-    return {c: {"channel": ch, "found_in_ancillary_py": bool(re.search(r"\b" + re.escape(ch.split(":", 1)[-1]) + r"\b", src))}
-            for c, ch in S_CHANNEL.items()}
+        src = path.read_text(encoding="utf-8")
+        err = None
+    except OSError as ex:
+        src, err = "", short_exc(ex)
+    out = []
+    for code, ch in sorted(S_CHANNEL.items(), key=lambda kv: int(kv[0][1:])):
+        name = ch.removeprefix("fact:")
+        found = bool(re.search(r"\b" + re.escape(name) + r"\b", src))
+        out.append({"code": code, "channel": ch, "name": name, "found_in_ancillary_py": found,
+                    **({"error": err} if err else {})})
+    return out
 
 
 def needs_matrix(data_dir: Path) -> dict:
     """pipeline x code: where would each declared input come from, and does that source exist?"""
     from engine.registry import scan_pipelines
     mans, _ = scan_pipelines(ENGINE / "pipelines")
-    prod, anc, schk = producers(), ancillary_files(data_dir), s_channel_check()
+    prod, anc = producers(), ancillary_files(data_dir)
+    chan_ok = {r["code"]: r["found_in_ancillary_py"] for r in s_channel_check()}
     cols: list = []
     rows = []
 
@@ -346,15 +377,14 @@ def needs_matrix(data_dir: Path) -> dict:
         if code.startswith("S"):
             ch = S_CHANNEL.get(code)
             if ch is None:
-                return {"state": "missing", "why": f"no channel in the bundle for {code} ({S_NAMES.get(code, '?')})"}
-            if not schk[code]["found_in_ancillary_py"]:
-                return {"state": "missing", "why": f"channel '{ch}' is not named anywhere in engine/common/ancillary.py"}
+                return {"state": "missing", "why": f"no source or downloader for {code} ({S_NAMES.get(code, '?')}) exists in the repo" if role == "fetch" else f"no channel in the bundle for {code} ({S_NAMES.get(code, '?')})"}
+            if not chan_ok.get(code, False):
+                return {"state": "missing", "why": f"channel '{ch.removeprefix('fact:')}' is not named anywhere in engine/common/ancillary.py"}
             have = anc.get(ch, {}).get("files", 0) if not ch.startswith("fact:") else int(anc["_facts.json"]["files"] or anc["_S7_volcanoes.geojson"]["files"])
             return {"state": "ok" if have else "empty", "why": f"bundle channel '{ch}' exists; {have} file(s) in data/ancillary, and nothing in the repo downloads them" if not have else f"{have} file(s) in data/ancillary/{ch}"}
         if code.startswith("R"):
             p = prod.get(code, {"produced": False, "how": "no adapter file"})
-            who = "fetched by the pipeline itself (own_fetch)" if role == "fetch" else "declared in uses_codes"
-            return {"state": "ok" if p["produced"] else "missing", "why": f"{who}: {p['how']}"}
+            return {"state": "ok" if p["produced"] else "missing", "why": p["how"] + "; pulled by the pipeline's own fetch.py"}
         return {"state": "missing", "why": "unknown code"}
 
     for m in mans:
@@ -460,6 +490,5 @@ def run_tests(timeout: int = 600) -> dict:
 
 def health_snapshot(settings) -> dict:
     return {"environment": environment(settings), "dependencies": dependencies(), "code": code_readiness(),
-            "pipelines": pipeline_code_state(), "imports": import_test(), "independence": independence(),
-            "needs": needs_matrix(Path(settings.data_dir)), "contract": pipeline_entry_contract(),
-            "s_channel_check": s_channel_check(), "generated": time.time()}
+            "pipelines": pipeline_code_state(), "imports": import_test(), "independence": independence(), "contract": pipeline_entry_contract(), "s_channel_check": s_channel_check(),
+            "needs": needs_matrix(Path(settings.data_dir)), "generated": time.time()}

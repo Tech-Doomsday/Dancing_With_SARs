@@ -22,7 +22,9 @@ Type a latitude / longitude (or paste `34.05, -118.25` into either box). The til
   `tests/test_debug_hub.py` asserts a hub run and a plain `build_scene_bundle` give the same bundle id.
 * **No mocks in live mode.** Missing dependency, no credentials, ASF down: the page shows the engine's own error text.
 * The only synthetic source is `--allow-selftest`; it is off by default and stamps a red banner on every screen.
-* Every number in HEALTH comes from AST parsing, `importlib`, `os.stat` or a real socket, not from a hand-kept list.
+* In HEALTH, counts and states are measured (AST parsing, `importlib`, `os.stat`, a real socket). `MEASUREMENT_NAMES` and `S_NAMES` in `health.py` are
+  human-readable labels written by hand. `S_CHANNEL` is a hand-written S-code -> bundle-channel mapping that is verified at run time against
+  `engine/common/ancillary.py` (`s_channel_check`); a channel not named there is shown as missing.
 * Per-granule byte progress is not exposed by `NisarClient` (one blocking call per product), so progress is per call,
   from the client's own counters. Exposing a progress callback in the client would give per-granule bars.
 
