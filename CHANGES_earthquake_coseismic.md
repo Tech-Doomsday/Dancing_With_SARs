@@ -9,8 +9,6 @@ Copy this tree over the repo root (it only adds/overwrites the listed files), th
   and re-run together with the other fast pipeline tests (7 passed). The ~40 s optimizer tests were not
   re-run after that one-line assertion change (they do not depend on it).
 * Engine suites (independence, bundle contract, common truth/chain/foundation, debug hub): 186 passed.
-  `tests/test_worker_run.py` cannot be collected (needs a `devflock` module that is not in the repo) —
-  pre-existing, unrelated.
 * Okada vectorised-grid bug fixed (`_ub_vec` used an undefined `q2` on exactly-vertical faults);
   regression test covers dips 90, 90-1e-12, 89.999, 60, 5 for all three dislocation types.
 * Referencing: default `tileMedian` (robust median over all valid tile pixels; no reference-scatter

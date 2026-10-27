@@ -406,7 +406,7 @@ The board shows, for every tile: status, summary, evidence count, what data was 
 2. A test double is allowed only at the network edge (an adapter's `provider`), and what it replays is a recorded real response stored with its URL, retrieval time and sha256. Math, registry, bundle and API are never replaced in tests.
 3. Synthetic scenes are allowed because they carry analytic truth, and they are marked: `synthetic` in their provenance, and the result gets a `synthetic_input` warning, so one can never pass for real data. The repo already does this for the NISAR-layout fixture (granule id carries `SYNTHETIC-FIXTURE`); the same marker convention is reused.
 4. Real-data tests state what the real product lacks. The existing `EqSampleRetriever` already lists its own `limitations` (no ionosphere or troposphere screens, flat synthetic geometry cubes); tests that use it assert only what those limits allow.
-5. Existing mock servers in `tests/` (`mock_cloudflare_server`, `mock_llama_server`, `mock_openrouter_server`, and the ASF range-server stand-in in `synth.py`) serve the retrieval and gateway work. They are not used by pipeline, verdict or API tests.
+5. The ASF range-server stand-in in `tests/synth.py` serves the retrieval work. It is not used by pipeline, verdict or API tests.
 
 **Test layers, from smallest**
 

@@ -74,7 +74,7 @@ the port design, see [`docs/PORT_DESIGN.md`](docs/PORT_DESIGN.md) decisions 7, 8
 target-architecture table): `engine/lib/{los,geo,detect}.py` shared libraries; the tsunami
 split into `engine/lib/tsunami/` + pipeline 3.17 (while 3.14 stays SAR-coastal, later); the
 registry's heavy lane + `PENDING` + `result.py` (independence allow-list widened accordingly);
-the 20 legacy devflock tests quarantined into `attic/`.
+the 20 stray tests and mock servers from an unrelated project removed from `tests/`.
 
 See `docs/IMPLEMENTATION_PLAN.md` (engineering spec), `docs/PORT_DESIGN.md` (the design review
 the code cites), `docs/common_vs_eq_comparison.md` (engine vs app conventions) and
