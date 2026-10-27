@@ -16,12 +16,14 @@ import numpy as np
 from engine.lib.okada import (
     GeoFault,
     geo_fault_displacement_enu,
+    geo_fault_displacement_enu_top_edge,
     moment_from_mw,
     rupture_area_from_mw,
     slip_from_moment,
 )
+from engine.lib.los import los_project
 
-from .lib_local import haversine_km, pearson, project_epicentre, project_los_enu
+from .lib_local import haversine_km, mad_sigma, pearson, project_epicentre, project_los_enu
 from .types import (
     AMPLITUDE_RATIO_FACTOR,
     PATTERN_CORRELATION_MIN,
@@ -160,8 +162,8 @@ FM_SKIP_NOTE = (
 def _reference_prediction(pred: np.ndarray, analysis, sub_i=None, sub_j=None) -> np.ndarray:
     """Reference the prediction with the MEASUREMENT's rule.
 
-    The measured field was referenced in prep (median over the
-    reference region removed — the whole valid tile by default); the raw Okada field carries the elastic
+    The measured field was far-field-referenced in prep (median over the
+    reference region removed); the raw Okada field carries the elastic
     model's arbitrary absolute level. Comparing the two unreferenced makes
     the screen measure the model's datum, not the signal (this asymmetry
     exists in the TS original; the port fixes it by referencing BOTH fields
@@ -285,72 +287,121 @@ def best_screen(screens: list) -> dict | None:
 
 
 # --------------------------------------------------------------------------- #
-# status decision + raw_p (docs/IMPLEMENTATION_PLAN.md 8.4; raw_p per "Porting earthquake and tsunami
-# detection into the Python engine" decision 4: an uncalibrated RANK score, never a probability)
+# uncatalogued branch (docs/IMPLEMENTATION_PLAN.md 8.6) — implemented in
+# uncatalogued.py (strike scan + least-squares refinement, analytic slip with a
+# stress-drop cap, location bounded around the anomaly centroid). model.py keeps
+# only the score mapping and the decision table.
+# --------------------------------------------------------------------------- #
+def uncatalogued_score(fit: dict) -> float | None:
+    """Within-tier score from the fit's residual-based equivalent.
+
+    uncatalogued.py reports `quality = 1 - residual RMS / field RMS`; hand-built
+    legacy dicts (tests) fall back to 1 - residual_rms_m / field_peak_m.
+    """
+    if not fit or not fit.get("converged"):
+        return None
+    q = fit.get("quality")
+    if q is not None:
+        return clamp01(float(q))
+    rms = fit.get("residual_rms_m")
+    peak = fit.get("field_peak_m")
+    if not rms or not peak or peak <= 0:
+        return None
+    return clamp01(1.0 - rms / peak)
+
+
+# --------------------------------------------------------------------------- #
+# status decision + within-tier score (docs/IMPLEMENTATION_PLAN.md 8.4-8.5)
 # --------------------------------------------------------------------------- #
 def clamp01(v: float) -> float:
     return max(0.0, min(1.0, v))
 
 
-def rank_score(correlation: float | None) -> float | None:
-    """raw_p: Pearson r of the better nodal plane on the identically-referenced fields, clipped to [0, 1].
-
-    A MEASURED quantity used only to order results inside a status tier. It is not a probability and
-    the UI must never show it as a percentage. None when no model was fitted/screened.
-    """
-    if correlation is None or not math.isfinite(correlation):
-        return None
-    return clamp01(float(correlation))
+def within_tier_score(ratio: float, corr: float, affected_km2: float, credible_km2: float,
+                      null_fraction_mean: float) -> float:
+    """raw_p: a within-tier score in [0,1] — NOT a calibrated probability."""
+    if ratio and math.isfinite(ratio) and ratio > 0:
+        s_amp = clamp01(min(ratio, 1.0 / ratio))
+    else:
+        s_amp = 0.0
+    s_corr = clamp01((corr - PATTERN_CORRELATION_MIN) / (1.0 - PATTERN_CORRELATION_MIN))
+    s_area = clamp01((affected_km2 - credible_km2) / (10.0 * max(credible_km2, 1e-9)))
+    s_null = 1.0 - clamp01((null_fraction_mean if math.isfinite(null_fraction_mean) else 0.0) / 0.05)
+    return 0.40 * s_amp + 0.25 * s_corr + 0.20 * s_area + 0.15 * s_null
 
 
 def decide(summary, screens: list, events_known: bool, params: EqParams,
-           catalog_events: int = 0, fit: dict | None = None) -> tuple[str, float | None, str, dict]:
+           uncatalogued: dict | None = None, n_events_in_window: int = 0) -> tuple[str, float | None, str, dict]:
     """-> (status, raw_p, decision_rule, extra evidence fields).
 
-    `catalog_events` = events that survived ranking (in window, within range). `fit` is the
-    uncatalogued-branch result (uncatalogued.fit_uncatalogued) when it was attempted.
+    Decision table (docs/IMPLEMENTATION_PLAN.md 8.4, with the final-prompt fixes):
+
+    * No detection AND genuinely no catalog event in the window -> `NO_SIGNAL`
+      ("nothing happened here" — a distinct quiet outcome, not a tested-and-rejected quake;
+      the docx adds NO_SIGNAL to this manifest's status_values for exactly that case).
+    * A catalogued event IS in the window but none can be modelled (no published nodal
+      planes, or unusable magnitude/depth) -> `INSUFFICIENT_EVIDENCE` (rule
+      `events_unscreenable`). This is a data gap, never evidence about the hypothesis —
+      and it is NOT "uncatalogued": the catalog event exists.
+    * Genuinely no catalog event in the window + credible detection + fit converged
+      -> `UNCATALOGUED_CANDIDATE` (raw_p = the fit's residual-based quality).
+    * Genuinely no catalog event + fit not converged (or no fit at all) -> `NOT_SUPPORTED`
+      (plan 8.4 row 4 — an unconverged fit must not read as a candidate).
     """
 
     affected = summary.affected_area_km2
     credible = max(1.0, summary.pixel_area_km2 * params.credible_pixel_factor)
+    null_frac = summary.null_screen.get("detected_fraction_mean", math.nan)
     best = best_screen(screens)
-    base = {"credible_area_km2": credible, "best_event_id": best["event_id"] if best else None}
 
     if summary.detected_pixels == 0:
-        if events_known and catalog_events == 0:
-            # nothing happened here: no qualifying event and no coherent cluster. Not "a quake was
-            # tested and rejected" — a distinct, quiet outcome.
-            return "NO_SIGNAL", None, "no_event_no_cluster", base
-        return "NOT_SUPPORTED", rank_score(best["pattern_correlation"]) if best else None, "no_detection", base
+        if events_known and n_events_in_window == 0 and best is None:
+            # genuinely quiet: no qualifying event (no screens could exist) and no cluster
+            return "NO_SIGNAL", None, "no_event_no_cluster", {
+                "credible_area_km2": credible, "best_event_id": None}
+        score = within_tier_score(0.0, 0.0, affected, credible, null_frac)
+        return "NOT_SUPPORTED", score, "no_detection", {
+            "credible_area_km2": credible, "best_event_id": best["event_id"] if best else None}
 
     if not events_known:
         return "INSUFFICIENT_EVIDENCE", None, "events_unknown", {
             "credible_area_km2": credible, "best_event_id": None}
 
     if best is None:
-        base = {"credible_area_km2": credible, "best_event_id": None}
-        if catalog_events > 0:
-            # an event qualifies (window, range) but none can be modelled (no magnitude / mechanism /
-            # depth, or the projection is unsupported): the coseismic link stays unevaluated.
-            return "NOT_MODELLED", None, "event_not_modellable", base
-
-        # genuinely no catalog event in window/range
-        if affected < credible:
-            return "NOT_SUPPORTED", None, "sub_credible_no_catalog_event", base
-        if fit is not None and fit.get("converged"):
-            return "UNCATALOGUED_CANDIDATE", rank_score(fit.get("pattern_correlation")), \
-                "uncatalogued_fit_converged", base
-        return "NOT_SUPPORTED", None, "uncatalogued_fit_not_converged", base
+        # No usable forward screen. Distinguish the two cases the old code conflated:
+        if n_events_in_window > 0:
+            # Catalog events rank in-window but every screen was skipped (no nodal
+            # planes / no magnitude / no depth). The coseismic hypothesis cannot be
+            # evaluated quantitatively — report the data gap honestly.
+            return "INSUFFICIENT_EVIDENCE", None, "events_unscreenable", {
+                "credible_area_km2": credible, "best_event_id": None,
+                "n_events_in_window": n_events_in_window}
+        # Genuinely no catalog event in the acquisition window.
+        if affected >= credible:
+            fit_ok = bool(uncatalogued and uncatalogued.get("converged"))
+            if fit_ok:
+                return "UNCATALOGUED_CANDIDATE", uncatalogued_score(uncatalogued), "uncatalogued_fit_converged", {
+                    "credible_area_km2": credible, "best_event_id": None}
+            # Unconverged (or not-run) fit -> NOT_SUPPORTED per plan 8.4 row 4;
+            # the attempted fit (if any) stays in detail.uncatalogued for review.
+            rule = "uncatalogued_fit_not_converged" if uncatalogued else "no_catalog_event_fit_not_run"
+            return "NOT_SUPPORTED", within_tier_score(0.0, 0.0, affected, credible, null_frac), rule, {
+                "credible_area_km2": credible, "best_event_id": None}
+        return "NOT_SUPPORTED", within_tier_score(0.0, 0.0, affected, credible, null_frac), \
+            "sub_credible_no_catalog_event", {"credible_area_km2": credible, "best_event_id": None}
 
     ratio, corr = best["amplitude_ratio"], best["pattern_correlation"]
     amp_ok = (1.0 / AMPLITUDE_RATIO_FACTOR) < ratio < AMPLITUDE_RATIO_FACTOR
     corr_ok = corr > PATTERN_CORRELATION_MIN
-    score = rank_score(corr)
+    score = within_tier_score(ratio, corr, affected, credible, null_frac)
     if amp_ok and corr_ok:
-        return "SUPPORTED", score, "screen_pass", base
+        return "SUPPORTED", score, "screen_pass", {"credible_area_km2": credible,
+                                                   "best_event_id": best["event_id"]}
     failed = []
     if not amp_ok:
         failed.append(f"amplitude ratio {ratio:.2f} outside (1/{AMPLITUDE_RATIO_FACTOR:.0f}, {AMPLITUDE_RATIO_FACTOR:.0f})")
     if not corr_ok:
         failed.append(f"pattern correlation {corr:.2f} <= {PATTERN_CORRELATION_MIN}")
-    return "NOT_SUPPORTED", score, "screen_fail", {**base, "failed_criteria": failed}
+    return "NOT_SUPPORTED", score, "screen_fail", {
+        "credible_area_km2": credible, "best_event_id": best["event_id"],
+        "failed_criteria": failed}

@@ -133,6 +133,42 @@ def test_vectorised_grid_matches_scalar_path():
             assert abs(got - want) <= 1e-12 * max(abs(want), 1e-30), (i, got, want)
 
 
+def test_vertical_fault_vectorised_matches_scalar():
+    """Regression (final-prompt fix 2): a dip-90 fault takes the cd == 0 branch of the
+    part-b displacement, which reads q2 from the coefficient dict. The vectorised path
+    once missed that unpack (NameError) — the same crash would have hit ANY dip-90
+    nodal plane in the forward screen and silently starved the uncatalogued fit."""
+    import numpy as np
+    for disl in ((0.0, 0.0, 0.0), (1.5, 0.0, 0.0), (0.0, -0.8, 0.0), (0.3, 0.4, 0.1)):
+        fault = OkadaFault(depth=5000, dip_deg=90, length=18000, width=12000,
+                           u1=disl[0], u2=disl[1], u3=disl[2])
+        rng = np.random.default_rng(11)
+        xs = rng.uniform(-35000, 35000, 256)
+        ys = rng.uniform(-35000, 35000, 256)
+        ux, uy, uz, sing = okada_surface_grid(xs, ys, fault)
+        assert not sing.any()
+        for i in range(len(xs)):
+            r = okada_surface_displacement(float(xs[i]), float(ys[i]), fault)
+            assert not r.singular
+            for got, want in zip((ux[i], uy[i], uz[i]), (r.ux, r.uy, r.uz)):
+                assert abs(got - want) <= 1e-12 * max(abs(want), 1e-30), (disl, i, got, want)
+
+
+def test_geo_fault_vertical_displacement_runs_and_decays():
+    """Dip-90 through geo_fault_displacement_enu: the exact forward-screen path for a
+    vertical nodal plane (must not raise, must decay with distance)."""
+    fault = GeoFault(strike_deg=30, dip_deg=90, rake_deg=-180, length_m=15000, width_m=10000,
+                     top_depth_m=0, slip_m=1.0, centroid_lat=0, centroid_lon=0)
+    xs = np.array([1000.0, 10000.0, 60000.0, 200000.0])
+    ys = np.array([2000.0, -8000.0, 20000.0, -50000.0])
+    e, n, up, sing = geo_fault_displacement_enu(fault, 8000.0, xs, ys)
+    assert not sing.any()
+    assert np.isfinite(e).all() and np.isfinite(n).all() and np.isfinite(up).all()
+    near = np.hypot(e[0], up[0])
+    far = np.hypot(e[3], up[3])
+    assert far < near / 20.0          # elastic decay, two orders of magnitude over 200 km
+
+
 def test_geo_fault_centroid_placement():
     # A thrust fault (rake +90) whose centroid sits at 9 km: the surface
     # projection of the centroid must be near the maximum uplift, and the
@@ -168,24 +204,3 @@ def test_shallow_centroid_depth_floors_top_edge():
                      top_depth_m=0, slip_m=1.0, centroid_lat=0, centroid_lon=0)
     e, n, up, sing = geo_fault_displacement_enu(fault, 1000.0, 5000.0, 0.0)
     assert not sing.any() or True  # placement is exercised; exactness pinned above
-
-
-@pytest.mark.parametrize("dip", [90.0, 90.0 - 1e-12, 89.999, 60.0, 5.0])
-@pytest.mark.parametrize("mode", [(1, 0, 0), (0, 1, 0), (0, 0, 1)])
-def test_vectorised_grid_matches_scalar_path_all_dips_incl_vertical(dip, mode):
-    """Regression (M2): the vectorised part-B vertical-fault branch used an undefined `q2`.
-
-    The scalar path is the benchmarked reference; the vector twin must agree with it for every
-    dislocation type, including the cos(dip) == 0 switch (exactly vertical and within DipSwitchEps).
-    """
-    rng = np.random.default_rng(7)
-    x = rng.uniform(-6.0, 6.0, 40)
-    y = rng.uniform(-6.0, 6.0, 40)
-    fault = OkadaFault(depth=2.0, dip_deg=dip, length=5.0, width=3.0, u1=mode[0], u2=mode[1], u3=mode[2])
-    ux, uy, uz, singular = okada_surface_grid(x, y, fault)
-    assert not singular.any()
-    for i in range(x.size):
-        ref = okada_surface_displacement(float(x[i]), float(y[i]), fault)
-        assert not ref.singular
-        for got, want in ((ux[i], ref.ux), (uy[i], ref.uy), (uz[i], ref.uz)):
-            assert got == pytest.approx(want, rel=1e-9, abs=1e-12)

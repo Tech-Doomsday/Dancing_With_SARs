@@ -14,7 +14,7 @@ uses: "M1 (los_m +toward sensor, sigma_m CRLB, coherence, conn_comp, iono_floor_
 uses_codes: 
   - "M1"
 
-own_prep: "pair selection (event window spanning | newest pair), quality mask (finite LOS, coherence gate, conn_comp != 0), referencing: robust median over all valid tile pixels, the same operator applied to the model prediction (no far-field margin on a 10 km tile; reference scatter reported, never used for the threshold), cycle-jump suspect screen (|los| > 0.5*lambda, diagnostic only), optional planar detrend (off by default)"
+own_prep: "pair selection (event window spanning | newest pair), quality mask (finite LOS, coherence gate, conn_comp != 0), far-field referencing (12% margin median, degenerate-MAD std fallback), cycle-jump suspect screen (|los| > 0.5*lambda, diagnostic only), optional planar detrend (off by default)"
 
 own_fetch: "R1 (bbox+0.5 deg, M>=4, window ref-1d..sec+1d, within 400 km, nodal planes via focal-mechanism/moment-tensor) — implemented; R2 ShakeMap expected extent (evidence-only) — implemented; S5 fault prior — no bundle channel yet (deferred); R3 coseismic GNSS offsets — deferred (M6)"
 fetch_codes: 
@@ -24,14 +24,19 @@ fetch_codes:
   - "R3"
 
 method:
-  - "detection: per-pixel |disp| > max(k*sigma_eff, 10 mm, iono floor); sigma_eff = sigma_m (bundle CRLB); clusters = 4-neighbour components >= 4 px; exploratory null-scene screen (8 scenes, corrLen 8 px, seed 20261021)"
+  - "detection: per-pixel |disp| > max(k*sigma_eff, 10 mm, iono floor); sigma_eff = sqrt(sigma_m^2 + ref_sigma^2); clusters = 4-neighbour components >= 4 px; exploratory null-scene screen (8 scenes, corrLen 8 px, seed 20261021)"
   - "event ranking: strict window (ref, sec), <= 400 km of tile centre, magnitude desc / distance asc / mechanism presence, id tie-break"
-  - "Mw -> M0 (Hanks-Kanamori), area (Wells-Coppersmith, 2:1), uniform slip; DC3D LOS prediction on strided subgrid (<=400k points), epicentre-anchored; ALL published nodal planes evaluated, best kept"
+  - "Mw -> M0 (Hanks-Kanamori), area (Wells-Coppersmith, 2:1), uniform slip; DC3D LOS prediction on strided subgrid (<=400k points), epicentre-anchored; BOTH published nodal planes evaluated, best kept; the prediction is referenced with the MEASUREMENT's rule (same nuisance removal on both sides)"
   - "consistency screen: amplitude ratio within x3 and Pearson r > 0.25 (a consistency screen, never a causation claim)"
-  - "status decision table: docs/IMPLEMENTATION_PLAN.md 8.4; raw_p = Pearson r of the better nodal plane on identically-referenced fields, clipped to 0..1 — an uncalibrated RANK score for ordering inside a status tier, not a probability (None when no model was screened)"
-  - "UNCATALOGUED branch (M2): quadtree-subsampled bounded global fit of one rectangular source; v1 simplifications recorded in evidence"
+  - "status decision table + within-tier raw_p score: docs/IMPLEMENTATION_PLAN.md 8.4-8.5"
+  - "UNCATALOGUED branch: quadtree-subsampled bounded global fit of ONE rectangular source (dip fixed 90, strike from the anomaly principal axis, both rake signs); v1 simplifications recorded in the evidence"
 
-output: "raw_p (uncalibrated rank score, not P(coseismic)), event id, Mw, ratio, r, residual layer, status: SUPPORTED | NOT_SUPPORTED | INSUFFICIENT_EVIDENCE | NOT_MODELLED | UNCATALOGUED_CANDIDATE | NO_SIGNAL"
+output: "status (SUPPORTED | NOT_SUPPORTED | INSUFFICIENT_EVIDENCE | UNCATALOGUED_CANDIDATE), raw_p = uncalibrated within-tier RANK SCORE in [0,1] — NOT a probability, shown as a tier + evidence, never a percentage; event id, Mw, ratio, r, residual layer"
+
+# execution lane + deadline (registry contract, port design decisions 9 + Pipeline contract)
+execution: normal            # this pipeline runs in the spawn pool; the wave-solver lane is 'heavy'
+timeout_s: 600
+needs_sar: true              # the measurement IS the SAR interferogram
 
 min_epochs: null
 
@@ -41,4 +46,5 @@ status_values:
   - "INSUFFICIENT_EVIDENCE"
   - "NOT_MODELLED"
   - "UNCATALOGUED_CANDIDATE"
-  - "NO_SIGNAL"
+  - "NO_SIGNAL"   # no catalog event in the window AND no coherent cluster: a quiet outcome,
+                  # not a tested-and-rejected quake (port design: "one clean scene needs a name")

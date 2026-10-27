@@ -2,14 +2,16 @@
 
     python -m uvicorn engine.api.main:app --port 8900
 
-Serving slice for the unified UI (docs/IMPLEMENTATION_PLAN.md 10):
+Serving slice for the unified UI (docs/IMPLEMENTATION_PLAN.md 10 + the port design's API set):
     GET  /api/health                   presence-only health
-    GET  /api/pipelines                manifest catalogue + implemented flag
+    GET  /api/pipelines                manifest catalogue + implemented flag + lanes
     GET  /api/bundles[/{id}]           ingested SceneBundles (metadata only)
+    GET  /api/tiles[/{id}/verdicts]    canonical verdicts from verdicts.db (4.5)
     GET  /api/events                   live ComCat context (R1 adapter)
-    POST /api/runs                     start a single-flight run
+    POST /api/runs                     start a single-flight run (normal lane inline, heavy via jobs)
     GET  /api/runs[/{id}]              run state + PipelineResults
     GET  /api/runs/{id}/layers/{name}  evidence layer payload (b64 + bounds)
+    GET  /api/jobs/{id}                heavy-lane job state (progress + cache)
 """
 from __future__ import annotations
 
@@ -21,8 +23,10 @@ from engine.registry import Registry
 
 from .routes_bundles import router as bundles_router
 from .routes_events import router as events_router
+from .routes_jobs import router as jobs_router
 from .routes_pipelines import router as pipelines_router
 from .routes_runs import router as runs_router
+from .routes_tiles import router as tiles_router
 
 
 def create_app() -> FastAPI:
@@ -35,8 +39,10 @@ def create_app() -> FastAPI:
     )
     app.include_router(pipelines_router)
     app.include_router(bundles_router)
+    app.include_router(tiles_router)
     app.include_router(runs_router)
     app.include_router(events_router)
+    app.include_router(jobs_router)
 
     @app.get("/api/health")
     def health():

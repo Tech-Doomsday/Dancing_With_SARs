@@ -3,19 +3,22 @@
 import { useEffect, useState } from "react";
 import Link from "next/link";
 import { api } from "@/lib/api";
-import type { BundleListItem, RunSummary, Health } from "@/lib/types";
+import type { BundleListItem, RunSummary, Health, PipelineInfo } from "@/lib/types";
 import RunLauncher from "@/components/RunLauncher";
 import StatusBadge from "@/components/StatusBadge";
+import PipelineGrid from "@/components/PipelineGrid";
 
 export default function Home() {
   const [health, setHealth] = useState<Health | null>(null);
   const [bundles, setBundles] = useState<BundleListItem[]>([]);
   const [runs, setRuns] = useState<RunSummary[]>([]);
+  const [pipelines, setPipelines] = useState<PipelineInfo[] | null>(null);
 
   const refresh = () => {
     api.health().then(setHealth).catch(() => setHealth(null));
     api.bundles().then((r) => setBundles(r.bundles)).catch(() => {});
     api.runs().then((r) => setRuns(r.runs)).catch(() => {});
+    api.pipelines().then((r) => setPipelines(r.pipelines)).catch(() => {});
   };
 
   useEffect(() => {
@@ -73,6 +76,8 @@ export default function Home() {
           </ul>
         )}
       </section>
+
+      <PipelineGrid catalogue={pipelines ?? undefined} />
     </div>
   );
 }

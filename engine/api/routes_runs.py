@@ -29,9 +29,18 @@ class RunRequest(BaseModel):
 
 @router.post("/runs")
 def create_run(body: RunRequest):
-    if "earthquake_coseismic" not in body.pipelines:
+    runner: JobRunner = get_runner()
+    known = set(runner.heavy.registry.names())
+    unknown = [p for p in body.pipelines if p not in known]
+    if unknown:
         raise HTTPException(status_code=400, detail={
-            "ok": False, "error": "v1 serves earthquake_coseismic only; got " + ",".join(body.pipelines)})
+            "ok": False, "error": f"unknown pipeline(s): {unknown}"})
+    if not body.pipelines:
+        raise HTTPException(status_code=400, detail={"ok": False, "error": "pipelines list is empty"})
+    unknown = sorted(set(body.params or {}) - set(ALLOWED_PARAMS))
+    if unknown:
+        raise HTTPException(status_code=400, detail={
+            "ok": False, "error": f"unknown param(s) {unknown}; allowed: {sorted(ALLOWED_PARAMS)}"})
     for key, (lo, hi) in ALLOWED_PARAMS.items():
         if key in (body.params or {}):
             v = float(body.params[key])
@@ -60,7 +69,7 @@ def get_run(run_id: str):
     state = runner.get_state(run_id)
     if state is None:
         raise HTTPException(status_code=404, detail={"ok": False, "error": f"unknown run: {run_id}"})
-    return {"ok": True, "run": state}
+    return {"ok": True, **state}
 
 
 @router.get("/runs/{run_id}/layers/{layer}")

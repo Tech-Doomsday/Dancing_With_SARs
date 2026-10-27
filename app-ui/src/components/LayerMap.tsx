@@ -64,7 +64,7 @@ const LAYERS = [
   { key: "displacement", label: "LOS displacement" },
   { key: "detected", label: "Detected" },
   { key: "threshold", label: "Threshold" },
-  { key: "residual", label: "Residual vs Okada" },
+  { key: "residual", label: "Residual vs model" },
 ];
 
 export default function LayerMap({ runId, bounds }: { runId: string; bounds: [[number, number], [number, number]] | null }) {
@@ -93,8 +93,16 @@ export default function LayerMap({ runId, bounds }: { runId: string; bounds: [[n
     }
   }, [layer]);
 
-  const center: [number, number] = bounds
-    ? [(bounds[0][0] + bounds[1][0]) / 2, (bounds[0][1] + bounds[1][1]) / 2]
+  // plan 6.4: the layer payload carries its own geographic frame (server-computed
+  // core-grid corners). Fall back to the bundle bbox only when a payload predates it.
+  const frame: [[number, number], [number, number]] | null = layer?.bounds_lonlat
+    ? [
+        [layer.bounds_lonlat[1], layer.bounds_lonlat[0]],
+        [layer.bounds_lonlat[3], layer.bounds_lonlat[2]],
+      ]
+    : bounds;
+  const center: [number, number] = frame
+    ? [(frame[0][0] + frame[1][0]) / 2, (frame[0][1] + frame[1][1]) / 2]
     : [0, 0];
 
   return (
@@ -120,14 +128,15 @@ export default function LayerMap({ runId, bounds }: { runId: string; bounds: [[n
             attribution="&copy; Esri"
             url="https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}"
           />
-          {layer && bounds && dataUrl && (
-            <ImageOverlay url={dataUrl} bounds={bounds} opacity={0.78} />
+          {layer && frame && dataUrl && (
+            <ImageOverlay url={dataUrl} bounds={frame} opacity={0.78} />
           )}
         </MapContainer>
       </div>
       {layer && (
         <p className="mt-2 text-[11px] text-[#8a837b]">
-          {layer.units} · shown on its geographic bounding box ({layer.shape[1]}×{layer.shape[0]} px).
+          {layer.units} · shown on its geographic bounding box ({layer.shape[1]}×{layer.shape[0]} px
+          {layer.bounds_lonlat ? ", server-computed corners" : ", bundle frame"}).
           {layer.note ? ` ${layer.note}` : ""}
         </p>
       )}

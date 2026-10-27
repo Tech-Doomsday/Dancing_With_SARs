@@ -26,6 +26,7 @@ class Job:
         self.step_counts: dict = {}      # step code -> {group: n arrays} after that step
         self.final: dict | None = None   # bundle summary
         self.handoff: dict | None = None
+        self.pipelines: dict | None = None  # PIPELINES tab: featured pipelines, real registry path
         self.net_last: dict = {}
         self.store = None                # ArrayStore, set by the runner
 

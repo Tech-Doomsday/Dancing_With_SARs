@@ -1,11 +1,14 @@
 "use client";
 
 import { CheckCircle2, AlertTriangle } from "lucide-react";
+import type { ReactNode } from "react";
 import type { PipelineResult, EvidenceItem } from "@/lib/types";
 import StatusBadge from "./StatusBadge";
 
 export function VerdictCard({ result }: { result: PipelineResult }) {
-  const narrative = (result.detail as { narrative?: { headline?: string } } | undefined)?.narrative;
+  const narrative = (
+    result.detail as { narrative?: { headline?: string; reliability?: string } } | undefined
+  )?.narrative;
   return (
     <section className="rounded-lg border border-[#e7e2da] bg-white p-4">
       <div className="flex flex-wrap items-center gap-3">
@@ -14,13 +17,15 @@ export function VerdictCard({ result }: { result: PipelineResult }) {
           pipeline {result.pipeline} · tile {result.tile} · {result.runtime_s.toFixed(1)} s
         </span>
       </div>
-      {narrative?.headline && (
+      {narrative?.headline ? (
         <h2 className="mt-3 text-lg font-semibold leading-snug">{narrative.headline}</h2>
-      )}
+      ) : result.summary ? (
+        <h2 className="mt-3 text-lg font-semibold leading-snug">{result.summary}</h2>
+      ) : null}
       {result.raw_p !== null && (
         <div className="mt-3">
           <div className="flex items-center justify-between text-xs text-[#8a837b]">
-            <span>rank score</span>
+            <span>within-tier rank score</span>
             <span className="mono">{result.raw_p.toFixed(2)}</span>
           </div>
           <div className="mt-1 h-2 w-full overflow-hidden rounded-full bg-[#f0ece4]">
@@ -30,7 +35,8 @@ export function VerdictCard({ result }: { result: PipelineResult }) {
             />
           </div>
           <p className="mt-1 text-[11px] text-[#8a837b]">
-            Rank score (Pearson r of the better fault plane) for ordering within a tier — not a probability.
+            A within-tier rank score — NOT a percentage and not a calibrated probability
+            (calibration lands with verdict stage 4.2).
           </p>
         </div>
       )}
@@ -41,7 +47,7 @@ export function VerdictCard({ result }: { result: PipelineResult }) {
   );
 }
 
-const KIND_ICON: Record<string, React.ReactNode> = {
+const KIND_ICON: Record<string, ReactNode> = {
   detection: <CheckCircle2 size={14} className="mt-0.5 shrink-0 text-[#2c5f58]" />,
   forward_model: <CheckCircle2 size={14} className="mt-0.5 shrink-0 text-[#2c5f58]" />,
   null_result: <AlertTriangle size={14} className="mt-0.5 shrink-0 text-[#8a837b]" />,
@@ -53,9 +59,9 @@ export function EvidenceList({ result }: { result: PipelineResult }) {
       <h3 className="text-sm font-semibold">Evidence</h3>
       <ul className="mt-2 space-y-2">
         {result.evidence.map((e: EvidenceItem, i: number) => (
-          <li key={i} className="flex gap-2 text-xs leading-relaxed text-[#4a443c]">
+          <li key={e.id ?? i} className="flex gap-2 text-xs leading-relaxed text-[#4a443c]">
             {KIND_ICON[e.kind] ?? <span className="mt-1 h-1.5 w-1.5 shrink-0 rounded-full bg-[#b08d57]" />}
-            <span>{e.text}</span>
+            <span>{e.claim}</span>
           </li>
         ))}
       </ul>
@@ -87,7 +93,7 @@ export function WarningsPanel({ warnings }: { warnings: string[] }) {
   if (!warnings.length) return null;
   return (
     <section className="rounded-lg border border-[#b08d57]/40 bg-[#f7f2e7] p-4">
-      <h3 className="text-sm font-semibold text-[#7a6438]">Warnings & limitations</h3>
+      <h3 className="text-sm font-semibold text-[#7a6438]">Warnings &amp; limitations</h3>
       <ul className="mt-2 space-y-1 text-xs text-[#7a6438]">
         {warnings.map((w, i) => (
           <li key={i}>· {w}</li>

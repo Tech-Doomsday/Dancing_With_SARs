@@ -418,7 +418,11 @@ def _ua_vec(xi, et, q, disl1, disl2, disl3, c0, c2):
 def _ub_vec(xi, et, q, disl1, disl2, disl3, c0, c2):
     alp3, sd, cd = c0["alp3"], c0["sd"], c0["cd"]
     sdsd, cdcd, sdcd = c0["sdsd"], c0["cdcd"], c0["sdcd"]
-    xi2, q2, r, y, d, tt, ale, x11, y11 = c2["xi2"], c2["q2"], c2["r"], c2["y"], c2["d"], c2["tt"], c2["ale"], c2["x11"], c2["y11"]
+    # q2 MUST be unpacked here: the dip-90 branch (cd == 0) uses it in aj3/aj6.
+    # Regression-pinned by test_okada.py::test_vertical_fault_vectorised_matches_scalar
+    # (a missing unpack was a silent NameError swallowed into a 1e9 fit sentinel).
+    xi2, q2, r, y, d, tt, ale, x11, y11 = (
+        c2["xi2"], c2["q2"], c2["r"], c2["y"], c2["d"], c2["tt"], c2["ale"], c2["x11"], c2["y11"])
 
     rd = r + d
     d11 = 1.0 / (r * rd)

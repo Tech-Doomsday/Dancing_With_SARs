@@ -10,13 +10,12 @@ from pathlib import Path
 
 from fastapi import APIRouter, HTTPException
 
-from engine.registry import Registry
-
 router = APIRouter(prefix="/api")
 
 
 def _bundles_dir() -> Path:
-    return Registry().bundles_dir
+    from .state import get_runner
+    return get_runner().bundles_dir   # the runner owns the configured bundles dir (test-aware)
 
 
 def _meta(bundle_dir: Path) -> dict | None:

@@ -108,8 +108,19 @@ class Settings:
 
     @property
     def catalog_dirs(self) -> list[Path]:
-        """shipped (config/catalog, commit it) first, then generated (data/cache/catalog)."""
-        return [self.root / "config" / "catalog", self.data_dir / "cache" / "catalog"]
+        """[shipped defaults, runtime cache] — slot 0 is committed to the repo, slot 1 is learned.
+
+        Unit tests are hermetic: the shipped catalog describes REAL product layouts, and a synthetic
+        fixture granule would hit the stale-catalog KeyError -> full-walk fallback on every index
+        build. Under pytest slot 0 points at an empty data-local dir instead, so fixtures teach the
+        catalog themselves (test_regressions::test_unit_tests_ignore_a_shipped_catalog). The list
+        keeps both slots so callers can keep indexing [1] for the runtime cache.
+        """
+        cache = self.data_dir / "cache" / "catalog"
+        import sys
+        if "pytest" in sys.modules:
+            return [cache.parent / "catalog-shipped", cache]
+        return [self.root / "config" / "catalog", cache]
 
     @property
     def search_dir(self) -> Path:

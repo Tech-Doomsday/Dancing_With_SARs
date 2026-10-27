@@ -200,7 +200,12 @@ def import_test() -> list:
 
 
 # ------------------------------------------------------------------------------------------------ independence
-ALLOWED_COMMON = {"scene_bundle", "contract", "frozen", "bundle_io", "layers", "ancillary", "config"}   # = tests/test_pipeline_independence.py
+# keep in sync with tests/test_pipeline_independence.py (imported live so they cannot drift)
+try:
+    from tests.test_pipeline_independence import ALLOWED_COMMON, FORBIDDEN_COMMON_NAMES
+except Exception:   # hub run outside a pytest context: fall back to a pinned copy
+    ALLOWED_COMMON = {"scene_bundle", "contract", "frozen", "bundle_io", "layers", "ancillary", "config", "result"}
+    FORBIDDEN_COMMON_NAMES = {"build_scene_bundle", "run_steps", "assemble", "STEPS"}
 FORBIDDEN_COMMON_NAMES = {"build_scene_bundle", "run_steps", "assemble", "STEPS"}
 
 

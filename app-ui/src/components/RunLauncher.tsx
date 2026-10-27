@@ -5,6 +5,17 @@ import { Play } from "lucide-react";
 import { api } from "@/lib/api";
 import type { BundleListItem, PipelineInfo } from "@/lib/types";
 import StatusBadge from "./StatusBadge";
+import BundlePicker from "./BundlePicker";
+
+/** Parameter overrides the engine validates and APPLIES (routes_runs.ALLOWED_PARAMS):
+ *  out-of-range or unknown values are rejected with 400, in-range values reach the
+ *  pipeline through the run's request triggers and land in the result's detail.params. */
+const PARAM_FIELDS: { key: string; label: string; min: number; max: number; step: number; hint: string }[] = [
+  { key: "coherence_threshold", label: "Coherence gate", min: 0.0, max: 1.0, step: 0.05, hint: "valid-pixel coherence floor (default 0.5)" },
+  { key: "detection_floor_m", label: "Detection floor", min: 0.001, max: 0.2, step: 0.001, hint: "absolute LOS floor in m (default 0.01 = 10 mm)" },
+  { key: "significance_k", label: "Significance k", min: 1.0, max: 6.0, step: 0.5, hint: "sigma multiplier (default 3)" },
+  { key: "far_field_margin", label: "Far-field margin", min: 0.02, max: 0.4, step: 0.02, hint: "reference margin fraction (default 0.12)" },
+];
 
 export default function RunLauncher({
   onStarted,
@@ -16,6 +27,7 @@ export default function RunLauncher({
   const [selected, setSelected] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const [params, setParams] = useState<Record<string, number>>({});
 
   useEffect(() => {
     api.bundles().then((r) => {
@@ -30,7 +42,8 @@ export default function RunLauncher({
     setBusy(true);
     setError(null);
     try {
-      const { run_id } = await api.startRun(selected, ["earthquake_coseismic"]);
+      const clean = Object.fromEntries(Object.entries(params).filter(([, v]) => Number.isFinite(v)));
+      const { run_id } = await api.startRun(selected, ["earthquake_coseismic"], clean);
       onStarted(run_id);
       window.location.href = `/runs/${run_id}`;
     } catch (e) {
@@ -44,35 +57,47 @@ export default function RunLauncher({
     <section className="rounded-lg border border-[#e7e2da] bg-white p-4">
       <h2 className="text-sm font-semibold">1 · Choose an ingested scene</h2>
       <p className="mt-1 text-xs text-[#8a837b]">
-        Bundles are the engine's preprocessed SceneBundles (P01–P13). The pipeline
+        Bundles are the engine&apos;s preprocessed SceneBundles (P01–P13). The pipeline
         derives the acquisition window itself and fetches matching ComCat events.
       </p>
-      {bundles.length === 0 && !error && (
-        <p className="mono mt-3 text-xs text-[#8a837b]">
-          No bundles ingested yet — build one with the retrieval/chain tools, then reload.
-        </p>
-      )}
-      <div className="mt-3 grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
-        {bundles.map((b) => (
-          <button
-            key={b.bundle_id}
-            onClick={() => setSelected(b.bundle_id)}
-            className={`rounded-md border p-3 text-left text-xs transition ${
-              selected === b.bundle_id
-                ? "border-[#2c5f58] bg-[#eff5f3]"
-                : "border-[#e7e2da] bg-[#faf9f6] hover:border-[#b08d57]"
-            }`}
-          >
-            <div className="mono font-semibold">{b.tile ?? b.bundle_id}</div>
-            <div className="mt-1 text-[#8a837b]">
-              epoch {b.epoch ?? "—"} · status {b.status ?? "—"}
-            </div>
-            <div className="mono mt-1 truncate text-[10px] text-[#b08d57]">{b.bundle_id}</div>
-          </button>
+      <BundlePicker bundles={bundles} selected={selected} onSelect={setSelected} error={error} />
+
+      <h2 className="mt-5 text-sm font-semibold">2 · Parameters (optional)</h2>
+      <p className="mt-1 text-xs text-[#8a837b]">
+        Overrides the engine validates server-side (out-of-range → 400) and APPLIES to the run —
+        the verdict&apos;s detail always records what was actually used.
+      </p>
+      <div className="mt-2 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+        {PARAM_FIELDS.map((f) => (
+          <label key={f.key} className="text-xs">
+            <span className="block font-medium text-[#4a443c]">{f.label}</span>
+            <input
+              type="number"
+              inputMode="decimal"
+              min={f.min}
+              max={f.max}
+              step={f.step}
+              placeholder="engine default"
+              value={params[f.key] ?? ""}
+              onChange={(e) => {
+                const v = e.target.value === "" ? undefined : Number(e.target.value);
+                setParams((p) => {
+                  const next = { ...p };
+                  if (v === undefined) delete next[f.key];
+                  else next[f.key] = v;
+                  return next;
+                });
+              }}
+              className="mono mt-1 w-full rounded-md border border-[#e7e2da] bg-[#faf9f6] px-2 py-1.5 text-xs focus:border-[#2c5f58] focus:outline-none"
+            />
+            <span className="mt-1 block text-[10px] text-[#8a837b]">
+              {f.min}–{f.max} · {f.hint}
+            </span>
+          </label>
         ))}
       </div>
 
-      <h2 className="mt-5 text-sm font-semibold">2 · Run</h2>
+      <h2 className="mt-5 text-sm font-semibold">3 · Run</h2>
       <div className="mt-2 flex items-center gap-3">
         <button
           onClick={launch}

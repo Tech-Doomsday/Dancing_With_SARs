@@ -51,6 +51,7 @@ def make_null_provider():
 
 # --------------------------------------------------------------------------- #
 # uncatalogued-branch fixtures: scenes whose truth is a known vertical strike-slip Okada source
+# (ported from the M2 implementation overlay — earthquake_coseismic_M2_wip_overlay.zip)
 # --------------------------------------------------------------------------- #
 import math  # noqa: E402
 from types import SimpleNamespace  # noqa: E402

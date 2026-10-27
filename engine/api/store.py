@@ -16,7 +16,7 @@ _SCHEMA = """
 CREATE TABLE IF NOT EXISTS runs(
   id TEXT PRIMARY KEY, created_at TEXT, bundle_id TEXT, tile TEXT,
   pipelines TEXT, params TEXT, status TEXT, error TEXT, duration_s REAL);
-CREATE TABLE IF NOT EXISTS verdicts(
+CREATE TABLE IF NOT EXISTS run_verdicts(
   run_id TEXT, pipeline TEXT, tile TEXT, epoch TEXT, raw_p REAL, status TEXT,
   result TEXT,
   PRIMARY KEY(run_id, pipeline));
@@ -34,6 +34,7 @@ class RunsStore:
     def _conn(self) -> sqlite3.Connection:
         conn = sqlite3.connect(self._path)
         conn.row_factory = sqlite3.Row
+        conn.execute("PRAGMA journal_mode=WAL")   # the verdict store (4.5) shares this db file
         return conn
 
     def create_run(self, run_id: str, bundle_id: str, tile: str, pipelines: list, params: dict) -> None:
@@ -50,9 +51,11 @@ class RunsStore:
                          (status, error, duration_s, run_id))
 
     def save_verdict(self, run_id: str, result: dict) -> None:
+        """Run-scoped result cache (table run_verdicts). The CANONICAL verdict table (`verdicts`)
+        is owned by engine.verdict.persist.VerdictStore — one store, two concerns (Decision 1)."""
         with self._lock, self._conn() as conn:
             conn.execute(
-                "INSERT OR REPLACE INTO verdicts(run_id, pipeline, tile, epoch, raw_p, status, result)"
+                "INSERT OR REPLACE INTO run_verdicts(run_id, pipeline, tile, epoch, raw_p, status, result)"
                 " VALUES (?,?,?,?,?,?,?)",
                 (run_id, result.get("pipeline"), result.get("tile"), result.get("epoch"),
                  result.get("raw_p"), result.get("status"), json.dumps(result)))
@@ -64,7 +67,7 @@ class RunsStore:
 
     def get_verdicts(self, run_id: str) -> list:
         with self._conn() as conn:
-            rows = conn.execute("SELECT result FROM verdicts WHERE run_id=? ORDER BY pipeline", (run_id,)).fetchall()
+            rows = conn.execute("SELECT result FROM run_verdicts WHERE run_id=? ORDER BY pipeline", (run_id,)).fetchall()
         return [json.loads(r["result"]) for r in rows]
 
     def list_runs(self, limit: int = 50) -> list:

@@ -14,7 +14,7 @@ ROOT = Path(__file__).resolve().parents[1]
 PIPELINES = ROOT / "engine" / "pipelines"
 
 # engine.common modules a pipeline may import: the bundle types / contract / persistence, never the chain steps
-ALLOWED_COMMON = {"scene_bundle", "contract", "frozen", "bundle_io", "layers", "ancillary", "config"}
+ALLOWED_COMMON = {"scene_bundle", "contract", "frozen", "bundle_io", "layers", "ancillary", "config", "result"}
 # `engine.common` itself is allowed (lazy facade); `build_scene_bundle` is the chain's entry point and is forbidden there
 FORBIDDEN_COMMON_NAMES = {"build_scene_bundle", "run_steps", "assemble", "STEPS"}
 

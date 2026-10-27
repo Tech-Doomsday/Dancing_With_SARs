@@ -149,10 +149,12 @@ def make_handler(hub: Hub):
             part = (q.get("part") or ["all"])[0]
             base = {**j.brief(), "tile": j.tile, "source": j.source, "request": getattr(j, "request", {}), "net": j.net_last}
             parts = {"summary": lambda: base, "retrieval": lambda: j.retrieval, "p01": lambda: getattr(j, "p01", {}),
-                     "processing": lambda: {"steps": j.steps}, "final": lambda: j.final, "handoff": lambda: j.handoff}
+                     "processing": lambda: {"steps": j.steps}, "final": lambda: j.final, "handoff": lambda: j.handoff,
+                     "pipelines": lambda: getattr(j, "pipelines", None)}
             if part == "all":
                 out = {**base, "retrieval": j.retrieval, "p01": getattr(j, "p01", {}), "steps": j.steps, "final": j.final,
-                       "handoff": j.handoff, "calls_live": j.calls if j.retrieval is None else None}
+                       "handoff": j.handoff, "pipelines": getattr(j, "pipelines", None),
+                       "calls_live": j.calls if j.retrieval is None else None}
             elif part in parts:
                 out = parts[part]()
             else:

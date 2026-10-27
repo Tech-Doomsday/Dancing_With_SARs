@@ -4,16 +4,20 @@ import { use, useEffect, useState } from "react";
 import { api } from "@/lib/api";
 import type { BundleListItem } from "@/lib/types";
 import RunView from "@/components/RunView";
+import EventsPanel from "@/components/EventsPanel";
 
 export default function RunPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = use(params);
   const [bounds, setBounds] = useState<[[number, number], [number, number]] | null>(null);
+  const [center, setCenter] = useState<[number, number] | null>(null);
 
   useEffect(() => {
     // The run's bundle gives the map its geographic frame (metadata only).
-    api.run(id)
+    // The state is FLAT: {ok, id, status, results, ...} — no nested `run` key.
+    api
+      .run(id)
       .then((r) => {
-        const bundleId = r.run.results[0]?.bundle_id;
+        const bundleId = r.results?.[0]?.bundle_id;
         if (!bundleId) return;
         return api.bundles().then((all) => {
           const b: BundleListItem | undefined = all.bundles.find((x) => x.bundle_id === bundleId);
@@ -24,6 +28,7 @@ export default function RunPage({ params }: { params: Promise<{ id: string }> })
               [n, e],
             ]);
           }
+          if (b?.center_lonlat) setCenter([b.center_lonlat[1], b.center_lonlat[0]]);
         });
       })
       .catch(() => {});
@@ -38,6 +43,7 @@ export default function RunPage({ params }: { params: Promise<{ id: string }> })
         </a>
       </div>
       <RunView runId={id} bounds={bounds} />
+      {center && <EventsPanel lon={center[1]} lat={center[0]} />}
     </div>
   );
 }

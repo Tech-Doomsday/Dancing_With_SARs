@@ -3,4 +3,28 @@ name = "nisar-hazard-engine"
 version = "0.1.0"
 description = "Global SAR hazard detection engine (NISAR primary, Sentinel-1 fallback)"
 requires-python = ">=3.11"
-dependencies = []
+dependencies = [
+  # retrieval + common chain (requirements-retrieval.txt)
+  "numpy>=1.26",
+  "scipy>=1.11",
+  "h5py>=3.8",
+  "aiohttp>=3.9",
+  "zarr>=3.0",
+  "pyproj>=3.6",
+  "shapely>=2.0",
+  "pyyaml",
+  "python-dotenv",
+  "asf_search>=7",
+  # serving layer (requirements-engine.txt)
+  "fastapi>=0.115",
+  "uvicorn[standard]>=0.30",
+]
+
+[tool.pytest.ini_options]
+# The suite the repo maintains: engine-level tests + every pipeline's own tests + shared libs.
+# attic/ holds quarantined legacy files and must never be collected.
+testpaths = ["tests", "engine/pipelines", "engine/lib"]
+norecursedirs = ["attic", "app-ui", "data", "tools", "docs", "*.egg-info", ".git", "__pycache__"]
+markers = [
+    "live: touches the real network; opt-in only (EQ_LIVE=1 python -m pytest -m live -q)",
+]

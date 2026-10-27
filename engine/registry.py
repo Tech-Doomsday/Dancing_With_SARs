@@ -16,17 +16,30 @@ What it does, in order
     4. gate      manifest `min_epochs` against the bundle's data depth: too little history -> INSUFFICIENT_EVIDENCE is
                  answered here, without launching a worker (registry.gate_min_epochs). An EMPTY bundle gates every
                  pipeline the same way.
-    5. run       a `spawn` process pool (never fork: the retrieval client owns threads and an event loop). Each task has a
+    5. lane      the manifest declares its execution lane: `execution: normal` (spawn pool, per-manifest `timeout_s`
+                 or registry.task_timeout_s) or `execution: heavy` (the wave-solver class of work: own timeout,
+                 progress file and a content-addressed result cache — engine/jobs). A heavy pipeline encountered in a
+                 normal run_tile is DEFERRED, not launched: it answers status PENDING with the lane annotated, and the
+                 caller submits it to the jobs runner (engine/jobs/runner.py). run_tile(..., heavy="run") executes it
+                 in this process (used by the jobs runner itself and by tests).
+    6. run       a `spawn` process pool (never fork: the retrieval client owns threads and an event loop). Each task has a
                  deadline; a task that exceeds it is reported TIMEOUT -> status ERROR, the pool is recycled and the tasks
                  that were only collateral damage are re-run (alone, so a crash can be pinned on its pipeline).
                  One pipeline crashing, raising or hanging never affects another pipeline's result.
-    6. collect   every return is validated against the manifest's `status_values` and normalised to `PipelineResult`.
+    7. collect   every return is validated against the manifest's `status_values` and normalised to `PipelineResult`
+                 (engine/common/result.py — the typed shape the UI renders).
 
-Pipeline entry point (the contract this module defines, because the pipeline folders are still stubs):
-    engine/pipelines/<name>/verdict.py   defines   run(bundle: SceneBundle) -> PipelineResult | Mapping | (raw_p, status, evidence)
+Pipeline entry point (the contract this module defines):
+    engine/pipelines/<name>/verdict.py   defines   run(bundle: SceneBundle, providers=None)
+                                              -> PipelineResult | Mapping | (raw_p, status, evidence)
+The registry calls run(bundle) — the optional `providers` mapping (injected event/bathy/gauge sources, a progress
+callback) is how TESTS and the API hand a pipeline offline or alternate data sources; see each pipeline's fetch.py.
+Extra DATA beyond the bundle comes only through the pipeline's own fetch.py, which may import only
+engine.retrieval.clients.adapters.* — never NisarClient, never another pipeline, never the P01-P13 chain.
 A folder without a `run()` yields status NOT_MODELLED with a warning (it exists but is not implemented yet), not a crash.
 Statuses a pipeline may return are those in its manifest's `status_values`; the registry itself adds NOT_APPLICABLE,
-NOT_RUN and ERROR. A pipeline sees ONLY the bundle: no retriever, no other pipeline's result.
+NOT_RUN, NOT_MODELLED, PENDING and ERROR. Apart from its own fetch.py (adapters only) a pipeline sees ONLY the bundle:
+no retriever, no other pipeline's result — event-level conclusions live in engine/verdict/link_events.py.
 """
 from __future__ import annotations
 
@@ -47,9 +60,9 @@ import numpy as np
 import yaml
 
 from .common.config import CommonConfig, data_root, load_common_config
+from .common.result import REGISTRY_STATUSES, PipelineResult, plain
 from .common.scene_bundle import RoutingDecision
 
-REGISTRY_STATUSES = ("NOT_APPLICABLE", "NOT_RUN", "ERROR")
 ENTRY_MODULE = "verdict"
 ENTRY_FUNC = "run"
 
@@ -68,11 +81,18 @@ class Manifest:
     fetch_codes: tuple = ()
     min_epochs: int | None = None
     status_values: tuple = ()
+    execution: str = "normal"               # normal | heavy (engine/jobs lane: own timeout + progress + cache)
+    timeout_s: float | None = None          # per-manifest deadline; None -> registry.task_timeout_s
+    needs_sar: bool = True                  # False = the pipeline can produce evidence without NISAR data
     raw: Mapping = field(default_factory=dict, compare=False, hash=False)
 
     @property
     def measurement_codes(self) -> tuple:
         return tuple(c for c in self.uses_codes if c[:1] in ("M", "P"))
+
+    @property
+    def deadline_s(self) -> float:
+        return float(self.timeout_s) if self.timeout_s else 900.0
 
 
 def load_manifest(path: Path) -> Manifest:
@@ -83,9 +103,16 @@ def load_manifest(path: Path) -> Manifest:
     me = raw.get("min_epochs")
     if me is not None and (isinstance(me, bool) or not isinstance(me, int) or me < 0):
         raise ValueError(f"{path}: min_epochs must be a non-negative integer or null, got {me!r}")
+    execution = str(raw.get("execution") or "normal").lower()
+    if execution not in ("normal", "heavy"):
+        raise ValueError(f"{path}: execution must be 'normal' or 'heavy', got {execution!r}")
+    ts = raw.get("timeout_s")
+    if ts is not None and (isinstance(ts, bool) or not isinstance(ts, (int, float)) or ts <= 0):
+        raise ValueError(f"{path}: timeout_s must be a positive number or null, got {ts!r}")
     return Manifest(name, str(raw.get("code", "")), path, str(raw.get("sensor") or ""), str(raw.get("applies") or ""),
                     tuple(str(c) for c in raw.get("uses_codes") or ()), tuple(str(c) for c in raw.get("fetch_codes") or ()),
-                    me, tuple(str(s) for s in raw.get("status_values") or ()), raw)
+                    me, tuple(str(s) for s in raw.get("status_values") or ()),
+                    execution, (float(ts) if ts is not None else None), bool(raw.get("needs_sar", True)), raw)
 
 
 def scan_pipelines(pipelines_dir: Path | str) -> tuple:
@@ -103,37 +130,11 @@ def scan_pipelines(pipelines_dir: Path | str) -> tuple:
 
 
 # ---------------------------------------------------------------------------------------------
-# result schema (what 4.1 collect receives)
+# result schema (what 4.1 collect receives) — PipelineResult, EvidenceItem, LayerRef and Source
+# live in engine/common/result.py (the typed shape the UI renders) and are re-exported here.
 # ---------------------------------------------------------------------------------------------
-@dataclass
-class PipelineResult:
-    pipeline: str
-    tile: str
-    epoch: str | None
-    raw_p: float | None
-    status: str
-    evidence: list = field(default_factory=list)
-    layers: list = field(default_factory=list)
-    data_used: list = field(default_factory=list)
-    references_used: list = field(default_factory=list)
-    runtime_s: float = 0.0
-    warnings: list = field(default_factory=list)
-    min_epochs_met: bool | None = None
-    bundle_id: str | None = None
-    detail: dict = field(default_factory=dict)
-
-    def to_dict(self) -> dict:
-        return dataclasses.asdict(self)
-
-
 def _plain(v: Any) -> Any:
-    if isinstance(v, np.generic):
-        return v.item()
-    if isinstance(v, dict):
-        return {str(k): _plain(x) for k, x in v.items()}
-    if isinstance(v, (list, tuple)):
-        return [_plain(x) for x in v]
-    return v
+    return plain(v)
 
 
 def coerce_result(raw: Any, manifest: Manifest, bundle) -> PipelineResult:
@@ -159,14 +160,28 @@ def coerce_result(raw: Any, manifest: Manifest, bundle) -> PipelineResult:
             p = float(p)
             if not (0.0 <= p <= 1.0) or p != p:
                 raise ValueError(f"raw_p {p!r} outside [0, 1]")
+        conf = d.get("confidence")
+        if conf is not None:
+            conf = float(conf)
+            if not (0.0 <= conf <= 1.0) or conf != conf:
+                raise ValueError(f"confidence {conf!r} outside [0, 1]")
         ev = d.get("evidence") or []
         if isinstance(ev, (str, Mapping)):
             ev = [ev]
+        prov = d.get("provenance") or []
+        if isinstance(prov, Mapping):
+            prov = [prov]
         fields = {f.name for f in dataclasses.fields(PipelineResult)}
         extra = {k: _plain(v) for k, v in d.items() if k not in fields}
-        res = PipelineResult(**{**base, "raw_p": p, "status": status, "evidence": [_plain(e) for e in ev],
-                                "layers": list(d.get("layers") or []), "data_used": list(d.get("data_used") or []),
+        res = PipelineResult(**{**base, "raw_p": p, "status": status, "confidence": conf,
+                                "summary": str(d.get("summary") or ""),
+                                "evidence": [_plain(e) for e in ev],
+                                "layers": [_plain(l) for l in (d.get("layers") or [])],
+                                "provenance": [_plain(s) for s in prov],
+                                "data_used": list(d.get("data_used") or []),
                                 "references_used": list(d.get("references_used") or []),
+                                "diagnostics": dict(d.get("diagnostics") or {}),
+                                "versions": dict(d.get("versions") or {}),
                                 "warnings": [str(w) for w in d.get("warnings") or []],
                                 "min_epochs_met": d.get("min_epochs_met"),
                                 "detail": {**_plain(d.get("detail") or {}), **extra}})
@@ -177,7 +192,8 @@ def coerce_result(raw: Any, manifest: Manifest, bundle) -> PipelineResult:
 
 
 def _synthetic(manifest: Manifest, bundle, status: str, reasons: list, **kw) -> PipelineResult:
-    return PipelineResult(manifest.name, bundle.tile.id, bundle.epoch, None, status, [{"reason": r} for r in reasons],
+    evidence = [dict(reason=r) if isinstance(r, str) else dict(r) for r in reasons]
+    return PipelineResult(manifest.name, bundle.tile.id, bundle.epoch, status, evidence=evidence,
                           bundle_id=bundle.bundle_id, **kw)
 
 
@@ -261,7 +277,8 @@ class Registry:
     def describe(self) -> list:
         """What GET /pipelines needs: one plain dict per manifest."""
         return [{"name": m.name, "code": m.code, "sensor": m.sensor, "applies": m.applies, "uses_codes": list(m.uses_codes),
-                 "fetch_codes": list(m.fetch_codes), "min_epochs": m.min_epochs, "status_values": list(m.status_values)}
+                 "fetch_codes": list(m.fetch_codes), "min_epochs": m.min_epochs, "status_values": list(m.status_values),
+                 "execution": m.execution, "timeout_s": m.timeout_s, "needs_sar": m.needs_sar}
                 for m in self.manifests]
 
     def active_codes(self, names: list | None = None) -> set:
@@ -277,8 +294,14 @@ class Registry:
 
     # -- one tile ---------------------------------------------------------------------------
     def run_tile(self, tile, retriever, as_of=None, *, ancillary=None, event_window=None, triggers=None, names: list | None = None,
-                 bundle=None, workers: int | None = None) -> TileRun:
-        """Build (or accept) the bundle, route, gate and run. `workers=0` runs the pipelines inline (debugging / tests)."""
+                 bundle=None, workers: int | None = None, heavy: str = "defer") -> TileRun:
+        """Build (or accept) the bundle, route, gate and run. `workers=0` runs the pipelines inline (debugging / tests).
+
+        heavy="defer" (default): heavy-lane pipelines (manifest execution: heavy) are NOT launched — they answer PENDING
+        with the lane annotated, and the caller submits them to the jobs runner (engine/jobs). heavy="run" executes them
+        here (the jobs runner itself and tests use this)."""
+        if heavy not in ("defer", "run"):
+            raise ValueError(f"heavy must be 'defer' or 'run', got {heavy!r}")
         t_start = time.perf_counter()
         sel = [m for m in self.manifests if names is None or m.name in names]
         if names is not None:
@@ -289,7 +312,7 @@ class Registry:
             from .common.chain import build_scene_bundle
             bundle = build_scene_bundle(tile, retriever, as_of, ancillary=ancillary, active_codes=self.active_codes(names) or None,
                                         event_window=event_window, triggers=triggers, cfg=self.cfg)
-        results, todo = self.plan(bundle, sel)
+        results, todo = self.plan(bundle, sel, heavy=heavy)
         bpath = None
         if todo:
             if self.cfg.registry.persist_bundles and workers != 0:
@@ -300,7 +323,7 @@ class Registry:
         return TileRun(bundle.tile.id, bundle, bpath, ordered, bundle.routing, time.perf_counter() - t_start, dict(self.scan_errors))
 
     # -- decide what runs -------------------------------------------------------------------
-    def plan(self, bundle, manifests: list) -> tuple:
+    def plan(self, bundle, manifests: list, heavy: str = "defer") -> tuple:
         """-> ({name: synthetic PipelineResult for everything not launched}, [manifests to launch])."""
         rcfg = self.cfg.registry
         results: dict = {}
@@ -321,8 +344,15 @@ class Registry:
             else:
                 r = self._gate(m, bundle)
                 if r is None:
-                    todo.append(m)
-                    continue
+                    if m.execution == "heavy" and heavy == "defer":
+                        r = _synthetic(m, bundle, "PENDING",
+                                       [f"{m.name} declares execution: heavy — deferred to the jobs lane "
+                                        f"(own timeout {m.deadline_s:g} s, progress file, content-addressed result cache)"],
+                                       detail={"lane": "heavy", "timeout_s": m.deadline_s,
+                                               "submit": "engine.jobs.HeavyJobRunner.submit(pipeline=..., bundle_path=...)"})
+                    else:
+                        todo.append(m)
+                        continue
             r.detail.update(detail)
             results[m.name] = r
         return results, todo
@@ -332,8 +362,10 @@ class Registry:
         if not rcfg.gate_min_epochs:
             return None
         if not bundle.stacks:
-            return _synthetic(m, bundle, "INSUFFICIENT_EVIDENCE", ["no usable NISAR data for this tile in the window"],
-                              min_epochs_met=False if m.min_epochs else None)
+            if m.needs_sar:
+                return _synthetic(m, bundle, "INSUFFICIENT_EVIDENCE", ["no usable NISAR data for this tile in the window"],
+                                  min_epochs_met=False if m.min_epochs else None)
+            return None          # needs_sar: false — the pipeline answers from its own fetched data (honest INSUFFICIENT later)
         if m.min_epochs is None:
             return None
         metric = rcfg.min_epochs_metric.get(m.name, "epochs")
@@ -446,11 +478,11 @@ class Registry:
                         recycle("a worker crashed", None)
                     continue
                 now = time.monotonic()
-                over = [t for t in inflight.values() if now - t.submitted > rcfg.task_timeout_s]
+                over = [t for t in inflight.values() if now - t.submitted > t.manifest.deadline_s]
                 if over:
                     for t in over:
                         results[t.manifest.name] = self._finish(t.manifest, bundle, {
-                            "kind": "timeout", "error": f"exceeded task_timeout_s={rcfg.task_timeout_s:g}",
+                            "kind": "timeout", "error": f"exceeded timeout_s={t.manifest.deadline_s:g}",
                             "runtime_s": now - t.submitted}, now - t.submitted)
                     for f in [f for f, t in inflight.items() if t in over]:
                         inflight.pop(f)

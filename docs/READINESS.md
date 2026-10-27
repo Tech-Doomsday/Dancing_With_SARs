@@ -88,3 +88,44 @@ a channel not named there is reported `missing`). Counts and states in HEALTH ar
   that test; `sar_debug`'s README says the same about its own remote path.
 * The full `tests/` suite has not been run. `tests/test_debug_hub.py`, `tests/test_pipeline_independence.py` and `tests/test_retrieval.py` were run in a later session: the first two pass; `test_retrieval.py::test_chunk_tables_load_lazily_per_layer` fails (pre-existing, cause not investigated), and `tests/test_cli_cloudflare_e2e.py` cannot be collected (no module `devflock`).
 * `pyproj` was stood in for by the repo's own UTM code during verification, so tile coordinates were checked against that, not against `pyproj`.
+
+---
+
+## Addendum — 2026-10-27 (earthquake + tsunami port, Phase 0 + first two pipelines)
+
+Status changes since the audit above (this audit's snapshots are historical; re-run the hub for the live view):
+
+* **Gap 1 (adapters) resolved for the hazard path**: R1 ComCat (with provenance: url, retrieved_at,
+  sha256), R2 ShakeMap, R3 NGL GNSS (holdings + tenv3; optional evidence), R11 tsunami catalog
+  (local curated copy or remote, degrades to a note), R15 DART (realtime + historical archive,
+  live-verified), R16 ETOPO1 (OPeNDAP ascii, live-verified, disk cache). Failures are degraded
+  results, never exceptions.
+* **Gap 4 (pipelines comment-only) resolved for two pipelines**: 3.01 `earthquake_coseismic`
+  (full science + UNCATALOGUED fit) and 3.17 `tsunami_ocean_evidence` (NEW; heavy lane). The other
+  14 remain scaffolds by design.
+* **Gap 5 partially resolved**: `engine/lib/{okada,los,geo,detect}.py` and the whole
+  `engine/lib/tsunami/` package are real and acceptance-tested (lake-at-rest exact well-balancing,
+  dam-break mass drift < 1e-12, Ritter front speed, SSP-RK2 √(gh) speed, Kajiura transparency,
+  eikonal ≤ 4 %). `engine/verdict/` 4.1–4.5 and `engine/api/` are implemented (FastAPI + runs store
+  + verdicts.db). `engine/jobs/` (heavy lane) is new.
+* **Fetch seam defined** (was the registry-contract gap): `run(bundle, providers=None)`;
+  providers injected per call, module-level seam for tests, real adapters in production; a failed
+  fetch maps to INSUFFICIENT_EVIDENCE with the verbatim reason. The registry docstring now states
+  this (the old "a pipeline sees ONLY the bundle" wording was wrong).
+* **Registry contract extended**: manifests may declare `execution: normal|heavy`, `timeout_s`,
+  `needs_sar`; new registry status PENDING; per-manifest deadlines enforced in the pool.
+* **Hygiene fixed (was: broken imports, missing deps, stray tests)**:
+  `engine/common/{runner,state,_raster}.py` (dead `PreprocConfig` design) and 20 stray devflock
+  test files + `tools/devflock_probe.py` quarantined under `attic/` (nothing imported them);
+  `pyproject.toml` now declares its dependencies; the failing retrieval test
+  (`test_chunk_tables_load_lazily_per_layer`) root-caused and fixed (a stale catalog forced the
+  KeyError → full-walk fallback which DISCARDED already-loaded chunk tables; the runtime-learned
+  catalog is now read first and the fallback carries layout-compatible loaded tables); the
+  documented-but-missing regression fixes implemented (resolve-probe transient retry, h5py-GC
+  deadlock broken with a private inline HTTP loop for the h5py-serving path, credential-safe
+  `EarthdataAuth.__repr__`, `replace_dir(keep_existing=...)` with meta-first invalidation, search
+  truncation flag, hermetic catalogs under pytest).
+* **Tests**: `pytest tests/ engine/pipelines/earthquake_coseismic/tests
+  engine/pipelines/tsunami_ocean_evidence/tests engine/lib/tsunami/tests tests/test_jobs.py
+  tests/test_verdict_stages.py tests/test_api.py tests/test_g0_los_sign.py -q` is the new full
+  suite (live network tests remain excluded by default).

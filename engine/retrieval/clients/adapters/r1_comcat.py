@@ -17,6 +17,7 @@ import time
 import urllib.error
 import urllib.parse
 import urllib.request
+from datetime import datetime, timezone
 from pathlib import Path
 
 FDSN_URL = "https://earthquake.usgs.gov/fdsnws/event/1/query"
@@ -56,7 +57,8 @@ def _cache_put(key: str, payload: dict) -> None:
 def _http_get_json(url: str, timeout_s: float) -> dict:
     req = urllib.request.Request(url, headers={"User-Agent": "nisar-hazard-engine/0.1 (R1 ComCat adapter)"})
     with urllib.request.urlopen(req, timeout=timeout_s) as resp:
-        return json.loads(resp.read().decode("utf-8"))
+        body = resp.read()
+    return json.loads(body.decode("utf-8")), hashlib.sha256(body).hexdigest()
 
 
 def _parse_nodal_planes(properties: dict) -> list:
@@ -114,11 +116,19 @@ def parse_event_feature(feature: dict) -> dict | None:
         return None
 
 
+def _provenance(url: str, sha256: str | None = None) -> dict:
+    """Provenance for the pipeline result (engine/common/result.py Source shape)."""
+    return {"adapter": "r1_comcat", "url_or_id": url, "retrieved_at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
+            "sha256": sha256}
+
+
 def fetch_events(bbox, t0: str, t1: str, *, min_magnitude: float = 4.0, limit: int = 200,
                  timeout_s: float | None = None) -> dict:
     """ComCat event query around the bbox centre.
 
     bbox = (min_lon, min_lat, max_lon, max_lat). t0/t1 are ISO-8601 UTC strings.
+    The result carries `provenance` (url, retrieved_at, sha256) so a pipeline can cite every
+    external record it used, by name.
     """
     min_lon, min_lat, max_lon, max_lat = bbox
     lat = (min_lat + max_lat) / 2.0
@@ -142,13 +152,16 @@ def fetch_events(bbox, t0: str, t1: str, *, min_magnitude: float = 4.0, limit: i
         return {**cached, "source": "usgs-comcat (cache)"}
 
     try:
-        payload = _http_get_json(url, timeout_s or DEFAULT_TIMEOUT_S)
+        payload, sha = _http_get_json(url, timeout_s or DEFAULT_TIMEOUT_S)
     except urllib.error.HTTPError as ex:
-        return {"source": "usgs-comcat", "events": [], "degraded": True, "error": f"HTTP {ex.code} from ComCat ({url})"}
+        return {"source": "usgs-comcat", "events": [], "degraded": True, "error": f"HTTP {ex.code} from ComCat ({url})",
+                "provenance": _provenance(url)}
     except (urllib.error.URLError, TimeoutError, OSError) as ex:
-        return {"source": "usgs-comcat", "events": [], "degraded": True, "error": f"ComCat unreachable: {ex}"}
+        return {"source": "usgs-comcat", "events": [], "degraded": True, "error": f"ComCat unreachable: {ex}",
+                "provenance": _provenance(url)}
     except json.JSONDecodeError as ex:
-        return {"source": "usgs-comcat", "events": [], "degraded": True, "error": f"ComCat returned malformed JSON: {ex}"}
+        return {"source": "usgs-comcat", "events": [], "degraded": True, "error": f"ComCat returned malformed JSON: {ex}",
+                "provenance": _provenance(url)}
 
     features = payload.get("features") or []
     events = []
@@ -156,7 +169,7 @@ def fetch_events(bbox, t0: str, t1: str, *, min_magnitude: float = 4.0, limit: i
         ev = parse_event_feature(feature)
         if ev is not None:
             events.append(ev)
-    out = {"source": "usgs-comcat", "events": events, "degraded": False, "error": None}
+    out = {"source": "usgs-comcat", "events": events, "degraded": False, "error": None, "provenance": _provenance(url, sha)}
     _cache_put(key, out)
     return out
 
@@ -174,7 +187,10 @@ def fetch_event_detail(event_id: str, timeout_s: float | None = None) -> dict:
     if cached is not None:
         return {**cached, "source": "usgs-comcat (cache)"}
     try:
-        payload = _http_get_json(url, timeout_s or DEFAULT_TIMEOUT_S)
+        # _http_get_json returns (payload, sha256) — unpack BOTH. (The previous code
+        # assigned the tuple to `payload` and then called .get on it, so the R2
+        # ShakeMap lookup silently never worked; final-prompt fix 4.)
+        payload, sha = _http_get_json(url, timeout_s or DEFAULT_TIMEOUT_S)
     except urllib.error.HTTPError as ex:
         return {"source": "usgs-comcat", "event": None, "degraded": True, "error": f"HTTP {ex.code} from ComCat"}
     except (urllib.error.URLError, TimeoutError, OSError) as ex:

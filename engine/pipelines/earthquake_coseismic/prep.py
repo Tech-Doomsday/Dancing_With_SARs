@@ -7,8 +7,7 @@ floor; this module does the pipeline-specific work declared in the manifest:
     * pair selection (event mode: pairs spanning the event window; scan mode:
       the newest pair of the primary stack),
     * quality mask (finite LOS, coherence gate, connected-component gate),
-    * referencing: robust median over all valid tile pixels (default; the app's 12 % far-field margin
-      is opt-in), the same operator applied to the model prediction,
+    * far-field referencing (12 % margin median; degenerate-MAD fallback),
     * cycle-jump suspect screen (diagnostic, never corrective),
     * optional planar detrend (default OFF, flag recorded when applied).
 """
@@ -101,7 +100,7 @@ def analyse_pair(bundle, stack, pair_index: int, params: EqParams) -> tuple[Pair
                       f"(>= {params.coherence_threshold}); need >= {params.min_valid_pixels}")
 
     # ---- reference region -------------------------------------------------
-    if params.reference_strategy in ("tileMedian", "fullFrameMedian"):
+    if params.reference_strategy == "fullFrameMedian":
         ref = mask.copy()
     else:
         margin_rows = max(2, round(params.far_field_margin * h))
@@ -149,14 +148,6 @@ def analyse_pair(bundle, stack, pair_index: int, params: EqParams) -> tuple[Pair
         else:
             ref_sigma = 0.0
             warnings.append("Reference scatter is degenerate (std fallback failed); sigma_ref = 0")
-    ref_scatter = float(ref_sigma)           # diagnostic: robust scatter of the reference region
-    if params.reference_strategy == "tileMedian":
-        # On a 10 km tile the reference region can contain the deformation itself (a source field is
-        # tens of km wide), so its scatter measures SIGNAL, not noise, and would inflate the detection
-        # threshold until the signal hides itself (seen on a synthetic strike-slip scene: 22.6 mm
-        # "noise" -> 68 mm threshold on a 47 mm field). The noise term therefore stays the bundle's
-        # per-pixel sigma_m (+ iono floor + the 10 mm floor); the scatter is reported, never used.
-        ref_sigma = 0.0
 
     disp = np.where(mask, los - ref_offset, np.nan)
     sigma0 = np.where(np.isnan(sigma), 0.0, sigma)
@@ -179,7 +170,6 @@ def analyse_pair(bundle, stack, pair_index: int, params: EqParams) -> tuple[Pair
     analysis.sigma_eff = sigma_eff.astype(np.float32)
     analysis.ref_offset_m = float(ref_offset)
     analysis.ref_sigma_m = float(ref_sigma)
-    analysis.ref_scatter_m = ref_scatter    # type: ignore[attr-defined]
     analysis.warnings = warnings
     analysis.flags = flags
     analysis.iono_floor_m = iono           # type: ignore[attr-defined]

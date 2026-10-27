@@ -20,6 +20,8 @@ export interface PipelineInfo {
   min_epochs: number | null;
   status_values: string[];
   implemented: boolean;
+  execution?: string;
+  needs_sar?: boolean;
 }
 
 export interface BundleListItem {
@@ -39,8 +41,13 @@ export interface RunSummary {
 }
 
 export interface EvidenceItem {
+  id?: string;
   kind: string;
-  text: string;
+  /** one self-contained sentence — the engine's field is `claim` (never `text`) */
+  claim: string;
+  support?: Record<string, unknown> | null;
+  level?: string;
+  source_ref?: string | null;
   [k: string]: unknown;
 }
 
@@ -50,6 +57,7 @@ export interface PipelineResult {
   epoch: string | null;
   raw_p: number | null;
   status: string;
+  summary?: string;
   evidence: EvidenceItem[];
   layers: string[];
   data_used: string[];
@@ -79,6 +87,8 @@ export interface LayerPayload {
   vmin: number | null;
   vmax: number | null;
   note: string;
+  /** [W, S, E, N] core-grid corners, server-computed (plan 6.4) */
+  bounds_lonlat?: [number, number, number, number] | null;
 }
 
 export interface LayerResponse {

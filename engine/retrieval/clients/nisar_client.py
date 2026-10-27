@@ -98,6 +98,7 @@ class NisarClient:
         self.pool = ThreadPoolExecutor(int(self.cfg.decode["threads"]), thread_name_prefix="decode")
         self.blocking = ThreadPoolExecutor(8, thread_name_prefix="blocking")  # index build, fallback, clip IO
         self._indexes: dict[str, GranuleIndex] = {}
+        self.last_search_truncated = False   # set by search(): the result list hit maxResults
         self._inflight: dict[str, asyncio.Future] = {}
         self._index_inflight: dict[str, asyncio.Future] = {}
         self._fb: OrderedDict = OrderedDict()
@@ -112,12 +113,17 @@ class NisarClient:
     def search(self, bbox, t0=None, t1=None, product=None, maturity=None, fresh=False, max_results=None):
         """-> (refs, degraded). Uses asf_search; result lists are TTL-cached and served stale
         (degraded=True) if ASF is unreachable. bbox=None searches everywhere; fresh=True skips the
-        cache read (the poller does this) but still falls back to a stale entry if ASF is down."""
+        cache read (the poller does this) but still falls back to a stale entry if ASF is down.
+
+        Hitting the result budget sets last_search_truncated and logs a WARNING: a truncated list
+        looks like 'no granules over the tile' downstream, which it is not.
+        """
         keep_all = bool(self.cfg.search["keep_all_versions"])
         prods = [p.strip() for p in product.split(",")] if isinstance(product, str) else (product or [])
         k = self.searches.key(bbox or (0, 0, 0, 0), t0, t1, prods, maturity, keep_all)
         hit = None if fresh else self.searches.get(k)
         if hit:
+            self.last_search_truncated = False
             return [GranuleRef(**d) for d in hit[0]], False
         try:
             import asf_search as asf
@@ -137,6 +143,15 @@ class NisarClient:
                 refs.append(GranuleRef(gid, p.get("url"), p.get("processingLevel"), p.get("startTime"),
                                        p.get("stopTime"), p.get("pathNumber"), p.get("frameNumber"),
                                        p.get("flightDirection"), _size(p), _ring(r)))
+            budget = int(max_results or self.cfg.search["max_results"])
+            truncated = len(refs) >= budget
+            if truncated:
+                self.last_search_truncated = True
+                logging.getLogger("nisar.retrieval").warning(
+                    "search hit maxResults=%d — result list is TRUNCATED; narrow the query "
+                    "(smaller bbox / tighter time window) before treating it as complete", budget)
+            else:
+                self.last_search_truncated = False
             if not keep_all:
                 refs, _ = drop_older_versions(refs)
             self.searches.put(k, [r.to_dict() for r in refs])
@@ -301,12 +316,17 @@ class NisarClient:
 
     # catalog = layer/grid paths learned from one full walk of a product type; later granules are
     # then opened by path (a handful of metadata pages) instead of walking every object in the file.
+    # The runtime cache (learned from files of THIS product type, self-healing) is consulted before
+    # any shipped catalog: a shipped json for a different product revision must not shadow it, or
+    # every granule pays the stale-catalog KeyError -> full-walk fallback (regression 2026-10-27).
     def _catalog(self, g: GranuleRef) -> dict | None:
         if not g.product:
             return None
         if g.product in self._catalogs:
             return self._catalogs[g.product]
-        for d in self.cfg.catalog_dirs:
+        cache = self.cfg.catalog_dirs[-1:]          # runtime-learned, self-healing
+        shipped = self.cfg.catalog_dirs[:-1]        # repo defaults (last resort)
+        for d in (*cache, *shipped):
             try:
                 self._catalogs[g.product] = json.loads((d / f"{g.product}.json").read_text())
                 return self._catalogs[g.product]
@@ -363,6 +383,13 @@ class NisarClient:
         except KeyError:
             self._catalogs.pop(g.product, None)
             full = self._full_walk(g)
+            # the KeyError usually means the CATALOG was stale, not the file: chunk tables already
+            # read for unchanged layouts stay loaded (a full rebuild forgets them and every later
+            # fetch of those layers re-reads their chunk tables from the network)
+            for p, L in list(ix.layers.items()):
+                new = full.layers.get(p)
+                if new is not None and (L.shape, L.dtype.str, L.chunks, L.filters) == (new.shape, new.dtype.str, new.chunks, new.filters):
+                    full.layers[p] = L
             ix.grids, ix.layers = full.grids, full.layers
         ix.save(self._index_path(g))
         self.counters["index_skeleton_s"] += time.perf_counter() - t
@@ -385,7 +412,7 @@ class NisarClient:
         def run(label, block, pagebuf, targeted, cat=None):
             before = m.snapshot()
             t = time.perf_counter()
-            rf = RangeFile(self.io, g.url, block=block, max_blocks=256)
+            rf = RangeFile(self._fallback_io(), g.url, block=block, max_blocks=256)
             rf.warm()
             kw = {"page_buf_size": 16 << 20} if pagebuf else {}
             with h5py.File(rf, "r", **kw) as h5:
@@ -501,6 +528,18 @@ class NisarClient:
     def _fallback_file(self, g: GranuleRef):
         return self._fallback_pair(g)[1]
 
+    def _fallback_io(self) -> HttpIO:
+        """A private inline HTTP twin for the h5py-serving path.
+
+        A thread inside an h5py callback holds h5py's global lock for the whole call. If that call
+        waits on THE event loop (for a range read) while the loop thread finalises any h5py object
+        (cyclic GC runs on whichever thread allocates), the two wait on each other forever. Serving
+        RangeFile reads from a second, private loop breaks the cycle: loop-side GC can then only
+        ever wait for a reader that is itself waiting on a loop that carries no h5py work
+        (regression: test_index_build_survives_h5py_objects_being_finalised_on_the_loop_thread).
+        """
+        return self.io.inline_io("h5py-fallback")
+
     def _fallback_pair(self, g: GranuleRef):
         """-> (RangeFile, h5py.File). One open handle per granule, kept in an LRU so repeated fallback reads reuse its
         block cache. The LRU must hold more entries than there are worker threads: evicting closes the handle, and a
@@ -510,7 +549,7 @@ class NisarClient:
         with self._fb_lock:
             hit = self._fb.pop(g.granule_id, None)
             if hit is None:
-                rf = RangeFile(self.io, g.url, block=int(self.cfg.net["index_block_size_bytes"]), max_blocks=256)
+                rf = RangeFile(self._fallback_io(), g.url, block=int(self.cfg.net["index_block_size_bytes"]), max_blocks=256)
                 rf.warm()
                 h5 = None
                 if self.cfg.net["index_page_buffer"]:

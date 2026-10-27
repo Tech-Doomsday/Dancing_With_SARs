@@ -394,6 +394,20 @@ def r_tsunami_inundation(f: Facts):
     return _d(n, "no", ["trigger present, but the tile has no coastal low-lying strip"], proxy=proxy)
 
 
+def r_tsunami_ocean_evidence(f: Facts):
+    n = "tsunami_ocean_evidence"
+    tr = f.triggers
+    ew = f.ctx.request.event_window
+    if not (tr.get("quake") or tr.get("tsunami") or (ew and ew[0] is not None)):
+        return _d(n, "no", ["no earthquake / tsunami trigger and no event window in the request"])
+    # event-scoped ocean-evidence pipeline: needs no SAR channel (needs_sar: false), so routing
+    # says yes as soon as the request is scoped to an event; the pipeline answers honestly from
+    # its own fetched data when the event or the sensors are unavailable.
+    why = ["earthquake/tsunami trigger present" if (tr.get("quake") or tr.get("tsunami"))
+           else "event window present", "no SAR data required for this pipeline"]
+    return _d(n, "yes", why)
+
+
 def r_river_erosion(f: Facts):
     n, cfg = "river_erosion", f.cfg
     parts = []
@@ -497,6 +511,7 @@ def r_iceberg_calving_drift(f: Facts):
 RULES = {fn.__name__[2:]: fn for fn in (
     r_earthquake_coseismic, r_land_subsidence, r_volcanic_deformation, r_glacier_ice_flow, r_permafrost_thaw,
     r_landslide, r_flood_inundation, r_deforestation, r_wildfire_burn_scar, r_coastal_erosion, r_tsunami_inundation,
+    r_tsunami_ocean_evidence,
     r_river_erosion, r_tropical_cyclone, r_oil_spill, r_urban_damage, r_iceberg_calving_drift)}
 
 

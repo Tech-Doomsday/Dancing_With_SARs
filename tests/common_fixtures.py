@@ -332,6 +332,13 @@ def make_scene(tile=None, *, n_epochs=6, event=True, pairs=((0, 1), (1, 2), (2, 
     return specs + (extra or [])
 
 
+def selftest_scene(tile=None) -> list[GranuleSpec]:
+    """The scene the debug hub's SELF-TEST source serves (one shared recipe so the hub and its tests
+    cannot drift). It is the earthquake acceptance scene (T-8): a +50 mm LOS bowl on the newest GUNW
+    pair, so the hub's PIPELINES tab has a detectable, forward-model-consistent signal end to end."""
+    return make_scene(tile, n_epochs=4, pairs=((0, 1), (1, 2), (2, 3)), dlos=0.05)
+
+
 # ---------------------------------------------------------------------------------------------
 # ancillary rasters for DirectoryAncillary
 # ---------------------------------------------------------------------------------------------

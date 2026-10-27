@@ -1,8 +1,10 @@
-"""3.01 earthquake_coseismic — pipeline-only helpers (ported statistics.ts et al.).
+"""3.01 earthquake_coseismic — pipeline-only helpers.
 
-Pure NumPy kernels ported from the app's science core; behavior pinned by
-test_lib_local.py. Nothing here may import engine.common's chain or another
-pipeline — lib_local is this package's private code.
+The robust statistics kernels stay here (ported from the app's statistics.ts; behavior pinned by
+test_lib_local.py). Geometry is delegated to engine/lib: the ONE LOS projection lives in
+engine/lib/los.py (sign fixed by gate G0) and epicentre projection / distances in engine/lib/geo.py
+— this module re-exports them under their historical names so the pipeline code and tests read the
+same. lib_local may not import the chain or another pipeline.
 """
 from __future__ import annotations
 
@@ -11,8 +13,11 @@ import math
 
 import numpy as np
 
+from engine.lib import geo as _geo
+from engine.lib.los import los_project, los_project_point, los_flip, los_unit_ok
+
 MAD_SIGMA_FACTOR = 1.4826
-EARTH_RADIUS_KM = 6371.0088
+EARTH_RADIUS_KM = _geo.EARTH_RADIUS_KM
 
 
 # --------------------------------------------------------------------------- #
@@ -123,49 +128,26 @@ def pearson(x, y) -> float:
 
 
 # --------------------------------------------------------------------------- #
-# geometry helpers
+# geometry helpers — delegated to engine/lib (single source of truth for signs)
 # --------------------------------------------------------------------------- #
 def haversine_km(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
-    """Great-circle distance in km (spherical Earth, R = 6371.0088)."""
-    rad = math.pi / 180.0
-    dlat = (lat2 - lat1) * rad
-    dlon = (lon2 - lon1) * rad
-    a = (math.sin(dlat / 2.0) ** 2
-         + math.cos(lat1 * rad) * math.cos(lat2 * rad) * math.sin(dlon / 2.0) ** 2)
-    return 2.0 * EARTH_RADIUS_KM * math.asin(math.sqrt(a))
+    """Great-circle distance in km (engine.lib.geo)."""
+    return _geo.haversine_km(lat1, lon1, lat2, lon2)
 
 
 def project_los_enu(d_east, d_north, d_up, los_enu) -> np.ndarray:
-    """LOS displacement, engine convention: + = TOWARD the sensor.
-
-    los_enu is the ground->sensor unit vector (3, n, n) from the bundle
-    geometry; predicted toward-LOS = d . u_gs  (no negation — see the sign
-    table in docs/IMPLEMENTATION_PLAN.md 3).
-    """
-    ux, uy, uz = los_enu[0], los_enu[1], los_enu[2]
-    return np.asarray(d_east) * ux + np.asarray(d_north) * uy + np.asarray(d_up) * uz
+    """LOS displacement, engine convention: + = TOWARD the sensor (engine.lib.los.los_project)."""
+    return los_project(d_east, d_north, d_up, los_enu)
 
 
 def project_epicentre(lat: float, lon: float, epsg: int) -> tuple[float, float] | dict:
-    """lat/lon -> the grid's projected CRS (UTM). Non-UTM EPSG => explicit skip.
+    """lat/lon -> the grid's projected CRS (UTM). Non-UTM EPSG => explicit skip (engine.lib.geo)."""
+    return _geo.project_epicentre(lat, lon, epsg)
 
-    Replaces the app's Snyder-series utm.ts with pyproj (already a retrieval
-    dependency); the honesty guard is preserved: polar-stereographic granules
-    refuse the forward model rather than misplace it.
-    """
-    utm = (32601 <= epsg <= 32660) or (32701 <= epsg <= 32760)
-    if not utm:
-        return {"error": (
-            f"grid EPSG {epsg} is not WGS84 UTM; the forward model only supports UTM grids "
-            "(polar-stereographic granules would need a different projection — refusing "
-            "rather than misplacing the model)")}
-    try:
-        from pyproj import Transformer
-        tr = Transformer.from_crs(4326, epsg, always_xy=True)
-        x, y = tr.transform(lon, lat)
-        return (float(x), float(y))
-    except Exception as ex:  # pragma: no cover - projection should not fail for UTM
-        return {"error": f"projection failed: {ex}"}
+
+en_offsets_m = _geo.en_offsets_m
+azimuth_deg = _geo.azimuth_deg
+epsg_is_utm = _geo.epsg_is_utm
 
 
 # --------------------------------------------------------------------------- #
@@ -189,6 +171,34 @@ def mulberry32(seed: int):
 # --------------------------------------------------------------------------- #
 # evidence-layer encoding (LayerPayload transport)
 # --------------------------------------------------------------------------- #
+def core_bounds_lonlat(grid_x, grid_y, epsg: int, fallback=None) -> list:
+    """Core-grid geographic corners [W, S, E, N] (plan §6.4: server-computed once).
+
+    `grid_x`/`grid_y` are the core grid's coordinate arrays (metres, EPSG:epsg).
+    Falls back to the tile bbox when pyproj is unavailable or the EPSG is not UTM —
+    the fallback is a slightly larger rectangle and is what the UI used before this
+    field existed.
+    """
+    try:
+        from pyproj import Transformer
+        tr = Transformer.from_crs(epsg, 4326, always_xy=True)
+        xs = np.asarray(grid_x, dtype=np.float64)
+        ys = np.asarray(grid_y, dtype=np.float64)
+        if xs.size == 0 or ys.size == 0 or not np.isfinite(xs).all() or not np.isfinite(ys).all():
+            raise ValueError("non-finite grid coordinates")
+        (lon0, lat0) = tr.transform(float(xs.min()), float(ys.min()))
+        (lon1, lat1) = tr.transform(float(xs.max()), float(ys.max()))
+        lons = [lon0, lon1]
+        lats = [lat0, lat1]
+        if not all(math.isfinite(v) for v in lons + lats):
+            raise ValueError("non-finite geographic bounds")
+        return [min(lons), min(lats), max(lons), max(lats)]
+    except Exception:
+        if fallback:
+            return [float(v) for v in fallback]
+        return []
+
+
 def encode_layer(name: str, arr: np.ndarray, units: str, colormap: str,
                  vmin: float | None = None, vmax: float | None = None, note: str = "") -> dict:
     """Encode a core-grid raster as a little-endian base64 payload."""

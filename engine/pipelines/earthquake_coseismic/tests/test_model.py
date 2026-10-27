@@ -182,11 +182,14 @@ def test_forward_screen_skips_non_utm_epsg():
     assert "not WGS84 UTM" in scr["skip_reason"]
 
 
-def test_rank_score_is_pearson_r_clipped_and_never_a_percentage_claim():
-    assert model.rank_score(0.61) == pytest.approx(0.61)
-    assert model.rank_score(-0.4) == 0.0                 # anti-correlation clips to 0
-    assert model.rank_score(1.7) == 1.0
-    assert model.rank_score(None) is None and model.rank_score(float("nan")) is None
+def test_within_tier_score_bounds_and_monotonicity():
+    s = model.within_tier_score(ratio=1.0, corr=1.0, affected_km2=100, credible_km2=1.0,
+                                null_fraction_mean=0.0)
+    assert 0.95 <= s <= 1.0
+    zero = model.within_tier_score(ratio=0.0, corr=0.0, affected_km2=0, credible_km2=1.0,
+                                   null_fraction_mean=0.05)
+    assert zero == pytest.approx(0.0, abs=1e-9)
+    assert model.within_tier_score(1.0, 0.6, 50, 1.0, 0.0) > model.within_tier_score(1.0, 0.3, 50, 1.0, 0.0)
 
 
 def test_decide_status_table():
@@ -201,33 +204,67 @@ def test_decide_status_table():
                      "pattern_correlation": 0.6}]
     screens_fail = [{"event_id": "e1", "skipped": False, "amplitude_ratio": 20.0,
                      "pattern_correlation": 0.6}]
-    # screen present: raw_p IS the Pearson r of the better plane
-    status, raw_p, rule, extra = model.decide(_summary(500, 3.2), screens_pass, True, PARAMS, catalog_events=1)
-    assert status == "SUPPORTED" and rule == "screen_pass" and raw_p == pytest.approx(0.6)
-    status, raw_p, rule, extra = model.decide(_summary(500, 3.2), screens_fail, True, PARAMS, catalog_events=1)
-    assert status == "NOT_SUPPORTED" and rule == "screen_fail" and raw_p == pytest.approx(0.6)
-    # event present, nothing detected: not a quiet scene
-    status, raw_p, rule, extra = model.decide(_summary(0, 0.0), screens_pass, True, PARAMS, catalog_events=1)
-    assert status == "NOT_SUPPORTED" and rule == "no_detection"
-    # no event AND no cluster: nothing happened here
-    status, raw_p, rule, extra = model.decide(_summary(0, 0.0), [], True, PARAMS, catalog_events=0)
-    assert status == "NO_SIGNAL" and raw_p is None and rule == "no_event_no_cluster"
-    # an event qualifies but cannot be modelled (no mechanism): NOT_MODELLED, no raw_p
-    status, raw_p, rule, extra = model.decide(_summary(500, 3.2), [], True, PARAMS, catalog_events=2)
-    assert status == "NOT_MODELLED" and rule == "event_not_modellable" and raw_p is None
-    # genuinely NO catalog event: the status hinges on the uncatalogued-source fit (plan 8.4 / 8.6)
-    status, raw_p, rule, extra = model.decide(_summary(500, 3.2), [], True, PARAMS)      # fit never ran
-    assert status == "NOT_SUPPORTED" and rule == "uncatalogued_fit_not_converged" and raw_p is None
-    failed_fit = {"attempted": True, "converged": False, "pattern_correlation": 0.9}
-    status, raw_p, rule, extra = model.decide(_summary(500, 3.2), [], True, PARAMS, fit=failed_fit)
-    assert status == "NOT_SUPPORTED" and rule == "uncatalogued_fit_not_converged"
-    good_fit = {"attempted": True, "converged": True, "pattern_correlation": 0.93}
-    status, raw_p, rule, extra = model.decide(_summary(500, 3.2), [], True, PARAMS, fit=good_fit)
-    assert status == "UNCATALOGUED_CANDIDATE" and rule == "uncatalogued_fit_converged"
-    assert raw_p == pytest.approx(0.93)
-    # a converged fit cannot rescue a sub-credible signal
-    status, raw_p, rule, extra = model.decide(_summary(5, 0.03), [], True, PARAMS, fit=good_fit)
+    status, raw_p, rule, extra = model.decide(_summary(500, 3.2), screens_pass, True, PARAMS)
+    assert status == "SUPPORTED" and rule == "screen_pass" and 0.0 < raw_p <= 1.0
+    status, raw_p, rule, extra = model.decide(_summary(500, 3.2), screens_fail, True, PARAMS)
+    assert status == "NOT_SUPPORTED" and rule == "screen_fail"
+    status, raw_p, rule, extra = model.decide(_summary(0, 0.0), screens_pass, True, PARAMS)
+    assert status == "NOT_SUPPORTED" and rule == "no_detection" and raw_p is not None
+    status, raw_p, rule, extra = model.decide(_summary(5, 0.03), [], True, PARAMS)
     assert status == "NOT_SUPPORTED" and rule == "sub_credible_no_catalog_event"
-    # provider failure upstream: events unknown is never "no event"
     status, raw_p, rule, extra = model.decide(_summary(500, 3.2), screens_pass, False, PARAMS)
-    assert status == "INSUFFICIENT_EVIDENCE" and rule == "events_unknown" and raw_p is None
+    assert status == "INSUFFICIENT_EVIDENCE" and rule == "events_unknown"
+
+
+def test_decide_events_in_window_but_unscreenable_is_insufficient():
+    """Final-prompt fix 1: a catalogued Mw 6.4 event with no published nodal planes is a
+    DATA GAP (INSUFFICIENT_EVIDENCE / events_unscreenable) — never UNCATALOGUED_CANDIDATE."""
+    from engine.pipelines.earthquake_coseismic.types import DetectionSummary
+
+    summary = DetectionSummary(detected_pixels=500, affected_area_km2=3.2,
+                               pixel_area_km2=0.0064, threshold_median_m=0.01,
+                               null_screen={"detected_fraction_mean": 0.0})
+    screens = [{"event_id": "us6000", "skipped": True, "amplitude_ratio": float("nan"),
+                "pattern_correlation": float("nan"),
+                "note": "no moment-tensor nodal plane published for this event"}]
+    status, raw_p, rule, extra = model.decide(summary, screens, True, PARAMS, n_events_in_window=1)
+    assert status == "INSUFFICIENT_EVIDENCE" and rule == "events_unscreenable"
+    assert raw_p is None and extra["n_events_in_window"] == 1
+
+
+def test_decide_uncatalogued_requires_converged_fit():
+    """Final-prompt fix 1 + plan 8.4 row 4: genuinely no catalog event — the candidate
+    status only with a CONVERGED fit; unconverged / absent fit => NOT_SUPPORTED."""
+    from engine.pipelines.earthquake_coseismic.types import DetectionSummary
+
+    summary = DetectionSummary(detected_pixels=500, affected_area_km2=3.2,
+                               pixel_area_km2=0.0064, threshold_median_m=0.01,
+                               null_screen={"detected_fraction_mean": 0.0})
+    converged = {"converged": True, "residual_rms_m": 0.004, "field_peak_m": 0.05}
+    status, raw_p, rule, _ = model.decide(summary, [], True, PARAMS, uncatalogued=converged)
+    assert status == "UNCATALOGUED_CANDIDATE" and rule == "uncatalogued_fit_converged"
+    assert raw_p is not None
+
+    not_converged = {"converged": False, "residual_rms_m": 1e9, "field_peak_m": 0.05}
+    status, raw_p, rule, _ = model.decide(summary, [], True, PARAMS, uncatalogued=not_converged)
+    assert status == "NOT_SUPPORTED" and rule == "uncatalogued_fit_not_converged"
+
+    status, raw_p, rule, _ = model.decide(summary, [], True, PARAMS, uncatalogued=None)
+    assert status == "NOT_SUPPORTED" and rule == "no_catalog_event_fit_not_run"
+
+
+def test_decide_no_signal_for_quiet_scenes():
+    """Docx-confirmed sixth status: no detection AND genuinely no catalog event in the
+    window is NO_SIGNAL ("nothing happened here"), not a tested-and-rejected quake.
+    With events in the window (or events unknown) the answer stays NOT_SUPPORTED."""
+    from engine.pipelines.earthquake_coseismic.types import DetectionSummary
+
+    summary = DetectionSummary(detected_pixels=0, affected_area_km2=0.0,
+                               pixel_area_km2=0.0064, threshold_median_m=0.01,
+                               null_screen={"detected_fraction_mean": 0.0})
+    status, raw_p, rule, _ = model.decide(summary, [], True, PARAMS, n_events_in_window=0)
+    assert status == "NO_SIGNAL" and rule == "no_event_no_cluster" and raw_p is None
+    status, raw_p, rule, _ = model.decide(summary, [], True, PARAMS, n_events_in_window=2)
+    assert status == "NOT_SUPPORTED" and rule == "no_detection"
+    status, raw_p, rule, _ = model.decide(summary, [], False, PARAMS, n_events_in_window=0)
+    assert status == "NOT_SUPPORTED" and rule == "no_detection"

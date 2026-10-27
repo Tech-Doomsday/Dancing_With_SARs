@@ -1,29 +1,45 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import dynamic from "next/dynamic";
 import { api, pollWhile } from "@/lib/api";
-import type { RunState } from "@/lib/types";
-import StatusBadge from "./StatusBadge";
-import LayerMap from "./LayerMap";
+import type { PipelineInfo, RunState } from "@/lib/types";
+import RunProgress from "./RunProgress";
+import PipelineGrid from "./PipelineGrid";
 import { VerdictCard, EvidenceList, WarningsPanel } from "./VerdictCard";
+
+// Leaflet touches window at import time: render the map client-side only.
+const LayerMap = dynamic(() => import("./LayerMap"), {
+  ssr: false,
+  loading: () => <p className="text-xs text-[#8a837b]">Loading map…</p>,
+});
 
 export default function RunView({ runId, bounds }: { runId: string; bounds: [[number, number], [number, number]] | null }) {
   const [state, setState] = useState<RunState | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [catalogue, setCatalogue] = useState<PipelineInfo[] | null>(null);
 
   useEffect(() => {
+    // The contract is FLAT: GET /api/runs/{id} answers {ok, id, status, progress, error, results}.
+    // Poll errors are surfaced (they used to be swallowed, leaving the page on "Loading run…").
     const stop = pollWhile(
       async () => {
         const r = await api.run(runId);
-        const done = r.run.status === "ok" || r.run.status === "error";
-        return { done, value: r.run };
+        const done = r.status === "ok" || r.status === "error";
+        return { done, value: r };
       },
       (value) => setState(value),
+      1500,
+      (message) => setError(message || null),
     );
     return stop;
   }, [runId]);
 
-  if (error) {
+  useEffect(() => {
+    api.pipelines().then((r) => setCatalogue(r.pipelines)).catch(() => {});
+  }, []);
+
+  if (error && !state) {
     return (
       <p role="alert" className="mono rounded border border-[#9e3b2c] bg-[#fbf3ef] px-3 py-2 text-xs text-[#9e3b2c]">
         {error}
@@ -32,29 +48,18 @@ export default function RunView({ runId, bounds }: { runId: string; bounds: [[nu
   }
   if (!state) return <p className="text-sm text-[#8a837b]">Loading run…</p>;
 
-  const progress = state.progress as { stage?: string; tile?: string };
-
   return (
     <div className="space-y-4">
-      {(state.status === "queued" || state.status === "running") && (
-        <section aria-live="polite" className="rounded-lg border border-[#b08d57]/40 bg-[#f7f2e7] p-4">
-          <div className="flex items-center gap-3">
-            <StatusBadge status={state.status} />
-            <span className="mono text-xs text-[#7a6438]">
-              {progress?.stage ?? "working"}
-              {progress?.tile ? ` · tile ${progress.tile}` : ""}
-            </span>
-          </div>
-          <p className="mt-2 text-xs text-[#7a6438]">
-            Running the real engine path (routing → gates → pipeline → collect). The verdict
-            appears here when the registry returns.
-          </p>
-        </section>
-      )}
+      {(state.status === "queued" || state.status === "running") && <RunProgress state={state} />}
 
       {state.status === "error" && (
         <p role="alert" className="mono rounded border border-[#9e3b2c] bg-[#fbf3ef] px-3 py-2 text-xs text-[#9e3b2c]">
           {state.error ?? "run failed"}
+        </p>
+      )}
+      {error && state.status !== "error" && (
+        <p role="status" className="mono rounded border border-[#b08d57]/50 bg-[#f7f2e7] px-3 py-2 text-xs text-[#7a6438]">
+          last poll: {error}
         </p>
       )}
 
@@ -68,20 +73,7 @@ export default function RunView({ runId, bounds }: { runId: string; bounds: [[nu
               <LayerMap runId={runId} bounds={bounds} />
             </div>
           </div>
-          {state.results.length > 1 && (
-            <section className="rounded-lg border border-[#e7e2da] bg-white p-4">
-              <h3 className="text-sm font-semibold">Other pipelines on this run</h3>
-              <ul className="mt-2 space-y-1 text-xs">
-                {state.results.slice(1).map((r) => (
-                  <li key={r.pipeline} className="flex items-center gap-2">
-                    <StatusBadge status={r.status} />
-                    <span className="mono text-[#8a837b]">{r.pipeline}</span>
-                    <span className="text-[#8a837b]">{r.evidence[0]?.text ?? ""}</span>
-                  </li>
-                ))}
-              </ul>
-            </section>
-          )}
+          <PipelineGrid results={state.results} catalogue={catalogue ?? undefined} />
         </>
       )}
     </div>

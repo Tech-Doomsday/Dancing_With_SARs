@@ -20,7 +20,7 @@ class EqParams:
     """Pipeline parameters. Overrides enter via bundle.request.triggers["eq_params"]."""
 
     coherence_threshold: float = 0.5
-    reference_strategy: str = "tileMedian"        # or "farField" / "fullFrameMedian" (app, frame-scale)
+    reference_strategy: str = "farField"          # or "fullFrameMedian"
     far_field_margin: float = 0.12
     detrend: bool = False
     detection_floor_m: float = 0.01               # manifest: 10 mm
@@ -34,16 +34,16 @@ class EqParams:
     forward_top_events: int = 3
     credible_pixel_factor: int = 4
     cycle_jump_fraction: float = 0.5              # |los| > fraction * lambda  =>  suspect
-    # uncatalogued-source branch (docs 8.6) - optimizer budget + convergence rule
+    # uncatalogued-source branch (docs 8.6; module uncatalogued.py) — optimizer budget + rule
     uncat_max_points: int = 500                   # quadtree leaves fed to the optimizer
     uncat_scan_strikes: int = 12                  # coarse circular strike grid (every 15 deg)
     uncat_scan_seeds: int = 1                     # independent DE seeds per strike node
     uncat_scan_popsize: int = 8                   # per-strike 5-D differential evolution
     uncat_scan_iter: int = 25
-    uncat_refine_top: int = 12                     # candidates refined locally over all 6 parameters
+    uncat_refine_top: int = 12                    # candidates refined locally over all 6 parameters
     uncat_refine_nfev: int = 60                   # least-squares refinement budget (x7 evals / Jacobian)
     uncat_rms_ratio: float = 0.7                  # residual RMS must be < ratio x field RMS
-    uncat_seed: int = 20261021
+    uncat_seed: int = 20261021                    # replaced by the bundle-content seed at run time
 
     @classmethod
     def from_triggers(cls, triggers) -> "EqParams":
@@ -111,6 +111,7 @@ class EventsResult:
     source: str = "none"
     degraded: bool = False
     error: str | None = None
+    provenance: tuple = field(default_factory=tuple)   # tuple[engine.common.result.Source]
 
 
 @dataclass
@@ -175,6 +176,7 @@ class LayerPayload:
     vmin: float | None = None
     vmax: float | None = None
     note: str = ""
+    bounds_lonlat: list | None = None   # [W, S, E, N] core-grid corners (§6.4, server-computed)
 
     def to_dict(self) -> dict:
         d = asdict(self)

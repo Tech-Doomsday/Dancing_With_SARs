@@ -217,7 +217,10 @@ def make_source(kind: str, job: Job, tile, params: dict):
     if kind == "selftest":
         sys.path.insert(0, str(REPO / "tests"))
         import common_fixtures as cf
-        retr = cf.FakeRetriever(cf.make_scene(tile))
+        # One shared recipe for the synthetic source (common_fixtures.selftest_scene): the earthquake
+        # acceptance scene, so the PIPELINES tab has a detectable, forward-model-consistent signal.
+        # Synthetic by definition; the red SELF-TEST banner is always shown when this source is active.
+        retr = cf.FakeRetriever(cf.selftest_scene(tile))
         anc = NullAncillary()
         tmp = None
         if params.get("synthetic_ancillary"):
@@ -299,6 +302,20 @@ def run_job(job: Job) -> None:
         job.emit("final", f"contract check: {len(issues)} issue(s)", stage="P13")
         job.handoff = handoff.pipeline_feed(bundle)
         job.emit("handoff", f"pipeline feed: {job.handoff['tally']}", stage="handoff")
+        from . import pipelines as featured
+        job.emit("pipelines", f"running featured pipelines through the registry: {', '.join(n for n, _, _ in featured.FEATURED)}",
+                 stage="pipelines")
+        try:
+            job.pipelines = featured.run_featured(job, tile, bundle, as_of, info["kind"])
+            st = {n: p.get("status") for n, p in job.pipelines["pipelines"].items()}
+            job.emit("pipelines", f"featured pipelines done in {job.pipelines['seconds']:.2f} s: "
+                     + ", ".join(f"{k}={v}" for k, v in st.items()), stage="pipelines",
+                     launched=job.pipelines.get("launched", []))
+        except Exception as ex:
+            tb = traceback.format_exc(limit=8)
+            job.pipelines = {"names": [n for n, _, _ in featured.FEATURED], "error": short_exc(ex),
+                             "trace": tb[-4000:], "pipelines": {}, "seconds": None}
+            job.emit("error", f"featured pipeline runner failed: {short_exc(ex)}", stage="pipelines")
         job.finish("done")
         job.emit("done", "finished", stage="done")
     except Exception as ex:

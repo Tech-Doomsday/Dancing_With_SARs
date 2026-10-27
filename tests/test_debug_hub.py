@@ -9,6 +9,8 @@ import urllib.request
 from http.server import ThreadingHTTPServer
 from pathlib import Path
 
+import numpy as np
+
 ROOT = Path(__file__).resolve().parents[1]
 for p in (ROOT, ROOT / "tools", ROOT / "tests"):
     if str(p) not in sys.path:
@@ -43,7 +45,7 @@ def test_observing_does_not_change_the_bundle():
     from engine.common.chain import build_scene_bundle
     j = _run()
     tile = cf.default_tile()
-    plain = build_scene_bundle(tile, cf.FakeRetriever(cf.make_scene(tile)), as_of="2026-09-20T00:00:00Z", ancillary=NullAncillary())
+    plain = build_scene_bundle(tile, cf.FakeRetriever(cf.selftest_scene(tile)), as_of="2026-09-20T00:00:00Z", ancillary=NullAncillary())
     assert j.final["bundle_id"] == plain.bundle_id
 
 
@@ -172,6 +174,72 @@ def test_make_source_rejects_unknown_kinds_without_touching_the_network():
         make_source("nonsense", None, None, {})
     with pytest.raises(ValueError):
         make_source("", None, None, {})
+
+
+def test_pipelines_tab_runs_featured_through_the_real_registry_path():
+    """PIPELINES tab: earthquake runs the registry path on the job's own bundle; hurricane gets the
+    registry's own honest answer. Layer payloads are decoded into the ArrayStore, never shipped as b64."""
+    import json
+    from debug_hub.util import plain
+    j = _run()
+    assert j.state == "done", j.error
+    P = j.pipelines
+    assert P and set(P["pipelines"]) == {"earthquake_coseismic", "tropical_cyclone"}
+    eq = P["pipelines"]["earthquake_coseismic"]
+    assert eq["launched"] is True
+    assert eq["status"] == "SUPPORTED", (eq["status"], eq.get("summary"))   # the selftest scene IS the T-8 truth bowl
+    assert eq["detail"]["decision"]["rule"] == "screen_pass"
+    assert eq["raw_p"] is not None and 0.0 <= eq["raw_p"] <= 1.0
+    assert eq["detail"]["events_considered"][0]["id"] == "hub-selftest-event"
+    assert eq["layers_store"] and {l["name"] for l in eq["layers_store"]} >= {"displacement", "threshold", "detected"}
+    for l in eq["layers_store"]:
+        e = j.store.get(l["aid"])
+        assert e is not None and e.data.size == int(np.prod(l["shape"]))
+    # selftest stays hermetic: the event fetch used the fixture provider, no base64 leaves the server
+    assert "hub selftest fixture" in P["providers_used"]["earthquake_coseismic"]
+    assert "data_b64" not in json.dumps(plain(P))
+    tc = P["pipelines"]["tropical_cyclone"]
+    assert tc["launched"] is False and tc["status"] in ("NOT_APPLICABLE", "NOT_RUN", "INSUFFICIENT_EVIDENCE", "PENDING")
+    assert tc["detail"]["routing"]["reasons"]
+
+
+def test_featured_pipeline_failure_does_not_fail_the_job(monkeypatch):
+    """A crashing featured pipeline is contained exactly like in the registry: the job still completes
+    and the failure is visible verbatim on the PIPELINES tab."""
+    import debug_hub.pipelines as pl
+    def boom(*a, **k):
+        raise RuntimeError("simulated featured-pipeline crash")
+    monkeypatch.setattr(pl, "run_featured", boom)
+    j = _run()
+    assert j.state == "done"
+    assert j.pipelines["error"] == "RuntimeError: simulated featured-pipeline crash"
+    assert j.final and j.handoff                       # everything else is untouched
+
+
+def test_server_serves_pipelines_part_ui_tab_and_pipeline_images():
+    hub, httpd, port = _serve()
+    try:
+        tok = {"X-Hub-Token": hub.token}
+        code, body = _req(port, "/api/run", "POST", tok, {"lon": -118.5, "lat": 34.0, "source": "selftest"})
+        assert code == 200
+        jid = json.loads(body)["id"]
+        job = hub.jobs[jid]
+        for _ in range(600):
+            if job.finished:
+                break
+            threading.Event().wait(0.1)
+        assert job.state == "done", job.error
+        code, body = _req(port, f"/api/job?id={jid}&part=pipelines")
+        assert code == 200
+        P = json.loads(body)
+        assert P["pipelines"]["earthquake_coseismic"]["status"] == "SUPPORTED"
+        aid = P["pipelines"]["earthquake_coseismic"]["layers_store"][0]["aid"]
+        code, png = _req(port, f"/api/img?id={jid}&aid={aid}")
+        assert code == 200 and png[:8] == b"\x89PNG\r\n\x1a\n"
+        code, html = _req(port, "/")
+        assert code == 200 and b"PIPELINES" in html and b"viewPipelines" in html
+    finally:
+        httpd.shutdown()
 
 
 def test_pipeline_entry_contract_is_read_from_the_registry_source():

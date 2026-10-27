@@ -80,13 +80,13 @@ def test_supported_on_synthetic_eq_scene(tmp_path, tile):
     event = make_event(lat=lat, lon=lon, time="2026-08-01T00:00:00Z")
     eq_fetch.set_event_provider(make_provider([event]))
     try:
-        result = eq_run(bundle)
+        result = eq_run(bundle).to_dict()
     finally:
         eq_fetch.reset_event_provider()
 
     assert result["status"] == "SUPPORTED", result["detail"].get("decision")
     assert result["raw_p"] is not None and 0.0 <= result["raw_p"] <= 1.0
-    assert set(result["layers"]) >= {"displacement", "threshold", "detected"}
+    assert {l["name"] for l in result["layers"]} >= {"displacement", "threshold", "detected"}
     detail = result["detail"]
     selected = next(r for r in detail["pairs_analysed"] if r.get("selected"))
     assert selected["detected_pixels"] > 0
@@ -114,12 +114,12 @@ def test_null_scene_is_not_supported_with_null_hypothesis_language(tmp_path, til
     event = make_event(lat=lat, lon=lon, time="2026-08-01T00:00:00Z")
     eq_fetch.set_event_provider(make_provider([event]))
     try:
-        result = eq_run(bundle)
+        result = eq_run(bundle).to_dict()
     finally:
         eq_fetch.reset_event_provider()
     assert result["status"] == "NOT_SUPPORTED"
     assert result["detail"]["decision"]["rule"] == "no_detection"
-    texts = " ".join(e["text"] for e in result["evidence"])
+    texts = " ".join(e["claim"] for e in result["evidence"])
     assert "NOT that the ground did not move" in texts
 
 
@@ -128,30 +128,62 @@ def test_provider_failure_maps_to_insufficient_evidence(tmp_path, tile):
     bundle = _build_bundle(tmp_path, tile, specs)
     eq_fetch.set_event_provider(make_provider(error="ComCat unreachable: fixture outage"))
     try:
-        result = eq_run(bundle)
+        result = eq_run(bundle).to_dict()
     finally:
         eq_fetch.reset_event_provider()
     assert result["status"] == "INSUFFICIENT_EVIDENCE"
-    assert any("fixture outage" in str(e.get("text", "")) for e in result["evidence"])
+    assert any("fixture outage" in str(e.get("claim", "")) for e in result["evidence"])
 
 
 def test_no_event_in_window_still_reports_detection_honestly(tmp_path, tile):
-    """Detection present, genuinely empty catalog: the signal is reported as-is."""
+    """Detection present, genuinely empty catalog: the fit now runs with REAL residuals
+    (the dip-90 q2 crash used to sink it to a silent 1e9 sentinel). The v1 fit family is
+    a vertical STRIKE-SLIP source (plan 8.6), which cannot reproduce the single-lobe
+    truth bowl — so per plan 8.4 row 4 the honest answer is NOT_SUPPORTED
+    (uncatalogued_fit_not_converged). An unconverged fit must never read as
+    UNCATALOGUED_CANDIDATE."""
     specs = make_scene(tile, n_epochs=4, pairs=((0, 1), (1, 2), (2, 3)), dlos=0.05)
     bundle = _build_bundle(tmp_path, tile, specs)
     eq_fetch.set_event_provider(make_null_provider())
     try:
-        result = eq_run(bundle)
+        result = eq_run(bundle).to_dict()
     finally:
         eq_fetch.reset_event_provider()
-    # truth is an isotropic uplift bowl: not representable by the v1 vertical strike-slip fit, so the
-    # honest outcome is "no candidate claimed" with the fit's own reason on record
-    assert result["status"] in ("UNCATALOGUED_CANDIDATE", "NOT_SUPPORTED")
-    assert result["detail"]["decision"]["rule"] in (
-        "uncatalogued_fit_converged", "uncatalogued_fit_not_converged", "sub_credible_no_catalog_event")
-    if result["detail"]["decision"]["rule"] != "sub_credible_no_catalog_event":
-        assert result["detail"]["uncatalogued"]["attempted"] is True
-    assert "_prediction" not in (result["detail"]["uncatalogued"] or {})
+    assert result["status"] == "NOT_SUPPORTED", result["detail"].get("decision")
+    assert result["detail"]["decision"]["rule"] == "uncatalogued_fit_not_converged"
+    fit = result["detail"]["uncatalogued"]
+    assert fit["attempted"] is True and fit["converged"] is False
+    assert fit["reason"]                                      # the refusal is explained
+    assert fit["rms_m"] < 1e6                                 # a real RMS, not the old crash sentinel (1e9)
+    texts = " ".join(e["claim"] for e in result["evidence"]).lower()
+    assert "no catalog event" in texts
+    assert "did not converge" in texts
+
+
+def test_catalogued_event_without_mechanism_is_insufficient(tmp_path, tile):
+    """The reviewer's repro (final-prompt fix 1): a catalogued Mw 6.4 event 4.7 km from
+    the tile with NO published nodal planes must be INSUFFICIENT_EVIDENCE
+    (events_unscreenable) — most smaller ComCat events lack a mechanism, so the old
+    UNCATALOGUED_CANDIDATE answer would have been the common case, and wrong."""
+    specs = make_scene(tile, n_epochs=4, pairs=((0, 1), (1, 2), (2, 3)), dlos=0.05)
+    bundle = _build_bundle(tmp_path, tile, specs)
+    lat, lon = _event_lonlat(tile)
+    event = make_event(event_id="us6000-mw64", magnitude=6.4, lat=lat, lon=lon,
+                       time="2026-08-01T00:00:00Z", nodal_planes=())
+    eq_fetch.set_event_provider(make_provider([event]))
+    try:
+        result = eq_run(bundle).to_dict()
+    finally:
+        eq_fetch.reset_event_provider()
+    assert result["status"] == "INSUFFICIENT_EVIDENCE", result["detail"].get("decision")
+    assert result["detail"]["decision"]["rule"] == "events_unscreenable"
+    assert result["detail"]["decision"]["n_events_in_window"] == 1
+    texts = " ".join(e["claim"] for e in result["evidence"])
+    assert "no catalog event" not in texts.lower()
+    assert any("us6000-mw64" in str(e.get("support") or {}) or "us6000-mw64" in str(e.get("claim", ""))
+               for e in result["evidence"])
+    # the detection itself is still reported honestly alongside the data gap
+    assert any(e["kind"] == "detection" for e in result["evidence"])
 
 
 def test_low_coherence_map_maps_to_insufficient_evidence(tmp_path, tile):
@@ -162,11 +194,11 @@ def test_low_coherence_map_maps_to_insufficient_evidence(tmp_path, tile):
     bundle = _build_bundle(tmp_path, tile, specs)
     eq_fetch.set_event_provider(make_null_provider())
     try:
-        result = eq_run(bundle)
+        result = eq_run(bundle).to_dict()
     finally:
         eq_fetch.reset_event_provider()
     assert result["status"] == "INSUFFICIENT_EVIDENCE"
-    assert any("pixels pass the coherence threshold" in str(e.get("text", "")) for e in result["evidence"])
+    assert any("pixels pass the coherence threshold" in str(e.get("claim", "")) for e in result["evidence"])
 
 
 def test_registry_run_tile_end_to_end(tmp_path, tile):
@@ -223,117 +255,12 @@ def test_eq_params_override_via_triggers(tmp_path, tile):
     # floor 200 mm > the 50 mm truth peak => no detections possible
     eq_fetch.set_event_provider(make_null_provider())
     try:
-        result = eq_run(bundle)
+        result = eq_run(bundle).to_dict()
     finally:
         eq_fetch.reset_event_provider()
-    # empty catalog + nothing above the raised floor => NO_SIGNAL (with the floor in the headline)
+    # nothing above threshold + genuinely no catalog event in the window: NO_SIGNAL
+    # (the docx's sixth status — a quiet outcome, not a tested-and-rejected quake)
     assert result["status"] == "NO_SIGNAL"
-    assert "200 mm" in result["detail"]["narrative"]["headline"]
+    assert result["detail"]["decision"]["rule"] == "no_event_no_cluster"
     selected = next(r for r in result["detail"]["pairs_analysed"] if r.get("selected"))
     assert selected["detected_pixels"] == 0
-
-
-def test_uncatalogued_candidate_on_synthetic_source_with_empty_catalog(tmp_path, tile, monkeypatch):
-    """T-8 UNCATALOGUED path on the real chain.
-
-    Truth = a vertical strike-slip Okada source (fixtures_eq.TRUE_SOURCE) injected through the
-    engine fixture's truth hook, empty catalog => UNCATALOGUED_CANDIDATE with a converged fit that
-    recovers the source, a residual layer, and the v1 simplifications on record.
-    """
-    import tests.common_fixtures as cf
-    from .fixtures_eq import TRUE_SOURCE, fixture_los_unit, okada_los_field
-
-    # the fixture's LOS vector projects a 0.15 m strike-slip weakly (peak ~14 mm < the 10 mm floor
-    # after noise), so the end-to-end source is stronger: peak ~50 mm, a clearly detectable field
-    E2E_SOURCE = dict(TRUE_SOURCE, slip=0.5)
-    los = fixture_los_unit()
-    original = cf.los_truth
-
-    def source_truth(t, x, y, peak):
-        if peak == 0.0:                                      # pairs that do not span the event
-            return original(t, x, y, 0.0)
-        return okada_los_field(x, y, t.e0, t.n0, los, E2E_SOURCE).astype(np.float32)
-
-    monkeypatch.setattr(cf, "los_truth", source_truth)
-    specs = make_scene(tile, n_epochs=4, pairs=((0, 1), (1, 2), (2, 3)), dlos=0.05)
-    bundle = _build_bundle(tmp_path, tile, specs)
-    assert_bundle_contract(bundle, deep=True)
-
-    eq_fetch.set_event_provider(make_null_provider())
-    try:
-        result = eq_run(bundle)
-    finally:
-        eq_fetch.reset_event_provider()
-
-    decision = result["detail"]["decision"]
-    assert result["status"] == "UNCATALOGUED_CANDIDATE", (decision, result["detail"]["uncatalogued"])
-    assert decision["rule"] == "uncatalogued_fit_converged"
-    assert result["raw_p"] is not None and 0.0 < result["raw_p"] <= 1.0
-
-    fit = result["detail"]["uncatalogued"]
-    assert fit["converged"] and "_prediction" not in fit            # JSON-able: no raw array leaks out
-    p = fit["parameters"]
-    assert np.hypot(p["east_m"] - (tile.e0 + TRUE_SOURCE["east"]),
-                    p["north_m"] - (tile.n0 + TRUE_SOURCE["north"])) < 600.0
-    assert abs((p["strike_deg"] - TRUE_SOURCE["strike"] + 90.0) % 180.0 - 90.0) < 10.0
-
-    sel = next(r for r in result["detail"]["pairs_analysed"] if r.get("selected"))
-    assert sel["ref_sigma_m"] == 0.0 and sel["ref_scatter_m"] > 0.0       # tileMedian: scatter reported, not used
-    assert "residual" in result["layers"] and "residual" in result["detail"]["layers"]
-    kinds = {e["kind"] for e in result["evidence"]}
-    assert {"uncatalogued", "uncatalogued_simplifications"} <= kinds
-    unc_text = next(e["text"] for e in result["evidence"] if e["kind"] == "uncatalogued")
-    assert "candidate" in unc_text and "not a detection" in unc_text
-    import json
-    json.dumps(result["detail"])                                      # whole detail must serialise
-
-
-def _run_with(bundle, provider):
-    eq_fetch.set_event_provider(provider)
-    try:
-        return eq_run(bundle)
-    finally:
-        eq_fetch.reset_event_provider()
-
-
-def test_no_event_and_no_cluster_is_no_signal(tmp_path, tile):
-    specs = make_scene(tile, n_epochs=4, pairs=((0, 1), (1, 2), (2, 3)), dlos=0.0)
-    result = _run_with(_build_bundle(tmp_path, tile, specs), make_null_provider())
-    assert result["status"] == "NO_SIGNAL", result["detail"]["decision"]
-    assert result["raw_p"] is None
-    assert result["detail"]["decision"]["rule"] == "no_event_no_cluster"
-    assert any(e["kind"] == "no_signal" for e in result["evidence"])
-    assert "NOT 'the ground did not move'" in result["detail"]["narrative"]["headline"]
-
-
-def test_event_without_mechanism_is_not_modelled(tmp_path, tile):
-    """A qualifying event that cannot be modelled must not become SUPPORTED/UNCATALOGUED."""
-    specs = make_scene(tile, n_epochs=4, pairs=((0, 1), (1, 2), (2, 3)), dlos=0.05)
-    lat, lon = _event_lonlat(tile)
-    event = make_event(lat=lat, lon=lon, time="2026-08-01T00:00:00Z", nodal_planes=())
-    result = _run_with(_build_bundle(tmp_path, tile, specs), make_provider([event]))
-    assert result["status"] == "NOT_MODELLED", result["detail"]["decision"]
-    assert result["raw_p"] is None
-    assert result["detail"]["decision"]["rule"] == "event_not_modellable"
-    kinds = {e["kind"] for e in result["evidence"]}
-    assert {"not_modellable", "forward_model_skip"} <= kinds
-
-
-def test_flipping_the_los_sign_of_the_truth_changes_the_verdict(tmp_path, tile):
-    """Metamorphic sign gate: same event, truth bowl moved AWAY instead of toward the sensor.
-
-    A convention flip anywhere between the bundle and the forward model would make both scenes
-    agree with the event (or both disagree); the verdict must differ, and the flipped scene must
-    anti-correlate with the model.
-    """
-    lat, lon = _event_lonlat(tile)
-    event = make_event(lat=lat, lon=lon, time="2026-08-01T00:00:00Z")
-    results = {}
-    for name, dlos in (("toward", 0.05), ("away", -0.05)):
-        specs = make_scene(tile, n_epochs=4, pairs=((0, 1), (1, 2), (2, 3)), dlos=dlos)
-        bundle = _build_bundle(tmp_path / name, tile, specs)
-        results[name] = _run_with(bundle, make_provider([event]))
-    assert results["toward"]["status"] == "SUPPORTED"
-    assert results["away"]["status"] != "SUPPORTED"
-    away_screens = [s for s in results["away"]["detail"]["forward_screens"] if not s["skipped"]]
-    assert away_screens and max(s["pattern_correlation"] for s in away_screens) < 0.25

@@ -150,6 +150,19 @@ class HttpIO:
         self._resolved: dict[str, tuple[str, float, int | None]] = {}
         self._locks: dict[str, asyncio.Lock] = {}
         self._suffixes = tuple(net.get("auth_hosts", []))
+        # Inline IO loops: private HttpIO children for callers that must not share this loop
+        # (e.g. a thread inside an h5py callback — see NisarClient._fallback_io). close() releases them.
+        self._inline_ios: list[HttpIO] = []
+
+    def inline_io(self, name: str) -> "HttpIO":
+        """A private child HttpIO (own loop/session), registered so close() releases it too."""
+        for c in self._inline_ios:
+            if getattr(c, "name", None) == name:
+                return c
+        c = HttpIO(self.auth, self.net, metrics=self.metrics)
+        c.name = name
+        self._inline_ios.append(c)
+        return c
 
     # -- lazily created inside the loop thread
     async def _ensure(self):
@@ -180,30 +193,44 @@ class HttpIO:
             hit = self._resolved.get(url)
             if hit and not force and time.time() - hit[1] < float(self.net["url_ttl_s"]):
                 return hit[0], hit[2]
-            cur = url
-            for _ in range(10):
-                hdr = {"Range": "bytes=0-0", **self._headers_for(cur)}
-                async with self._session.get(cur, headers=hdr, allow_redirects=False) as r:
-                    if r.status in (301, 302, 303, 307, 308):
-                        cur = urljoin(cur, r.headers["Location"])
-                        await r.read()
-                        continue
-                    if r.status in (401, 403):
-                        raise AuthError(f"HTTP {r.status} resolving {urlsplit(url).netloc}: check Earthdata "
-                                        "token/credentials and that the ASF Data Access app is authorized")
-                    if r.status not in (200, 206):
-                        raise RangeError(f"HTTP {r.status} resolving {url}")
-                    size = None
-                    cr = r.headers.get("Content-Range", "")
-                    if "/" in cr and cr.rsplit("/", 1)[1].isdigit():
-                        size = int(cr.rsplit("/", 1)[1])
-                    elif r.status == 200 and r.headers.get("Content-Length"):
-                        size = int(r.headers["Content-Length"])
-                    await r.read()
-                    self._resolved[url] = (cur, time.time(), size)
-                    self.metrics.add(resolves=1)
-                    return cur, size
-            raise RangeError("too many redirects")
+            last: Exception | None = None
+            for attempt in range(int(self.net["retries"]) + 1):
+                cur = url
+                try:
+                    for _ in range(10):
+                        hdr = {"Range": "bytes=0-0", **self._headers_for(cur)}
+                        async with self._session.get(cur, headers=hdr, allow_redirects=False) as r:
+                            if r.status in (301, 302, 303, 307, 308):
+                                cur = urljoin(cur, r.headers["Location"])
+                                await r.read()
+                                continue
+                            if r.status in (401, 403):
+                                raise AuthError(f"HTTP {r.status} resolving {urlsplit(url).netloc}: check Earthdata "
+                                                "token/credentials and that the ASF Data Access app is authorized")
+                            if r.status in (408, 429) or r.status >= 500:
+                                # transient: retry the probe exactly like a range read (a single 503/429
+                                # during resolve used to fail the whole granule - see test_regressions)
+                                raise aiohttp.ClientResponseError(r.request_info, (), status=r.status)
+                            if r.status not in (200, 206):
+                                raise RangeError(f"HTTP {r.status} resolving {url}")
+                            size = None
+                            cr = r.headers.get("Content-Range", "")
+                            if "/" in cr and cr.rsplit("/", 1)[1].isdigit():
+                                size = int(cr.rsplit("/", 1)[1])
+                            elif r.status == 200 and r.headers.get("Content-Length"):
+                                size = int(r.headers["Content-Length"])
+                            await r.read()
+                            self._resolved[url] = (cur, time.time(), size)
+                            self.metrics.add(resolves=1)
+                            return cur, size
+                    raise RangeError("too many redirects")
+                except (AuthError, RangeError):
+                    raise
+                except (aiohttp.ClientError, asyncio.TimeoutError, OSError) as ex:
+                    last = ex
+                    self.metrics.add(retries=1)
+                    await asyncio.sleep(min(20.0, 0.5 * 2 ** attempt) * (0.5 + random.random()))
+            raise RangeError(f"gave up resolving {urlsplit(url).netloc} after retries: {last!r}")
 
     async def _get(self, url: str, start: int, end: int) -> bytes:
         """One range GET [start, end) with retry. Re-resolves the URL on 401/403."""
@@ -295,6 +322,12 @@ class HttpIO:
         if getattr(self, "_closed", False):
             return
         self._closed = True
+        for child in list(self._inline_ios):
+            try:
+                child.close()
+            except Exception:
+                pass
+        self._inline_ios.clear()
         try:
             self.lt.run(self.aclose(), timeout=10)
         finally:
