@@ -504,9 +504,9 @@ function plOutput(name, P) {
   h += `<div style="margin-top:10px">${det("pld:pairs:" + name, `Pairs analysed <span class="sub">${(d.pairs_analysed || []).length}</span>`, plPairs(d.pairs_analysed))}
     ${det("pld:events:" + name, `Events considered (ranking window) <span class="sub">${(d.events_considered || []).length}</span>`, plEvents(d.events_considered) + ((d.events_excluded || []).length ? det("pld:excl:" + name, `excluded events <span class="sub">${d.events_excluded.length}</span>`, `<pre>${esc(JSON.stringify(d.events_excluded, null, 1))}</pre>`) : ""))}
     ${det("pld:screens:" + name, `Okada forward screens <span class="sub">${(d.forward_screens || []).length}</span>`, plScreens(d.forward_screens))}
-    ${d.decision ? det("pld:dec:" + name, `Decision <span class="sub">${esc(d.decision.rule || "")}</span>`, `<pre>${esc(JSON.stringify(d.decision, null, 1))}</pre>`) : ""}
-    ${d.uncatalogued ? det("pld:unc:" + name, "Uncatalogued-source fit", `<pre>${esc(JSON.stringify(d.uncatalogued, null, 1))}</pre>`) : ""}
-    ${d.params ? det("pld:par:" + name, "Pipeline params", `<pre>${esc(JSON.stringify(d.params, null, 1))}</pre>`) : ""}</div>`;
+    ${d.decision ? det("pld:dec:" + name, `Decision <span class="sub">${esc(d.decision.rule || "")}</span>`, `<pre>${esc(JSON.stringify(d.decision, null, 1))}</pre>`)}
+    ${d.uncatalogued ? det("pld:unc:" + name, "Uncatalogued-source fit", `<pre>${esc(JSON.stringify(d.uncatalogued, null, 1))}</pre>`)}
+    ${d.params ? det("pld:par:" + name, "Pipeline params", `<pre>${esc(JSON.stringify(d.params, null, 1))}</pre>`)}</div>`;
   if ((P.warnings || []).length) h += `<div class="note" style="margin-top:8px">Warnings</div>${P.warnings.map(w => `<div class="ev">${badge("warn", "warning")} <span>${esc(w)}</span></div>`).join("")}`;
   if ((P.data_used || []).length) h += `<div class="note" style="margin-top:8px">Data used</div><ul style="margin:2px 0 0 18px;padding:0">${P.data_used.map(x => `<li>${esc(x)}</li>`).join("")}</ul>`;
   if ((P.provenance || []).length) h += det("pld:prov:" + name, `Provenance <span class="sub">${P.provenance.length}</span>`, `<table><tr><th>adapter</th><th>url / id</th><th>retrieved at</th><th>sha256</th></tr>${P.provenance.map(s => `<tr><td class="m">${esc(s.adapter || "")}</td><td class="m" style="word-break:break-all">${esc(s.url_or_id || "")}</td><td class="m">${esc(s.retrieved_at || "")}</td><td class="m">${esc((s.sha256 || "").slice(0, 16) + ((s.sha256 || "").length > 16 ? "…" : ""))}</td></tr>`).join("")}</table>`);
@@ -517,7 +517,7 @@ function plInput(name, P, row, F) {
   const groups = P.input_groups || [];
   let h = `<h2>Input — what the pipeline is and what it sees</h2><div class="card">`;
   if (row) {
-    h += `<div class="grid2"><div>${kv([["pipeline", `${esc(row.code)} ${esc(row.name)}`], ["sensor", esc(row.sensor || "–")], ["min_epochs", row.min_epochs ?? "–"], ["implemented (run() defined)", badge(row.implemented ? "ok" : "bad", row.implemented ? "yes" : "NO")], ["registry feed", badge(row.feed)]])}</div>
+    h += `<div class="grid2"><div>${kv([["pipeline", `${esc(row.code)} ${esc(row.name)}`], ["sensor", esc(row.sensor || "–")], ["min_epochs", row.min_epochs ?? "–"], ["implemented (run() defined)", badge(row.implemented ? "ok" : "bad", row.implemented ? "yes" : "NO")], ["registry feed", badge(row.feed)]]}</div>
       <div>${kv([["routing (P12)", row.routing ? badge(row.routing.applies === "yes" ? "ok" : row.routing.applies === "no" ? "skip" : "warn", row.routing.applies + (row.routing.proxy ? " (proxy)" : "")) : "–"], ["routing reasons", esc(((row.reasons && row.reasons.length ? row.reasons : (row.routing ? row.routing.reasons : [])) || []).join(" · ")) || "–"], ["own fetch (adapters)", `<div class="chips">${row.own_fetch.map(u => `<span class="chip ${u.state === "present" ? "ok" : "bad"}" title="${esc(u.name + ": " + u.why)}">${esc(u.code)}</span>`).join("") || "–"}</div>`]])}</div></div>`;
     h += `<div class="note" style="margin-top:8px">Declared bundle inputs (uses)</div><div class="chips">${row.uses.map(u => `<span class="chip ${u.state === "present" ? "ok" : "bad"}" title="${esc(u.name + ": " + u.why)}">${esc(u.code)} ${esc(u.name || "")}</span>`).join("") || "–"}</div>`;
   }

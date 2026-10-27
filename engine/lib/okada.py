@@ -20,15 +20,25 @@ Two entry layers:
       branches stay scalar; per-point singularity masking is exact, and the
       switch-branch overrides are applied only where the switch fires).
 
-SLIP-SENSE CONVENTIONS (inherited verbatim; pinned by tests):
-    U1 (strike) positive = SINISTRAL; U2 (dip) positive = NORMAL sense
-    (hanging wall down over the +y side); U3 (tensile) positive = OPENING.
-    Aki & Richards rake mapping: u1 = slip*cos(rake), u2 = -slip*sin(rake).
+SLIP-SENSE CONVENTIONS (kernel frame; pinned by tests):
+    U1 (strike) positive = SINISTRAL (left-lateral); U2 (dip) positive = THRUST
+    / REVERSE sense (hanging wall moves up-dip and rises); U3 (tensile)
+    positive = OPENING.
 
-Fault frame: x along strike, y horizontal pointing in the dip direction
-(hanging-wall side), z up. DEPTH is the top-edge depth; the down-dip extent
-is expressed via DC3D's aw range (positive aw = up-dip, so a fault with its
-top edge at DEPTH spanning width W down-dip is aw = [-W, 0]).
+Fault frame (right-handed, DC3D): x along strike, y horizontal pointing UP-DIP
+(toward the LEFT of the strike direction; the fault plane dips toward -y and
+the hanging wall lies over y < 0), z up. The surface trace of the top edge is
+at y = 0 and the fault extends toward -y with depth. DEPTH is the top-edge
+depth; the down-dip extent is expressed via DC3D's aw range (positive aw =
+up-dip, so a fault with its top edge at DEPTH spanning width W down-dip is
+aw = [-W, 0]).
+
+GEOGRAPHIC WRAPPERS: strike is clockwise from north and the fault dips toward
+strike + 90 deg (to the RIGHT of strike, Aki & Richards). Because the kernel's
++y points up-dip (LEFT of strike), the wrappers feed the kernel
+fy = -(offset . dip_direction) and rotate uy back with -dip_direction. Rake is
+the Aki & Richards rake: 0 = sinistral, +/-180 = dextral, +90 = reverse,
+-90 = normal, giving u1 = slip*cos(rake), u2 = +slip*sin(rake).
 
 Units: arbitrary but consistent (metres everywhere in the engine).
 """
@@ -57,7 +67,7 @@ class OkadaFault:
     length: float           # along-strike extent
     width: float            # down-dip extent
     u1: float = 0.0         # strike dislocation (positive = sinistral)
-    u2: float = 0.0         # dip dislocation (positive = normal sense)
+    u2: float = 0.0         # dip dislocation (positive = thrust/reverse sense)
     u3: float = 0.0         # tensile dislocation (positive = opening)
 
 
@@ -559,9 +569,11 @@ def okada_surface_grid(x, y, fault: OkadaFault, alpha: float = 0.5):
 # geographic placement + scaling
 # --------------------------------------------------------------------------- #
 def rake_to_dislocations(slip_m: float, rake_deg: float) -> tuple:
-    """Aki & Richards rake mapping: u1 = s*cos(rake), u2 = -s*sin(rake), u3 = 0."""
+    """Aki & Richards rake mapping onto the DC3D kernel: u1 = s*cos(rake), u2 = +s*sin(rake), u3 = 0.
+
+    rake 0 = sinistral (U1 > 0), +90 = reverse/thrust (U2 > 0), -90 = normal (U2 < 0)."""
     r = math.radians(rake_deg)
-    return slip_m * math.cos(r), -slip_m * math.sin(r), 0.0
+    return slip_m * math.cos(r), slip_m * math.sin(r), 0.0
 
 
 def geo_fault_displacement_enu(fault: GeoFault, centroid_depth_m: float, east_m, north_m):
@@ -585,14 +597,16 @@ def geo_fault_displacement_enu(fault: GeoFault, centroid_depth_m: float, east_m,
 
     rel_e = np.asarray(east_m, dtype=np.float64) + centroid_offset_dip * dx
     rel_n = np.asarray(north_m, dtype=np.float64) + centroid_offset_dip * dy
+    # Kernel +y points UP-DIP (left of strike), so the kernel coordinate is the NEGATED
+    # dip-direction coordinate; uy is rotated back with the same sign.
     fx = rel_e * sx + rel_n * sy
-    fy = rel_e * dx + rel_n * dy
+    fy = -(rel_e * dx + rel_n * dy)
 
     ux, uy, uz, singular = okada_surface_grid(
         fx, fy, OkadaFault(top_depth_m, fault.dip_deg, fault.length_m, fault.width_m, u1, u2, u3)
     )
-    east = ux * sx + uy * dx
-    north = ux * sy + uy * dy
+    east = ux * sx - uy * dx
+    north = ux * sy - uy * dy
     return east, north, uz, singular
 
 
@@ -603,14 +617,16 @@ def geo_fault_displacement_enu_top_edge(fault: GeoFault, top_edge_depth_m: float
     sx, sy = math.sin(strike), math.cos(strike)
     dx, dy = math.cos(strike), -math.sin(strike)
 
-    fx = np.asarray(east_m, dtype=np.float64) * sx + np.asarray(north_m, dtype=np.float64) * sy
-    fy = np.asarray(east_m, dtype=np.float64) * dx + np.asarray(north_m, dtype=np.float64) * dy
+    e_arr = np.asarray(east_m, dtype=np.float64)
+    n_arr = np.asarray(north_m, dtype=np.float64)
+    fx = e_arr * sx + n_arr * sy
+    fy = -(e_arr * dx + n_arr * dy)      # kernel +y = up-dip (left of strike)
 
     ux, uy, uz, singular = okada_surface_grid(
         fx, fy, OkadaFault(max(0.0, top_edge_depth_m), fault.dip_deg, fault.length_m, fault.width_m, u1, u2, u3)
     )
-    east = ux * sx + uy * dx
-    north = ux * sy + uy * dy
+    east = ux * sx - uy * dx
+    north = ux * sy - uy * dy
     return east, north, uz, singular
 
 

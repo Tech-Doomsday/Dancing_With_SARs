@@ -366,7 +366,7 @@ geo_fault_displacement_enu_top_edge(fault, top_edge_depth_m, east_m, north_m)   
 moment_from_mw(mw) = 10**(1.5·mw + 9.1)          # Hanks & Kanamori
 rupture_area_from_mw(mw) = 10**(0.91·mw − 3.49) · 1e6    # Wells & Coppersmith 1994, m²
 slip_from_moment(moment_nm, area_m2, shear_modulus=3.0e10)
-rake_to_dislocations(slip_m, rake_deg) -> (u1, u2, u3)   # u1 = s·cos(rake), u2 = −s·sin(rake)
+rake_to_dislocations(slip_m, rake_deg) -> (u1, u2, u3)   # u1 = s·cos(rake), u2 = +s·sin(rake)  (kernel: +U2 = thrust)
 ```
 
 **Faithfulness gotchas** (each one pinned by a named test in `test_okada.py`):

@@ -15,6 +15,7 @@ from engine.lib.okada import (
     GeoFault,
     OkadaFault,
     geo_fault_displacement_enu,
+    geo_fault_displacement_enu_top_edge,
     moment_from_mw,
     okada_surface_displacement,
     okada_surface_displacement_raw,
@@ -75,11 +76,22 @@ def test_buried_strike_slip_matches_2d_screw_analytic():
         assert abs(r.uz) < 1e-9
 
 
-def test_dip_slip_positive_is_normal_hanging_wall_drops():
+def test_dip_slip_positive_is_thrust_hanging_wall_rises():
+    """Kernel frame: +y is UP-DIP, the fault dips toward -y, so the hanging wall is the y < 0
+    side. U2 > 0 is THRUST sense (DC3D): the hanging wall rises relative to the footwall."""
     mk = lambda y: okada_surface_displacement(
         0.0, y, OkadaFault(depth=50, dip_deg=80, length=100000, width=10000, u2=1))
-    hang, foot = mk(100.0), mk(-100.0)
-    assert hang.uz - foot.uz < -0.5
+    hang, foot = mk(-100.0), mk(100.0)
+    assert hang.uz - foot.uz > 0.5
+
+
+def test_kernel_footprint_is_on_negative_y_side():
+    """Tensile opening of a shallow-dipping crack lifts the ground over the crack: the uplift
+    lobe must sit on the y < 0 side (fault dips toward -y), not on the +y side."""
+    fault = OkadaFault(depth=1000, dip_deg=30, length=2e6, width=20000, u3=1.0)
+    over = okada_surface_displacement(0.0, -8000.0, fault).uz
+    away = okada_surface_displacement(0.0, 8000.0, fault).uz
+    assert over > 0.5 and abs(away) < 0.05
 
 
 def test_strike_slip_positive_is_sinistral():
@@ -110,10 +122,15 @@ def test_moment_area_slip_scaling():
 
 
 def test_rake_mapping_matches_sign_conventions():
-    # rake +90 (reverse) -> u2 = -slip (reverse is the negative-U2, thrust sense)
+    # rake +90 (reverse) -> u2 = +slip (U2 > 0 is thrust sense)
     u1, u2, u3 = rake_to_dislocations(1.0, 90.0)
-    assert abs(u1) < 1e-12 and abs(u2 + 1.0) < 1e-12 and abs(u3) < 1e-12
-    # rake -180 (dextral) -> u1 = -slip (sinistral is positive U1)
+    assert abs(u1) < 1e-12 and abs(u2 - 1.0) < 1e-12 and abs(u3) < 1e-12
+    # rake -90 (normal) -> u2 = -slip
+    u1, u2, u3 = rake_to_dislocations(1.0, -90.0)
+    assert abs(u1) < 1e-12 and abs(u2 + 1.0) < 1e-12
+    # rake 0 (sinistral) -> u1 = +slip; rake -180 (dextral) -> u1 = -slip
+    u1, u2, u3 = rake_to_dislocations(3.0, 0.0)
+    assert abs(u1 - 3.0) < 1e-12 and abs(u2) < 1e-12
     u1, u2, u3 = rake_to_dislocations(2.0, -180.0)
     assert abs(u1 + 2.0) < 1e-12 and abs(u2) < 1e-9
 
@@ -169,32 +186,90 @@ def test_geo_fault_vertical_displacement_runs_and_decays():
     assert far < near / 20.0          # elastic decay, two orders of magnitude over 200 km
 
 
+def _reverse_fault(strike=0.0, rake=90.0, dip=35.0):
+    return GeoFault(strike_deg=strike, dip_deg=dip, rake_deg=rake, length_m=20000, width_m=14000,
+                    top_depth_m=0, slip_m=1.0, centroid_lat=0, centroid_lon=0)
+
+
 def test_geo_fault_centroid_placement():
-    # A thrust fault (rake +90) whose centroid sits at 9 km: the surface
-    # projection of the centroid must be near the maximum uplift, and the
-    # top edge must respect the max(500, ...) floor for shallow sources.
-    fault = GeoFault(strike_deg=0, dip_deg=35, rake_deg=90, length_m=20000, width_m=14000,
-                     top_depth_m=0, slip_m=1.0, centroid_lat=0, centroid_lon=0)
-    xs = np.linspace(-30000, 30000, 241)
-    ys = np.linspace(-30000, 30000, 241)
-    X, Y = np.meshgrid(xs, ys)
+    """Reverse fault (rake +90), strike north, dips EAST, centroid at depth 9 km.
+
+    Physics: the hanging wall (the ground above the fault, EAST of the surface trace) is
+    UPLIFTED, the footwall (west) subsides only weakly, and the net volume change is positive.
+    The uplift lobe must be centred on the surface projection of the fault (the centroid's
+    projection is the footprint midpoint), i.e. within +-(W/2)cos(dip) of the centroid."""
+    fault = _reverse_fault()
+    half_horiz = 0.5 * 14000 * math.cos(math.radians(35.0))
+    xs = np.arange(-60000.0, 60001.0, 500.0)
+    X, Y = np.meshgrid(xs, xs)
     e, n, up, sing = geo_fault_displacement_enu(fault, 9000.0, X, Y)
     assert not sing.any()
-    # Reverse faulting (rake +90 => u2 = -slip): the hanging wall (+E, dip
-    # direction for strike 0) rises relative to the footwall. Absolute values
-    # are both shifted by the elastostatic far field, so assert the RELATIVE
-    # step across the trace and the strong footwall subsidence lobe.
+    assert float(np.nanmax(up)) > 0.3                       # strong hanging-wall uplift
+    assert float(np.nanmin(up)) > -0.15                     # weak footwall subsidence
+    assert float(np.nansum(up)) > 0.0                       # net positive volume
+    i = np.unravel_index(np.nanargmax(up), up.shape)
+    assert abs(X[i]) <= half_horiz + 500.0 and abs(Y[i]) <= 10000.0
+    # hanging wall (east) up, footwall (west) down relative to each other across the trace
     def _up(x):
-        e, n, up, s = geo_fault_displacement_enu(fault, 9000.0, float(x), 0.0)
+        e, n, u, s = geo_fault_displacement_enu(fault, 9000.0, float(x), 0.0)
         assert not s
-        return float(up)
-    assert _up(5000.0) - _up(-5000.0) > 0.3
-    assert min(float(up.min()) for up in [up]) < -0.3
-    # strike 0 => along-strike is N; the field must be symmetric in x about 0
-    col = np.argmin(np.abs(xs))  # x ~ 0
-    prof = up[:, col]
+        return float(u)
+    assert _up(0.0) - _up(-2.0 * half_horiz) > 0.2
+    # strike 0 => along-strike is N; the field must be symmetric in N about 0
+    prof = up[:, np.argmin(np.abs(xs))]
     off = prof - prof[::-1]
     assert np.nanmax(np.abs(off)) < 1e-6 * np.nanmax(np.abs(prof)) + 1e-9
+
+
+def test_normal_fault_is_mirror_of_reverse_in_vertical_sense():
+    """Normal faulting (rake -90) subsides the hanging wall (the east side for strike 0)."""
+    fault = _reverse_fault(rake=-90.0)
+    xs = np.arange(-60000.0, 60001.0, 500.0)
+    X, Y = np.meshgrid(xs, xs)
+    e, n, up, sing = geo_fault_displacement_enu(fault, 9000.0, X, Y)
+    assert float(np.nanmin(up)) < -0.3 and float(np.nanmax(up)) < 0.15
+    i = np.unravel_index(np.nanargmin(up), up.shape)
+    assert abs(X[i]) <= 0.5 * 14000 * math.cos(math.radians(35.0)) + 500.0
+
+
+def test_geo_strike_slip_sense_rake0_is_left_lateral():
+    """Aki & Richards: rake 0 = LEFT-lateral. Strike north: the WEST block moves SOUTH and the
+    EAST block moves NORTH (standing on one side, the far side moves to your left)."""
+    fault = GeoFault(strike_deg=0.0, dip_deg=90.0, rake_deg=0.0, length_m=200000, width_m=10000,
+                     top_depth_m=0, slip_m=1.0, centroid_lat=0, centroid_lon=0)
+    _, n_w, _, _ = geo_fault_displacement_enu(fault, 6000.0, -1500.0, 0.0)
+    _, n_e, _, _ = geo_fault_displacement_enu(fault, 6000.0, 1500.0, 0.0)
+    assert float(n_w) < -0.1 and float(n_e) > 0.1
+    # rake 180 = right-lateral: the opposite
+    fault_r = GeoFault(strike_deg=0.0, dip_deg=90.0, rake_deg=180.0, length_m=200000, width_m=10000,
+                       top_depth_m=0, slip_m=1.0, centroid_lat=0, centroid_lon=0)
+    _, n_w, _, _ = geo_fault_displacement_enu(fault_r, 6000.0, -1500.0, 0.0)
+    assert float(n_w) > 0.1
+
+
+def test_geo_reverse_horizontal_motion_is_toward_up_dip_for_hanging_wall():
+    """Hanging wall moves UP-DIP, i.e. WEST for an east-dipping (strike 0) thrust: the ground over
+    the shallow part of the footprint must move west (negative east) and rise."""
+    fault = _reverse_fault()
+    e, n, up, s = geo_fault_displacement_enu(fault, 9000.0, -6000.0, 0.0)
+    assert float(e) < -0.05 and float(up) > 0.2
+
+
+def test_top_edge_variant_matches_centroid_variant():
+    """The tsunami (top-edge) and coseismic (centroid) wrappers must describe the same fault."""
+    fault = _reverse_fault(strike=40.0, rake=70.0)
+    half = 0.5 * 14000
+    d = math.radians(35.0)
+    centroid_depth = 9000.0
+    top = centroid_depth - half * math.sin(d)
+    dir_e, dir_n = math.cos(math.radians(40.0)), -math.sin(math.radians(40.0))
+    xs = np.array([-9000.0, 0.0, 4000.0, 15000.0])
+    ys = np.array([3000.0, -7000.0, 0.0, 12000.0])
+    e1, n1, u1, _ = geo_fault_displacement_enu(fault, centroid_depth, xs, ys)
+    shift = half * math.cos(d)
+    e2, n2, u2, _ = geo_fault_displacement_enu_top_edge(
+        fault, top, xs + shift * dir_e, ys + shift * dir_n)
+    assert np.allclose(e1, e2) and np.allclose(n1, n2) and np.allclose(u1, u2)
 
 
 def test_shallow_centroid_depth_floors_top_edge():

@@ -26,9 +26,12 @@ Model: Okada85 elastic dislocation + consistency screen
 - **LOS sign is the engine's**: `los_m` and the ported pipeline are
   **+ = toward the sensor, later − earlier**. Detection classes: 1 = toward,
   2 = away. (The TypeScript app used the opposite — see docs/IMPLEMENTATION_PLAN.md §3.)
-- Okada U1/U2/U3 senses: +U1 sinistral, +U2 normal, +U3 opening; rake mapping
-  `u1 = slip·cos(rake)`, `u2 = −slip·sin(rake)` — pinned by the 24-row DC3D
-  benchmark in `tests/test_okada.py`.
+- Okada U1/U2/U3 senses (kernel frame, DC3D): +U1 sinistral, +U2 **thrust/reverse**,
+  +U3 opening; the kernel's +y points **up-dip** (fault dips toward −y). The geographic
+  wrappers use Aki & Richards rake (`u1 = slip·cos(rake)`, `u2 = +slip·sin(rake)`; rake
+  +90 = reverse, −90 = normal) and feed the kernel the negated dip-direction coordinate.
+  The kernel is pinned by the 24-row DC3D benchmark; the wrapper physics (reverse ⇒
+  hanging-wall uplift, rake 0 ⇒ left-lateral) by `tests/test_okada.py`.
 - Event fetch failure ⇒ `INSUFFICIENT_EVIDENCE` with the provider's error —
   never "no event".
 

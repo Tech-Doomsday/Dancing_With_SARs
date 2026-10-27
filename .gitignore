@@ -6,3 +6,4 @@ __pycache__/
 _backup_before_install_*/
 app-ui/node_modules/
 node_modules/
+*.zip
