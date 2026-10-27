@@ -1,0 +1,23 @@
+/* Design tokens inherited from the reference app for continuity
+   (page #FAF9F6, ink #1C1A17, teal #2C5F58, terracotta #9E3B2C, gold #B08D57). */
+@import "tailwindcss";
+
+:root {
+  --page: #faf9f6;
+  --ink: #1c1a17;
+  --muted: #8a837b;
+  --teal: #2c5f58;
+  --terracotta: #9e3b2c;
+  --gold: #b08d57;
+  --border: #e7e2da;
+}
+
+body {
+  background: var(--page);
+  color: var(--ink);
+  font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+}
+
+.mono {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+}
