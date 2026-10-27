@@ -5,5 +5,7 @@ __pycache__/
 *.pyc
 _backup_before_install_*/
 app-ui/node_modules/
+app-ui/.next/
 node_modules/
 *.zip
+.next/
