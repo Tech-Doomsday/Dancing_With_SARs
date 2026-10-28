@@ -9,15 +9,17 @@ import StatusBadge from "./StatusBadge";
 export default function PipelineGrid({
   results,
   catalogue,
+  title = "Pipelines on this run",
 }: {
   results?: PipelineResult[] | null;
   catalogue?: PipelineInfo[];
+  title?: string;
 }) {
   if (results && results.length > 0) {
     const first = results[0];
     return (
       <section className="rounded-lg border border-[#e7e2da] bg-white p-4">
-        <h3 className="text-sm font-semibold">Pipelines on this run</h3>
+        <h3 className="text-sm font-semibold">{title}</h3>
         <ul className="mt-2 divide-y divide-[#f0ece4]">
           {results.map((r) => (
             <li key={r.pipeline} className="flex flex-wrap items-center gap-3 py-2">

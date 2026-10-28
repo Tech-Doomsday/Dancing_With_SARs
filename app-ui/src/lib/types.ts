@@ -69,12 +69,44 @@ export interface PipelineResult {
   detail: Record<string, unknown>;
 }
 
+/** What the engine reports about mirroring a finished run into the Supabase cache. */
+export interface CacheReport {
+  enabled: boolean;
+  written: number;
+  skipped: { pipeline: string | null; reason: string }[];
+  failed: string[];
+  /** why the cache is off, when enabled is false */
+  reason?: string;
+}
+
 export interface RunState {
   id: string;
   status: "queued" | "running" | "ok" | "error";
   progress: Record<string, unknown>;
   error: string | null;
   results: PipelineResult[];
+  /** absent on runs loaded from the store after an engine restart */
+  cache?: CacheReport;
+}
+
+/** One cached verdict, light columns only (no result body, no layer grids). */
+export interface CachedSummary {
+  tile: string;
+  pipeline: string;
+  bundle_id: string;
+  epoch: string | null;
+  status: string;
+  tier: string | null;
+  raw_p: number | null;
+  summary: string | null;
+  run_id: string | null;
+  computed_at: string;
+  first_computed_at: string;
+}
+
+/** A cached verdict with its full result row (the PipelineResult the engine produced). */
+export interface CachedVerdict extends CachedSummary {
+  result: PipelineResult;
 }
 
 export interface LayerPayload {

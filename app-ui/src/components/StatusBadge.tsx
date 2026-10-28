@@ -3,6 +3,7 @@
 /** Engine status -> colour/label (docs/IMPLEMENTATION_PLAN.md 11.3). */
 const STATUS_STYLES: Record<string, { cls: string; label: string }> = {
   SUPPORTED: { cls: "bg-[#2c5f58] text-white border-[#2c5f58]", label: "supported by evidence" },
+  POSSIBLE: { cls: "border-[#2c5f58] text-[#2c5f58] bg-[#eff5f3]", label: "possible" },
   UNCATALOGUED_CANDIDATE: { cls: "border-[#2c5f58] text-[#2c5f58] bg-[#eff5f3]", label: "uncatalogued candidate" },
   NOT_SUPPORTED: { cls: "border-[#d8d2c6] bg-[#f7f4ee] text-[#4a443c]", label: "not supported by evidence" },
   INSUFFICIENT_EVIDENCE: { cls: "border-[#b08d57]/50 bg-[#f7f2e7] text-[#7a6438]", label: "not enough evidence" },

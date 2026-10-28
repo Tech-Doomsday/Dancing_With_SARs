@@ -1,23 +1,25 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import dynamic from "next/dynamic";
 import { api, pollWhile } from "@/lib/api";
 import type { PipelineInfo, RunState } from "@/lib/types";
 import RunProgress from "./RunProgress";
+import CacheStatus from "./CacheStatus";
 import PipelineGrid from "./PipelineGrid";
 import { VerdictCard, EvidenceList, WarningsPanel } from "./VerdictCard";
 
 // Leaflet touches window at import time: render the map client-side only.
 const LayerMap = dynamic(() => import("./LayerMap"), {
   ssr: false,
-  loading: () => <p className="text-xs text-[#8a837b]">Loading map…</p>,
+  loading: () => <div className="skeleton h-[420px] rounded-lg" />,
 });
 
 export default function RunView({ runId, bounds }: { runId: string; bounds: [[number, number], [number, number]] | null }) {
   const [state, setState] = useState<RunState | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [catalogue, setCatalogue] = useState<PipelineInfo[] | null>(null);
+  const loadLayer = useCallback((name: string) => api.layer(runId, name).then((r) => r.layer), [runId]);
 
   useEffect(() => {
     // The contract is FLAT: GET /api/runs/{id} answers {ok, id, status, progress, error, results}.
@@ -65,12 +67,13 @@ export default function RunView({ runId, bounds }: { runId: string; bounds: [[nu
 
       {state.status === "ok" && state.results.length > 0 && (
         <>
+          <CacheStatus report={state.cache} bundleId={state.results[0].bundle_id} />
           <VerdictCard result={state.results[0]} />
           <div className="grid gap-4 lg:grid-cols-2">
             <EvidenceList result={state.results[0]} />
             <div className="space-y-4">
               <WarningsPanel warnings={state.results[0].warnings} />
-              <LayerMap runId={runId} bounds={bounds} />
+              <LayerMap load={loadLayer} sourceKey={runId} bounds={bounds} />
             </div>
           </div>
           <PipelineGrid results={state.results} catalogue={catalogue ?? undefined} />

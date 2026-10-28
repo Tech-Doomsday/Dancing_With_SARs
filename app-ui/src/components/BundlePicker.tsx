@@ -9,11 +9,14 @@ export default function BundlePicker({
   selected,
   onSelect,
   error,
+  cachedIds,
 }: {
   bundles: BundleListItem[];
   selected: string | null;
   onSelect: (bundleId: string) => void;
   error?: string | null;
+  /** bundles that already have a cached verdict in Supabase */
+  cachedIds?: Set<string>;
 }) {
   return (
     <div>
@@ -32,13 +35,21 @@ export default function BundlePicker({
           <button
             key={b.bundle_id}
             onClick={() => onSelect(b.bundle_id)}
+            aria-pressed={selected === b.bundle_id}
             className={`rounded-md border p-3 text-left text-xs transition ${
               selected === b.bundle_id
                 ? "border-[#2c5f58] bg-[#eff5f3]"
                 : "border-[#e7e2da] bg-[#faf9f6] hover:border-[#b08d57]"
             }`}
           >
-            <div className="mono font-semibold">{b.tile ?? b.bundle_id}</div>
+            <div className="flex items-center justify-between gap-2">
+              <span className="mono font-semibold">{b.tile ?? b.bundle_id}</span>
+              {cachedIds?.has(b.bundle_id) && (
+                <span className="rounded-full border border-[#2c5f58]/40 bg-[#eff5f3] px-1.5 py-0.5 text-[10px] font-medium text-[#2c5f58]">
+                  cached
+                </span>
+              )}
+            </div>
             <div className="mt-1 text-[#8a837b]">
               epoch {b.epoch ?? "—"} · status {b.status ?? "—"}
             </div>

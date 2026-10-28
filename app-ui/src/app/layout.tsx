@@ -16,7 +16,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
             <a href="/" className="text-sm font-semibold tracking-tight">
               Dancing with SARs <span className="text-[#8a837b]">· nisar-hazard-engine</span>
             </a>
-            <span className="mono text-[11px] text-[#8a837b]">
+            <span className="mono hidden text-[11px] text-[#8a837b] sm:inline">
               verdicts from the engine API — no science lives here
             </span>
           </div>

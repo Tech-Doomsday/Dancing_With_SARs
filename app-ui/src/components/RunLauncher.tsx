@@ -1,8 +1,10 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { Play } from "lucide-react";
+import Link from "next/link";
+import { Play, Eye } from "lucide-react";
 import { api } from "@/lib/api";
+import { cache, cacheConfigured } from "@/lib/cache";
 import type { BundleListItem, PipelineInfo } from "@/lib/types";
 import StatusBadge from "./StatusBadge";
 import BundlePicker from "./BundlePicker";
@@ -28,6 +30,7 @@ export default function RunLauncher({
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [params, setParams] = useState<Record<string, number>>({});
+  const [cachedIds, setCachedIds] = useState<Set<string>>(new Set());
 
   useEffect(() => {
     api.bundles().then((r) => {
@@ -35,7 +38,13 @@ export default function RunLauncher({
       if (r.bundles.length) setSelected(r.bundles[0].bundle_id);
     }).catch((e) => setError(String(e)));
     api.pipelines().then((r) => setPipelines(r.pipelines)).catch(() => {});
+    if (cacheConfigured) {
+      cache.list(200).then((rows) => setCachedIds(new Set(rows.map((r) => r.bundle_id)))).catch(() => {});
+    }
   }, []);
+
+  const isCached = selected !== null && cachedIds.has(selected);
+  const customParams = Object.values(params).some((v) => Number.isFinite(v));
 
   const launch = async () => {
     if (!selected) return;
@@ -60,12 +69,13 @@ export default function RunLauncher({
         Bundles are the engine&apos;s preprocessed SceneBundles (P01–P13). The pipeline
         derives the acquisition window itself and fetches matching ComCat events.
       </p>
-      <BundlePicker bundles={bundles} selected={selected} onSelect={setSelected} error={error} />
+      <BundlePicker bundles={bundles} selected={selected} onSelect={setSelected} error={error} cachedIds={cachedIds} />
 
       <h2 className="mt-5 text-sm font-semibold">2 · Parameters (optional)</h2>
       <p className="mt-1 text-xs text-[#8a837b]">
         Overrides the engine validates server-side (out-of-range → 400) and APPLIES to the run —
-        the verdict&apos;s detail always records what was actually used.
+        the verdict&apos;s detail always records what was actually used. Runs with custom parameters are
+        never cached — the cache holds engine-default verdicts only.
       </p>
       <div className="mt-2 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
         {PARAM_FIELDS.map((f) => (
@@ -98,13 +108,32 @@ export default function RunLauncher({
       </div>
 
       <h2 className="mt-5 text-sm font-semibold">3 · Run</h2>
-      <div className="mt-2 flex items-center gap-3">
+      <div className="mt-2 flex flex-wrap items-center gap-3">
+        {isCached && !customParams && selected && (
+          <Link
+            href={`/verdicts/${encodeURIComponent(selected)}`}
+            className="inline-flex items-center gap-2 rounded-md bg-[#2c5f58] px-4 py-2 text-sm font-medium text-white"
+          >
+            <Eye size={15} /> View cached verdict
+          </Link>
+        )}
         <button
           onClick={launch}
           disabled={!selected || busy}
-          className="inline-flex items-center gap-2 rounded-md bg-[#2c5f58] px-4 py-2 text-sm font-medium text-white disabled:opacity-40"
+          className={`inline-flex items-center gap-2 rounded-md px-4 py-2 text-sm font-medium disabled:opacity-40 ${
+            isCached && !customParams
+              ? "border border-[#2c5f58] text-[#2c5f58] hover:bg-[#eff5f3]"
+              : "bg-[#2c5f58] text-white"
+          }`}
         >
-          <Play size={15} /> {busy ? "Starting…" : "Run earthquake_coseismic"}
+          <Play size={15} />{" "}
+          {busy
+            ? "Starting…"
+            : customParams
+              ? "Run with custom parameters (not cached)"
+              : isCached
+                ? "Redo verdict (replaces cached)"
+                : "Run earthquake_coseismic"}
         </button>
         {pipelines.length > 0 && (
           <span className="text-xs text-[#8a837b]">

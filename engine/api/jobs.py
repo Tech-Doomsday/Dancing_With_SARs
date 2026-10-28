@@ -26,6 +26,7 @@ from engine.common.frozen import FrozenDict
 from engine.common.result import PipelineResult
 from engine.registry import Registry, coerce_result
 from engine.verdict import VerdictStore, calibrate_all, link
+from engine.verdict.cloud_cache import CloudCache
 
 from .store import RunsStore
 
@@ -53,7 +54,8 @@ def _apply_params(bundle, params: dict):
 
 
 class JobRunner:
-    def __init__(self, store: RunsStore, bundles_dir: Path, data_dir: Path | None = None):
+    def __init__(self, store: RunsStore, bundles_dir: Path, data_dir: Path | None = None,
+                 cache: CloudCache | None = None):
         self.store = store
         self.bundles_dir = Path(bundles_dir)
         self.data_dir = Path(data_dir) if data_dir else self.bundles_dir.parent
@@ -62,6 +64,7 @@ class JobRunner:
                                     registry=Registry(bundles_dir=self.bundles_dir),
                                     bundles_dir=self.bundles_dir)
         self.verdicts = VerdictStore(self.data_dir / "verdicts.db")
+        self.cache = cache if cache is not None else CloudCache.from_env()   # Supabase mirror (4.6)
         self._pool = ThreadPoolExecutor(max_workers=1, thread_name_prefix="engine-run")
         self._states: dict[str, dict] = {}
         self._lock = threading.Lock()
@@ -129,8 +132,11 @@ class JobRunner:
             rows = calibrate_all([_row_of(r) for r in results])
             links = link(rows)["events"]
             self.verdicts.write_run(rows, run_id=run_id, links=links)
+            # 4.6: mirror the same rows into the Supabase cache (best-effort; the report says what happened)
+            cache_report = self.cache.write_run(rows, run_id=run_id, bundle_id=bundle_id,
+                                                tile=bundle.tile.id, params=params)
             with self._lock:
-                self._states[run_id].update({"status": "ok", "results": results,
+                self._states[run_id].update({"status": "ok", "results": results, "cache": cache_report,
                                              "progress": {"stage": "done", "tile": bundle.tile.id}})
             self.store.set_status(run_id, "ok", duration_s=time.monotonic() - t0)
             self._write_replay_artifacts(run_id, bundle_id, pipelines, params, self._states[run_id])

@@ -11,6 +11,7 @@ import type {
 } from "./types";
 
 const BASE = process.env.NEXT_PUBLIC_ENGINE_API ?? "http://127.0.0.1:8900";
+export const ENGINE_API = BASE;
 
 /** FastAPI wraps HTTPException payloads under `detail`; the engine's own error
  *  convention nests {ok: false, error} there. Unwrap every shape in one place. */

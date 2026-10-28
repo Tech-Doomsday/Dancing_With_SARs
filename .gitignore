@@ -9,3 +9,12 @@ app-ui/.next/
 node_modules/
 *.zip
 .next/
+
+__pycache__/
+*.py[cod]
+
+node_modules/
+.next/
+dist/
+
+data/

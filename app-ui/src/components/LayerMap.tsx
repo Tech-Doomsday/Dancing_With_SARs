@@ -3,7 +3,6 @@
 import { useEffect, useRef, useState } from "react";
 import { MapContainer, ImageOverlay, TileLayer, CircleMarker, Tooltip } from "react-leaflet";
 import "leaflet/dist/leaflet.css";
-import { api } from "@/lib/api";
 import type { LayerPayload } from "@/lib/types";
 
 /** Decode little-endian base64 float32/uint8 grids (server-computed bounds). */
@@ -67,22 +66,41 @@ const LAYERS = [
   { key: "residual", label: "Residual vs model" },
 ];
 
-export default function LayerMap({ runId, bounds }: { runId: string; bounds: [[number, number], [number, number]] | null }) {
+/** Where the layer grids come from is the caller's business: the engine (a live run) or the
+ *  Supabase cache (a cached verdict). `sourceKey` identifies the source so a change reloads. */
+export default function LayerMap({
+  load,
+  sourceKey,
+  bounds,
+}: {
+  load: (layer: string) => Promise<LayerPayload>;
+  sourceKey: string;
+  bounds: [[number, number], [number, number]] | null;
+}) {
   const [layerKey, setLayerKey] = useState("displacement");
   const [layer, setLayer] = useState<LayerPayload | null>(null);
   const [err, setErr] = useState<string | null>(null);
+  const [loading, setLoading] = useState(true);
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
 
   useEffect(() => {
     let alive = true;
-    api
-      .layer(runId, layerKey)
-      .then((r) => alive && setLayer(r.layer))
-      .catch((e) => alive && setErr(e instanceof Error ? e.message : String(e)));
+    setLoading(true);
+    setErr(null);
+    load(layerKey)
+      .then((l) => alive && setLayer(l))
+      .catch((e) => {
+        if (!alive) return;
+        setLayer(null); // never leave the previous layer on screen under a new layer's name
+        setErr(e instanceof Error ? e.message : String(e));
+      })
+      .finally(() => alive && setLoading(false));
     return () => {
       alive = false;
     };
-  }, [runId, layerKey]);
+    // `load` is identified by sourceKey; listing the function itself would reload on every render
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [sourceKey, layerKey]);
 
   const [dataUrl, setDataUrl] = useState<string | null>(null);
 
@@ -113,14 +131,18 @@ export default function LayerMap({ runId, bounds }: { runId: string; bounds: [[n
           <button
             key={l.key}
             onClick={() => setLayerKey(l.key)}
-            className={`rounded-full border px-2.5 py-0.5 text-xs ${
-              layerKey === l.key ? "border-[#2c5f58] bg-[#eff5f3] text-[#2c5f58]" : "border-[#e7e2da] text-[#8a837b]"
+            aria-pressed={layerKey === l.key}
+            className={`rounded-full border px-2.5 py-0.5 text-xs transition-colors ${
+              layerKey === l.key
+                ? "border-[#2c5f58] bg-[#eff5f3] text-[#2c5f58]"
+                : "border-[#e7e2da] text-[#8a837b] hover:border-[#b08d57] hover:text-[#4a443c]"
             }`}
           >
             {l.label}
           </button>
         ))}
       </div>
+      {loading && !err && <p className="mono mt-2 text-xs text-[#8a837b]">loading layer…</p>}
       {err && <p className="mono mt-2 text-xs text-[#8a837b]">{err} (layer not produced for this verdict)</p>}
       <div className="mt-3 h-[420px] overflow-hidden rounded-md border border-[#e7e2da]">
         <MapContainer center={center} zoom={9} scrollWheelZoom style={{ height: "100%", width: "100%" }}>
