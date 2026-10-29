@@ -149,3 +149,8 @@ def load_settings(config_path: str | os.PathLike | None = None, root: Path | Non
     for sec in DEFAULTS:
         setattr(s, sec, _apply_env(sec, merged[sec]))
     return s
+
+
+def tile_cell_size_m() -> int:
+    """The configured MGRS cell size in metres (config/tiling.yaml `cell_size_m`)."""
+    return int(load_settings().tiling.get("cell_size_m", DEFAULTS["tiling"]["cell_size_m"]))

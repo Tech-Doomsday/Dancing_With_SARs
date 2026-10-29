@@ -1,0 +1,16 @@
+/* Globe map-control overrides (§8.3 visual critique): the bottom-right cluster (zoom, compass,
+   scale, Esri attribution) must stay visible next to the panel chrome. Imported by GlobeMap
+   right after maplibre-gl.css; the .globe-root scoping keeps it off the (site) pages.
+   - desktop (>=1024): the findings panel (~402px + margin) overlays the full-bleed map —
+     keep the controls on the visible map area, left of it;
+   - mobile (<1024): the bottom sheet's peek snap covers ~20vh — raise the controls above it. */
+@media (min-width: 1024px) {
+  .globe-root .maplibregl-ctrl-bottom-right {
+    right: 416px;
+  }
+}
+@media (max-width: 1023.98px) {
+  .globe-root .maplibregl-ctrl-bottom-right {
+    bottom: calc(20vh + 10px);
+  }
+}

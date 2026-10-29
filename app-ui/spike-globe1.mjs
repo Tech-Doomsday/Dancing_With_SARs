@@ -1,0 +1,11 @@
+import { chromium } from "@playwright/test";
+import fs from "node:fs";
+const b = await chromium.launch({ args: ["--use-angle=swiftshader", "--enable-unsafe-swiftshader"] });
+const page = await b.newPage({ viewport: { width: 900, height: 700 } });
+await page.goto("http://127.0.0.1:3199/spike-official.html");
+await page.waitForFunction(() => document.getElementById("out").textContent !== "booting", null, { timeout: 30000 });
+await page.waitForTimeout(2500);
+fs.mkdirSync("test-results/screens", { recursive: true });
+await page.screenshot({ path: "test-results/screens/spike-globe-img.png" });
+console.log("globe-mode shot saved");
+await b.close();

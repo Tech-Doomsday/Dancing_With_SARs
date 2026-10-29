@@ -213,6 +213,12 @@ def run(bundle, providers: dict | None = None) -> PipelineResult:
         "detected", best.grids["detected"],
         units="1 = toward sensor, 2 = away, 0 = not detected",
         colormap="binary", note="detection rule |d| > max(k·σ, 10 mm, iono floor)")
+    # §5.1 item 1: the UI renders categorical swatches from the engine's labels — the value
+    # meanings come from this layer's own units text (1 = toward, 2 = away; verified above).
+    layers["detected"]["categories"] = [
+        {"value": 1, "label": "toward sensor", "tone": "positive"},
+        {"value": 2, "label": "away from sensor", "tone": "negative"},
+    ]
 
     # residual against the v1 uncatalogued-source fit, when one was attempted — shown
     # for inspection even when the fit did NOT converge (never presented as a candidate)
@@ -371,6 +377,61 @@ def run(bundle, providers: dict | None = None) -> PipelineResult:
         flag_id = hashlib.sha1(note.encode("utf-8")).hexdigest()[:8]
         evidence.append(_evidence(f"flag.{flag_id}", "flag", note, level="caveat"))
 
+    bounds = core_bounds_lonlat(best.grid_x, best.grid_y, bundle.tile.epsg,
+                                fallback=tuple(bundle.tile.bbox_lonlat))
+    for layer in layers.values():            # plan §6.4: every layer payload carries its own bounds
+        layer["bounds_lonlat"] = bounds
+
+    # ---- §5.4 per-detection geometry (D8) -----------------------------------
+    # Same clusters the summary counts (same rule, same min_pixels — pinned by test), each with
+    # its own geographic geometry: pyproj path identical to core_bounds_lonlat. Capped at the
+    # 50 largest; detections_truncated says so. Uses the SELECTED pair's grids only.
+    detections: list[dict] = []
+    detections_truncated = False
+    try:
+        from engine.lib.detect import detected_clusters
+        from engine.lib.geo import epsg_is_utm
+
+        gx = np.asarray(best.grid_x, dtype=np.float64)
+        gy = np.asarray(best.grid_y, dtype=np.float64)
+        clusters = detected_clusters(best.grids["detected"], best.disp,
+                                     s.pixel_area_km2, s.clusters["min_pixels"], max_clusters=51)
+        detections_truncated = len(clusters) > 50
+        if epsg_is_utm(bundle.tile.epsg) and gx.size >= 2 and gy.size >= 2:
+            from pyproj import Transformer
+            tr = Transformer.from_crs(bundle.tile.epsg, 4326, always_xy=True)
+
+            def _xy(ci: float, cj: float) -> tuple[float, float]:
+                x = float(np.interp(cj, np.arange(gx.size), gx))
+                y = float(np.interp(ci, np.arange(gy.size), gy))
+                return tr.transform(x, y)
+
+            for k, c in enumerate(clusters[:50]):
+                i0, j0, i1, j1 = c["bbox_px"]
+                lon_w, lat_s = _xy(i0, j0)
+                lon_e, lat_n = _xy(i1, j1)
+                lon_c, lat_c = _xy(*c["centroid_px"])
+                pair_key = f"{best.stack_key}#{best.pair_index}"
+                detections.append({
+                    "id": f"earthquake_coseismic:{pair_key}:{k}",
+                    "label": (f"cluster {k + 1}: {c['size']} px ({c['area_km2']:.2f} km², "
+                              f"{c['polarity']})"),
+                    "kind": "cluster",
+                    "layer": "detected",
+                    "centroid_lonlat": [float(lon_c), float(lat_c)],
+                    "bbox_lonlat": [float(min(lon_w, lon_e)), float(min(lat_s, lat_n)),
+                                    float(max(lon_w, lon_e)), float(max(lat_s, lat_n))],
+                    "area_km2": round(c["area_km2"], 4),
+                    "polarity": c["polarity"],
+                    "metrics": ({"peak_abs_los_m": {"value": round(c["peak_abs_m"], 6), "units": "m"}}
+                                if c["peak_abs_m"] is not None else {}),
+                })
+        else:
+            warnings.append("detection geometry unavailable (non-UTM grid or degenerate axes); "
+                            "cluster counts and areas are still reported in the evidence")
+    except Exception as ex:  # noqa: BLE001 — geometry is additive; counts/areas already reported
+        warnings.append(f"per-detection geometry could not be computed: {type(ex).__name__}: {ex}")
+
     detail = {
         "params": params.to_dict(),
         "pairs_analysed": pair_records,
@@ -388,12 +449,10 @@ def run(bundle, providers: dict | None = None) -> PipelineResult:
                          if uncatalogued_fit is not None else None),
         "layers": {name: layer for name, layer in layers.items()},
         "narrative": _narrative(status, s, extra, best_screen, params, rule=rule),
+        "detections": detections,
+        "detections_truncated": detections_truncated,
     }
 
-    bounds = core_bounds_lonlat(best.grid_x, best.grid_y, bundle.tile.epsg,
-                                fallback=tuple(bundle.tile.bbox_lonlat))
-    for layer in layers.values():            # plan §6.4: every layer payload carries its own bounds
-        layer["bounds_lonlat"] = bounds
     layer_refs = [LayerRef(name=name, kind="raster", crs=f"EPSG:{bundle.tile.epsg}",
                            bounds_lonlat=tuple(bounds)) for name in layers]
 

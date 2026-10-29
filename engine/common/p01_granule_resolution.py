@@ -113,19 +113,16 @@ def _search(ctx: BuildContext, product: str):
     return r.search(bbox, iso(ctx.request.t0), iso(ctx.request.t1), product)
 
 
-def run(ctx: BuildContext) -> None:
-    res = Resolved()
-    ctx.resolved = res
-    if ctx.retriever is None:
-        ctx.flag("no_retriever", "error", "P01", "no retriever supplied: nothing to resolve")
-        return
+def resolve(ctx: BuildContext, products: list[str]) -> Resolved:
+    """Search + grouping for `products`, with every flag P01 raises while doing it.
+
+    The one implementation of P01's algorithm: `run()` (the chain step) and the granule-availability
+    endpoint (engine/api/jobs.py) both call this. Installs the result on `ctx.resolved` and returns it.
+    Post-loop bookkeeping (to_fetch, the no_granules / older_versions_dropped flags) stays with the
+    caller, because each caller derives "nothing found" from its own view of the groups."""
+    res = ctx.resolved = Resolved()
     cfg = ctx.cfg
-    products = wanted_products(ctx.request.active_codes, cfg.products.include_goff)
     names = {"GUNW": cfg.products.gunw, "GCOV": cfg.products.gcov, "GOFF": cfg.products.goff}
-    if not products:
-        ctx.flag("no_nisar_measurement", "info", "P01",
-                 "none of the active manifests needs a NISAR measurement (M1/M2/M3)", codes=sorted(ctx.request.active_codes or []))
-        return
     as_of = ctx.request.as_of
     merge = cfg.window.epoch_merge_minutes
 
@@ -149,6 +146,21 @@ def run(ctx: BuildContext) -> None:
             _group_epochs(ctx, res, metas, merge, as_of)
         else:
             _group_pairs(ctx, res, metas, prod, merge, as_of)
+    return res
+
+
+def run(ctx: BuildContext) -> None:
+    ctx.resolved = Resolved()
+    if ctx.retriever is None:
+        ctx.flag("no_retriever", "error", "P01", "no retriever supplied: nothing to resolve")
+        return
+    cfg = ctx.cfg
+    products = wanted_products(ctx.request.active_codes, cfg.products.include_goff)
+    if not products:
+        ctx.flag("no_nisar_measurement", "info", "P01",
+                 "none of the active manifests needs a NISAR measurement (M1/M2/M3)", codes=sorted(ctx.request.active_codes or []))
+        return
+    res = resolve(ctx, products)
 
     for prod, target in (("GUNW", res.gunw), ("GCOV", res.gcov), ("GOFF", res.goff)):
         ids = []

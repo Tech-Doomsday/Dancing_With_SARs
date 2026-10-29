@@ -10,11 +10,13 @@
     "typecheck": "tsc --noEmit",
     "guard:no-science": "node scripts/no-science-guard.mjs",
     "test:e2e": "playwright test",
+    "test:e2e:live": "playwright test --config playwright.live.config.ts",
     "ci": "npm run typecheck && npm run guard:no-science && npm run build"
   },
   "dependencies": {
     "leaflet": "^1.9.4",
     "lucide-react": "^0.469.0",
+    "maplibre-gl": "5.24.0",
     "next": "^15.3.0",
     "react": "^19.0.0",
     "react-dom": "^19.0.0",

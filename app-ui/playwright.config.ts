@@ -14,6 +14,12 @@ export default defineConfig({
     url: "http://127.0.0.1:3100",
     reuseExistingServer: !process.env.CI,
     timeout: 120_000,
+    // the anon key is public by design (RLS read-only); the URL is a dead local port that the
+    // intercept spec routes away — un-routed calls fail and the UI says so honestly
+    env: {
+      NEXT_PUBLIC_SUPABASE_URL: "http://127.0.0.1:39999",
+      NEXT_PUBLIC_SUPABASE_ANON_KEY: "test-anon-key-public-by-design",
+    },
   },
   projects: [{ name: "chromium", use: { browserName: "chromium" } }],
 });

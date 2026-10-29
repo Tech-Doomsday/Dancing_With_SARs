@@ -13,6 +13,8 @@ TIER_OF = {
     "POSSIBLE": "candidate",
     "NOT_SUPPORTED": "not_supported",
     "INSUFFICIENT_EVIDENCE": "insufficient",
+    "NO_SIGNAL": "quiet",          # D15: the designed outcome for a tile where nothing happened —
+                                   # never an error (it used to fall through to tier="error")
     "PENDING": "pending",
     "NOT_RUN": "pending",
     "NOT_APPLICABLE": "not_applicable",
@@ -25,6 +27,7 @@ TIER_LABEL = {
     "candidate": "candidate / possible",
     "not_supported": "not supported by evidence",
     "insufficient": "not enough evidence",
+    "quiet": "no signal — quiet tile",
     "pending": "not run (yet)",
     "not_applicable": "did not apply here",
     "not_modelled": "not modelled yet",

@@ -12,10 +12,34 @@ UI "Redo verdict" ─► POST /api/runs ─► engine recomputes ─► overwrit
 
 ## Set up (once)
 
-1. In the Supabase SQL editor run `supabase/migrations/0001_verdict_cache.sql` (idempotent).
+1. In the Supabase SQL editor run `supabase/migrations/0001_verdict_cache.sql` (idempotent), then
+   `supabase/migrations/0002_locations_and_featured.sql` (idempotent) — 0002 adds the tile's
+   location columns (center_lon/center_lat/bbox_lonlat) to `verdicts` and creates the owner-curated
+   `featured_areas` table (public read, service-role write).
 2. Engine `.env`: `SUPABASE_URL`, `SUPABASE_SERVICE_KEY` (service-role key; server-side only).
 3. `app-ui/.env.local`: `NEXT_PUBLIC_SUPABASE_URL`, `NEXT_PUBLIC_SUPABASE_ANON_KEY` (see `app-ui/.env.example`).
 4. Push verdicts you already computed: `python tools/backfill_supabase.py --dry-run`, then without `--dry-run`.
+5. Backfill the location columns of rows pushed before 0002:
+   `python tools/backfill_supabase.py --fill-locations --dry-run`, then without `--dry-run`
+   (PATCH-only, by primary key; needs the bundles on disk — rows without a local bundle.json are
+   skipped and counted, never guessed).
+6. If rows were cached before the D15 fix, re-tier them from their stored status:
+   `python tools/backfill_supabase.py --retier --dry-run`, then without `--dry-run`
+   (PATCH-only; adds the "quiet" tier for NO_SIGNAL).
+
+## Featured areas (the globe UI's curated list)
+
+`featured_areas` is seeded EMPTY — nothing is invented. The owner adds real entries with the CLI:
+
+    python tools/feature_area.py add --slug los-angeles-basin --title "Los Angeles basin" \
+        --blurb "…" --lon -118.25 --lat 34.05 --zoom 11 --sort 10
+    python tools/feature_area.py list
+    python tools/feature_area.py remove --slug los-angeles-basin
+
+The tile is always resolved by the ENGINE (`engine.tiling.mgrs`): pass either `--tile` (validated
+against the engine's grid — unknown tiles are refused) or `--lon/--lat` (the engine resolves the
+containing cell). No verdicts are created; an entry whose tile has no cached result shows
+"not scanned yet" in the UI until a real scan fills it.
 
 Unset keys are fine: the engine reports "cache off" on each run and the UI works as before.
 

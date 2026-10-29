@@ -298,6 +298,30 @@ class DetectionSummary:                 # engine-relevant subset of the app Chan
     anomaly: dict                       # centroid/orientation/elongation
 ```
 
+### 6.3a `detail.detections` — the generic cross-pipeline detection contract (globe task §5.4)
+
+Every pipeline that detects discrete objects may add to its `detail`:
+
+```jsonc
+"detections": [{
+  "id": "earthquake_coseismic:<pair-key>:<k>",   // stable within the verdict
+  "label": "…",                                  // engine-written, shown verbatim
+  "kind": "cluster",
+  "layer": "detected",                           // layer this detection lives on (or null)
+  "centroid_lonlat": [lon, lat],
+  "bbox_lonlat": [W, S, E, N],
+  "area_km2": 3.2,
+  "polarity": "toward" | "away" | "mixed" | null,
+  "metrics": { "peak_abs_los_m": {"value": 0.031, "units": "m"} }
+}],
+"detections_truncated": false                    // true when the list is capped (50 largest)
+```
+
+Rules: the clusters must be the SAME clusters the summary counts (same neighbourhood rule and
+min_pixels — `engine/lib/detect.py::detected_clusters` pins equality with `detected_cluster_stats`);
+geometry uses the same grid coordinates and pyproj path as the layer bounds; a pipeline that cannot
+compute geometry reports counts/areas in evidence and omits `detections` rather than guessing.
+
 ### 6.3 `EqDetail` (the machine-readable payload inside `detail`)
 
 ```jsonc
@@ -320,10 +344,22 @@ class DetectionSummary:                 # engine-relevant subset of the app Chan
 ```jsonc
 { "name": "displacement", "dtype": "<f4", "shape": [125, 125],
   "data_b64": "...",                      // little-endian, row-major, row 0 = north, NaN = no-data
-  "bounds_lonlat": [[w,s],[e,n]],          // core-slice corners via pyproj (server-computed once)
+  "bounds_lonlat": [W, S, E, N],          // FLAT core-slice corners via pyproj (server-computed once);
+                                          // the earlier nested [[w,s],[e,n]] form in this doc was drift
   "units": "m (LOS, + = toward sensor)", "colormap": "diverging_teal_terracotta",
-  "vmin": -0.05, "vmax": 0.05 }            // hints; UI snaps to a nice scale
+  "vmin": -0.05, "vmax": 0.05,             // hints; UI snaps to a nice scale
+  "categories": [ ... ] }                  // categorical <u1 layers only:
+                                          // [{value: 1, label: "toward sensor", tone: "positive"},
+                                          //  {value: 2, label: "away from sensor", tone: "negative"}]
 ```
+
+Canonical encoder + validator: `engine/lib/layer_payload.py` (`encode_layer`, `validate_layer_payload`,
+`resample_mercator_rows`). Every implemented pipeline emits through it (the tsunami pipeline used to
+emit a nested-list payload the UI could not decode — fixed). A layer that violates the contract is a
+422 at the layer-serving routes with the problem list, never a 500. A raster whose latitude span
+exceeds 1 deg is resampled by the ENGINE so rows are linear in Web-Mercator Y (DEC10); the payload
+note says so. Rasters are drawn on their lon/lat bounding rectangle (documented approximation, exact
+enough at 10 km).
 
 Layers live only inside the run record (API response / runs store). They are derived, deterministic functions of `bundle_id + params` — same reproducibility contract the app had ("full grids are not persisted, recomputed on demand"), with the runs store keeping summary + layer payloads for v1 convenience (bounded, see §10).
 
@@ -568,7 +604,9 @@ app-ui/
 
 ### 11.4 What the UI deliberately does NOT do (v1)
 
-No map-click AOI runs (needs the task-queue decision, ARCHITECTURE §10), no event picker driving runs (events are derived from the pair window by the pipeline — the picker is display-only context), no calibration UI, no time slider (one bundle = one epoch set). Each of these is an M5+ item behind an API extension, not a UI hack.
+No event picker driving runs (events are derived from the pair window by the pipeline — the picker is display-only context), no calibration UI, no time slider over verdict results (one bundle = one epoch set). Each of these is an M5+ item behind an API extension, not a UI hack.
+
+SUPERSEDED (globe task): "No map-click AOI runs" is no longer true — the globe UI scans the one MGRS tile that contains a clicked/typed point through POST /api/scans (a real engine run with engine defaults, gated by NISAR_ENABLE_SCANS). A separate Data tab (GET /api/granules) browses granule availability on a real time-scaled timeline; that is metadata-only discovery, not the verdict time slider this section still excludes.
 
 ---
 

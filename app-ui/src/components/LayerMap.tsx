@@ -3,60 +3,23 @@
 import { useEffect, useRef, useState } from "react";
 import { MapContainer, ImageOverlay, TileLayer, CircleMarker, Tooltip } from "react-leaflet";
 import "leaflet/dist/leaflet.css";
-import type { LayerPayload } from "@/lib/types";
+import { colorize as colorizeLayer, decodeLayer } from "@/lib/raster";
+import type { LayerCategory, LayerPayload } from "@/lib/types";
 
-/** Decode little-endian base64 float32/uint8 grids (server-computed bounds). */
-function decode(layer: LayerPayload): Float32Array | Uint8Array {
-  const bytes = Uint8Array.from(atob(layer.data_b64), (c) => c.charCodeAt(0));
-  if (layer.dtype === "<u1") return new Uint8Array(bytes.buffer);
-  return new Float32Array(bytes.buffer);
-}
+/** <u1> payloads that predate the engine's `categories`: 1 = toward the sensor, 2 = away (the detected layer) */
+const LEGACY_DETECTED_CATEGORIES: LayerCategory[] = [
+  { value: 1, label: "toward sensor", tone: "positive" },
+  { value: 2, label: "away from sensor", tone: "negative" },
+];
 
+/** the shared colour implementation (lib/raster.ts), drawn 1:1 — this map does no pre-upscaling */
 function colorize(layer: LayerPayload, canvas: HTMLCanvasElement): void {
-  const [h, w] = layer.shape;
-  canvas.width = w;
-  canvas.height = h;
-  const ctx = canvas.getContext("2d");
-  if (!ctx) return;
-  const img = ctx.createImageData(w, h);
-  const data = decode(layer);
-  const vmin = layer.vmin ?? 0;
-  const vmax = layer.vmax ?? 1;
-  const span = vmax - vmin || 1;
-  for (let i = 0; i < w * h; i++) {
-    const v = Number(data[i]);
-    const [r, g, b, a] = px(layer, v, vmin, span, i);
-    img.data[i * 4] = r;
-    img.data[i * 4 + 1] = g;
-    img.data[i * 4 + 2] = b;
-    img.data[i * 4 + 3] = a;
-  }
-  ctx.putImageData(img, 0, 0);
-}
-
-function px(layer: LayerPayload, v: number, vmin: number, span: number, i: number): [number, number, number, number] {
-  if (layer.dtype === "<u1") {
-    // detected: 1 = toward (teal), 2 = away (terracotta)
-    if (v === 1) return [44, 95, 88, 210];
-    if (v === 2) return [158, 59, 44, 210];
-    return [0, 0, 0, 0];
-  }
-  if (!Number.isFinite(v)) return [0, 0, 0, 0]; // NaN -> transparent
-  const t = Math.max(0, Math.min(1, (v - vmin) / span));
-  if (layer.colormap.startsWith("diverging")) {
-    // terracotta -> cream -> teal
-    const r = Math.round(t < 0.5 ? 158 + t * 2 * (247 - 158) : 247 - (t - 0.5) * 2 * (247 - 44));
-    const g = Math.round(t < 0.5 ? 59 + t * 2 * (242 - 59) : 242 - (t - 0.5) * 2 * (242 - 95));
-    const b = Math.round(t < 0.5 ? 44 + t * 2 * (233 - 44) : 233 - (t - 0.5) * 2 * (233 - 88));
-    return [r, g, b, 205];
-  }
-  // sequential cream -> teal
-  return [
-    Math.round(247 - t * (247 - 26)),
-    Math.round(242 - t * (242 - 77)),
-    Math.round(233 - t * (233 - 68)),
-    205,
-  ];
+  const decoded = decodeLayer(layer);
+  if (!decoded.ok) throw new Error(decoded.reason);
+  const withCats = layer.dtype === "<u1" && !layer.categories
+    ? { ...layer, categories: LEGACY_DETECTED_CATEGORIES }
+    : layer;
+  colorizeLayer(withCats, decoded.data, canvas, 1);
 }
 
 const LAYERS = [

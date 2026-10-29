@@ -18,3 +18,8 @@ node_modules/
 dist/
 
 data/
+# playwright / build transients
+app-ui/test-results/
+app-ui/verify-screens/
+app-ui/tsconfig.tsbuildinfo
+app-ui/playwright-report/

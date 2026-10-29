@@ -128,6 +128,13 @@ class Tile:
     def pixel_window_hint(self, spacing_m: float) -> int:
         return int(round(self.size / spacing_m))
 
+    def to_dict(self) -> dict:
+        """The wire shape the API gives the UI for a tile (the UI never does tiling math itself)."""
+        return {"id": self.id, "epsg": int(self.epsg), "size_m": int(self.size),
+                "bbox_lonlat": [float(v) for v in self.bbox(0.0)],
+                "center_lonlat": [float(v) for v in self.center],
+                "polygon_lonlat": [[float(x), float(y)] for x, y in self.polygon_lonlat(0.0)]}
+
 
 # ---------------------------------------------------------------------- constructors
 def _make(zone: int, north_hint: bool, e0: float, n0: float, size: int) -> Tile | None:

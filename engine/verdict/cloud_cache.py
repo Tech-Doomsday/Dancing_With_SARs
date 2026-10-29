@@ -58,15 +58,19 @@ def _plain(x):
     return x
 
 
-def to_record(row: dict, *, run_id: str | None, bundle_id: str, tile: str, now: str) -> dict:
+def to_record(row: dict, *, run_id: str | None, bundle_id: str, tile: str, now: str,
+              location: dict | None = None) -> dict:
     """Verdict row (engine.verdict.collect + calibrate) -> one `verdicts` table record.
 
     The layer grids (detail.layers, base64) go in their own column so a board listing never has
-    to download them; everything else of the row is kept whole in `result`."""
+    to download them; everything else of the row is kept whole in `result`.
+    `location` carries the tile's geographic position (Phase 2): center_lon/center_lat/bbox_lonlat
+    come from the bundle's own TileInfo — never from the client — so the globe UI can pin cached
+    areas without resolving anything itself. A record without location still caches (older paths)."""
     detail = dict(row.get("detail") or {})
     layers = detail.pop("layers", None) or {}
     result = {**row, "detail": detail}
-    return {
+    rec = {
         "tile": row.get("tile") or tile,
         "pipeline": row["pipeline"],
         "bundle_id": row.get("bundle_id") or bundle_id,
@@ -80,6 +84,11 @@ def to_record(row: dict, *, run_id: str | None, bundle_id: str, tile: str, now: 
         "run_id": run_id,
         "computed_at": now,       # first_computed_at is omitted on purpose: the DB default sets it
     }                             # once, and merge-duplicates never touches a column it is not sent
+    if location:
+        rec["center_lon"] = location.get("center_lon")
+        rec["center_lat"] = location.get("center_lat")
+        rec["bbox_lonlat"] = location.get("bbox_lonlat")
+    return rec
 
 
 class CloudCache:
@@ -109,9 +118,11 @@ class CloudCache:
 
     # ------------------------------------------------------------------ write
     def write_run(self, rows: list, *, run_id: str | None, bundle_id: str, tile: str,
-                  params: dict | None = None, computed_at: str | None = None) -> dict:
+                  params: dict | None = None, computed_at: str | None = None,
+                  location: dict | None = None) -> dict:
         """Upsert one run's verdict rows. Returns {enabled, written, skipped[], failed[]} — never raises.
-        `computed_at` (ISO-8601 UTC) is only for the backfill tool, which keeps the original run time."""
+        `computed_at` (ISO-8601 UTC) is only for the backfill tool, which keeps the original run time.
+        `location` (Phase 2) is the tile's {center_lon, center_lat, bbox_lonlat} from the bundle."""
         report: dict = {"enabled": self.enabled, "written": 0, "skipped": [], "failed": []}
         if not self.enabled:
             report["reason"] = self.disabled_reason
@@ -127,7 +138,8 @@ class CloudCache:
             elif not name or not row.get("status"):
                 report["skipped"].append({"pipeline": name, "reason": "row has no pipeline/status"})
             else:
-                records.append(to_record(row, run_id=run_id, bundle_id=bundle_id, tile=tile, now=now))
+                records.append(to_record(row, run_id=run_id, bundle_id=bundle_id, tile=tile, now=now,
+                                         location=location))
         if not records:
             return report
         try:

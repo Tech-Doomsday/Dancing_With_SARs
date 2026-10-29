@@ -79,39 +79,75 @@ def threshold_rule(disp: np.ndarray, sigma_eff: np.ndarray, mask: np.ndarray,
     return thresholds, detected
 
 
-def detected_cluster_stats(detected: np.ndarray, pixel_area_km2: float, min_pixels: int) -> dict:
-    """Connected-component labelling (4-neighbourhood) of detected pixels.
-
-    Regions smaller than min_pixels are ignored — a documented minimum-cluster
-    criterion, not a statistical guarantee.
-    """
-    h, w = detected.shape
+def _connected_components(detected: np.ndarray, min_pixels: int):
+    """Yield the pixel list [(i, j), ...] of every 4-neighbourhood connected component of the detected
+    mask that has at least `min_pixels` pixels. Scan order is row-major from the top-left; pixels
+    within a component are in stack-pop order. The one flood fill behind both cluster functions below."""
+    det = np.asarray(detected).astype(bool)
+    h, w = det.shape
     visited = np.zeros((h, w), dtype=bool)
-    sizes: list[int] = []
-    det = detected.astype(bool)
     for start_i in range(h):
         for start_j in range(w):
             if not det[start_i, start_j] or visited[start_i, start_j]:
                 continue
             stack = [(start_i, start_j)]
             visited[start_i, start_j] = True
-            size = 0
+            pixels: list[tuple[int, int]] = []
             while stack:
                 i, j = stack.pop()
-                size += 1
+                pixels.append((i, j))
                 for ni, nj in ((i, j - 1), (i, j + 1), (i - 1, j), (i + 1, j)):
                     if 0 <= ni < h and 0 <= nj < w and det[ni, nj] and not visited[ni, nj]:
                         visited[ni, nj] = True
                         stack.append((ni, nj))
-            if size >= min_pixels:
-                sizes.append(size)
-    sizes.sort(reverse=True)
+            if len(pixels) >= min_pixels:
+                yield pixels
+
+
+def detected_cluster_stats(detected: np.ndarray, pixel_area_km2: float, min_pixels: int) -> dict:
+    """Connected-component labelling (4-neighbourhood) of detected pixels.
+
+    Regions smaller than min_pixels are ignored — a documented minimum-cluster
+    criterion, not a statistical guarantee.
+    """
+    sizes = sorted((len(px) for px in _connected_components(detected, min_pixels)), reverse=True)
     return {
         "count": len(sizes),
         "largest_km2": sizes[0] * pixel_area_km2 if sizes else 0.0,
         "sizes_km2": [s * pixel_area_km2 for s in sizes],
         "min_pixels": min_pixels,
     }
+
+
+def detected_clusters(detected: np.ndarray, disp: np.ndarray, pixel_area_km2: float,
+                      min_pixels: int, max_clusters: int = 50) -> list[dict]:
+    """Per-cluster geometry for the detections contract (task §5.4) — SAME 4-neighbour rule and
+    the same min_pixels as `detected_cluster_stats`, so counts and areas are IDENTICAL (a test
+    pins that equality; this function never replaces the summary numbers, it adds geometry).
+
+    -> [{pixels [(i, j)], size, area_km2, polarity, centroid_px, bbox_px}] sorted by size desc,
+    capped at the `max_clusters` largest (detections_truncated is the caller's job).
+    Coordinates are grid pixels; the caller converts to lon/lat with the grid axes."""
+    disp_arr = np.asarray(disp, dtype=np.float64)
+    out: list[dict] = []
+    for pixels in _connected_components(detected, min_pixels):
+        vals = [float(disp_arr[i, j]) for i, j in pixels if np.isfinite(disp_arr[i, j])]
+        toward = sum(1 for v in vals if v > 0)
+        away = sum(1 for v in vals if v < 0)
+        polarity = "toward" if toward and not away else "away" if away and not toward else "mixed"
+        ii = [p[0] for p in pixels]
+        jj = [p[1] for p in pixels]
+        out.append({
+            "pixels": pixels,
+            "size": len(pixels),
+            "area_km2": len(pixels) * pixel_area_km2,
+            "polarity": polarity,
+            "peak_abs_m": max((abs(v) for v in vals), default=None),
+            "centroid_px": (sum(ii) / len(ii), sum(jj) / len(jj)),
+            "bbox_px": (min(ii), min(jj), max(ii), max(jj)),
+        })
+    out.sort(key=lambda c: (-c["size"], c["centroid_px"]))
+    return out[:max_clusters]
 
 
 def anomaly_moments(detected_mask: np.ndarray, disp: np.ndarray) -> tuple:

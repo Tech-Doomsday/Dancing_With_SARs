@@ -1,31 +1,30 @@
 "use client";
 
-/** Engine status -> colour/label (docs/IMPLEMENTATION_PLAN.md 11.3). */
-const STATUS_STYLES: Record<string, { cls: string; label: string }> = {
-  SUPPORTED: { cls: "bg-[#2c5f58] text-white border-[#2c5f58]", label: "supported by evidence" },
-  POSSIBLE: { cls: "border-[#2c5f58] text-[#2c5f58] bg-[#eff5f3]", label: "possible" },
-  UNCATALOGUED_CANDIDATE: { cls: "border-[#2c5f58] text-[#2c5f58] bg-[#eff5f3]", label: "uncatalogued candidate" },
-  NOT_SUPPORTED: { cls: "border-[#d8d2c6] bg-[#f7f4ee] text-[#4a443c]", label: "not supported by evidence" },
-  INSUFFICIENT_EVIDENCE: { cls: "border-[#b08d57]/50 bg-[#f7f2e7] text-[#7a6438]", label: "not enough evidence" },
-  NO_SIGNAL: { cls: "border-[#d8d2c6] bg-[#f7f4ee] text-[#8a837b]", label: "no signal — quiet tile" },
-  NOT_APPLICABLE: { cls: "border-[#d8d2c6] bg-[#f7f4ee] text-[#8a837b]", label: "did not run here" },
-  NOT_RUN: { cls: "border-[#d8d2c6] bg-[#f7f4ee] text-[#8a837b]", label: "not launched" },
-  NOT_MODELLED: { cls: "border-dashed border-[#d8d2c6] bg-[#f7f4ee] text-[#8a837b]", label: "not modelled yet" },
-  PENDING: { cls: "border-[#b08d57]/50 bg-[#f7f2e7] text-[#7a6438]", label: "pending (heavy lane)" },
-  ERROR: { cls: "border-[#9e3b2c] bg-[#fbf3ef] text-[#9e3b2c]", label: "run failed" },
-  queued: { cls: "border-[#b08d57]/50 bg-[#f7f2e7] text-[#7a6438]", label: "queued" },
-  running: { cls: "border-[#b08d57]/50 bg-[#f7f2e7] text-[#7a6438]", label: "running" },
-  ok: { cls: "border-[#2c5f58] bg-[#eff5f3] text-[#2c5f58]", label: "finished" },
-};
+import { FALLBACK_CHIP_CLASSES, STATUS_CHIP, TIER_CHIP_CLASSES } from "@/lib/status";
 
-export default function StatusBadge({ status }: { status: string }) {
-  const style = STATUS_STYLES[status] ?? {
-    cls: "border-[#d8d2c6] bg-[#f7f4ee] text-[#4a443c]",
-    label: status,
-  };
+/** Engine status / tier -> colour + label (docs/IMPLEMENTATION_PLAN.md 11.3). The tables live in lib/status.ts.
+ *  With a `tier` the colour comes from the tier table and the label is the caller's `label` (the engine's
+ *  tier_label); without one it takes the status-only path. `compact` is the small chip the globe panels use. */
+export default function StatusBadge({ status, tier, label, compact }: {
+  status: string;
+  tier?: string | null;
+  label?: string | null;
+  compact?: boolean;
+}) {
+  let cls: string;
+  let text: string;
+  if (tier !== undefined) {
+    cls = TIER_CHIP_CLASSES[tier ?? ""] ?? FALLBACK_CHIP_CLASSES;
+    text = label ?? status.replace(/_/g, " ").toLowerCase();
+  } else {
+    const style = STATUS_CHIP[status] ?? { cls: FALLBACK_CHIP_CLASSES, label: status };
+    cls = style.cls;
+    text = style.label;
+  }
+  const size = compact ? "shrink-0 px-2 text-[10px]" : "px-2.5 text-xs";
   return (
-    <span className={`inline-flex items-center rounded-full border px-2.5 py-0.5 text-xs font-medium ${style.cls}`}>
-      {style.label}
+    <span className={`inline-flex items-center rounded-full border py-0.5 font-medium ${size} ${cls}`}>
+      {text}
     </span>
   );
 }

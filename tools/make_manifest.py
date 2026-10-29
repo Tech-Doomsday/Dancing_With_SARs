@@ -5,7 +5,9 @@ import hashlib, json, sys
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
-SKIP_DIRS = {"__pycache__", ".pytest_cache", "data", ".git", "catalog"}
+SKIP_DIRS = {"__pycache__", ".pytest_cache", "data", ".git", "catalog",
+             # build/test artefacts and dependency trees are never shipped (regenerated locally)
+             "node_modules", ".next", "test-results", "verify-screens", "playwright-report"}
 
 
 def files():

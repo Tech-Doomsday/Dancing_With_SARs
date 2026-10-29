@@ -241,17 +241,32 @@ def run(bundle, providers: dict | None = None) -> PipelineResult:
         "simulation": (sim["diagnostics"] if sim else None),
     }
     if sim is not None:
+        # D1 fix: canonical LayerPayloads (engine.lib.layer_payload) — b64 grids, flat [W,S,E,N]
+        # bounds, vmin/vmax, note. The solver's grids have row 0 = SOUTH (lat0 + j*res); the
+        # layer contract is row 0 = NORTH, so rows are flipped. The domain spans
+        # 2*domain_half_deg of latitude (10 deg by default): per DEC10 the engine resamples rows
+        # to be linear in Web-Mercator Y before encoding (the client never reprojects) and the
+        # note says so.
+        w, s_, e, n_ = (float(v) for v in domain["bbox"])
+        from engine.lib.layer_payload import encode_layer as canonical_layer, resample_mercator_rows
+
+        def canonical(field: str, units: str, colormap: str) -> dict:
+            a = np.asarray(sim["fields"][field], dtype=np.float32)[::-1, :]   # row 0 -> north
+            a, resample_note = resample_mercator_rows(a, lat_top=n_, lat_bottom=s_)
+            finite = a[np.isfinite(a)]
+            span = float(np.abs(finite).max()) if finite.size else 1.0
+            return canonical_layer(
+                field, a, units=units, colormap=colormap,
+                vmin=-span if colormap.startswith("diverging") else 0.0,
+                vmax=span,
+                bounds_lonlat=[w, s_, e, n_],
+                note=(f"{field} over the simulation domain"
+                      + (f"; {resample_note}" if resample_note else "")),
+            )
+
         detail["layers"] = {
-            "max_eta": {"units": "m (max |eta| over the run)",
-                        "data": np.asarray(sim["fields"]["max_eta"], dtype=np.float32).tolist(),
-                        "bounds_lonlat": [[domain["bbox"][0], domain["bbox"][1]],
-                                          [domain["bbox"][2], domain["bbox"][3]]],
-                        "colormap": "diverging_teal_terracotta"},
-            "arrival": {"units": "s (first arrival of |eta| > threshold)",
-                        "data": np.asarray(sim["fields"]["arrival"], dtype=np.float32).tolist(),
-                        "bounds_lonlat": [[domain["bbox"][0], domain["bbox"][1]],
-                                          [domain["bbox"][2], domain["bbox"][3]]],
-                        "colormap": "sequential"},
+            "max_eta": canonical("max_eta", "m (max |eta| over the run)", "diverging_teal_terracotta"),
+            "arrival": canonical("arrival", "s (first arrival of |eta| > threshold)", "sequential"),
         }
         layers.append(LayerRef(name="max_eta", kind="raster", crs="EPSG:4326"))
         layers.append(LayerRef(name="arrival", kind="raster", crs="EPSG:4326"))

@@ -8,6 +8,8 @@ import type {
   RunState,
   RunSummary,
   EventItem,
+  GranuleSearchResponse,
+  TileInfo,
 } from "./types";
 
 const BASE = process.env.NEXT_PUBLIC_ENGINE_API ?? "http://127.0.0.1:8900";
@@ -28,8 +30,8 @@ function extractError(body: unknown, res: Response): string {
   return `${res.status} ${res.statusText}`;
 }
 
-async function get<T>(path: string): Promise<T> {
-  const res = await fetch(`${BASE}${path}`, { cache: "no-store" });
+async function get<T>(path: string, opts?: { signal?: AbortSignal }): Promise<T> {
+  const res = await fetch(`${BASE}${path}`, { cache: "no-store", signal: opts?.signal });
   if (!res.ok) {
     const body = await res.json().catch(() => ({}));
     throw new Error(extractError(body, res));
@@ -65,9 +67,40 @@ export const api = {
     }),
   runs: () => get<{ ok: true; runs: RunSummary[] }>("/api/runs"),
   /** The engine returns the run state FLAT: {ok, id, status, progress, error, results}. */
-  run: (id: string) => get<RunState & { ok: true }>(`/api/runs/${id}`),
+  run: (id: string, opts?: { slim?: boolean }) =>
+    get<RunState & { ok: true }>(`/api/runs/${id}${opts?.slim ? "?slim=1" : ""}`),
   layer: (id: string, layer: string) =>
     get<LayerResponse>(`/api/runs/${id}/layers/${layer}`),
+  /** D5: the pipeline-scoped layer route — layer names collide across pipelines. */
+  pipelineLayer: (id: string, pipeline: string, layer: string) =>
+    get<LayerResponse>(`/api/runs/${id}/pipelines/${encodeURIComponent(pipeline)}/layers/${encodeURIComponent(layer)}`),
+  /** §5.2: the engine does the tiling — the UI never computes MGRS itself. */
+  tileAt: (lon: number, lat: number) =>
+    get<{ ok: true; tile: TileInfo }>(
+      `/api/tile-at?lon=${lon}&lat=${lat}`,
+    ),
+  /** §7.7 URL restore: a pasted ?tile= link gets the tile's geometry/centre from the engine. */
+  tileAtId: (tile: string) =>
+    get<{ ok: true; tile: TileInfo }>(
+      `/api/tile-at?tile=${encodeURIComponent(tile)}`,
+    ),
+  /** §5.3: a scan is a run — one polling path for everything. */
+  startScan: (lon: number, lat: number, opts?: { as_of?: string; lookback_days?: number }) =>
+    post<{ ok: true; run_id: string; tile: TileInfo }>("/api/scans", {
+      lon,
+      lat,
+      ...(opts?.as_of ? { as_of: opts.as_of } : {}),
+      ...(opts?.lookback_days ? { lookback_days: opts.lookback_days } : {}),
+    }),
+  /** §5.5: granule availability (metadata-only; live-engine-only, DEC5). */
+  granules: (lon: number, lat: number, opts?: { product?: string; from?: string; to?: string }, signal?: AbortSignal) =>
+    get<GranuleSearchResponse & { ok: true }>(
+      `/api/granules?lon=${lon}&lat=${lat}`
+      + (opts?.product ? `&product=${encodeURIComponent(opts.product)}` : "")
+      + (opts?.from ? `&from=${encodeURIComponent(opts.from)}` : "")
+      + (opts?.to ? `&to=${encodeURIComponent(opts.to)}` : ""),
+      { signal },
+    ),
 };
 
 /** Self-scheduling poll: next request only after the previous settles (>=1.5 s).

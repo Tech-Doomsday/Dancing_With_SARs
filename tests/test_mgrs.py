@@ -95,3 +95,18 @@ def test_equator_crossing_footprint_uses_both_hemispheres():
     tiles = tiles_for_bbox((30.0, -0.05, 30.1, 0.05), 10_000)
     assert {t.north for t in tiles} == {True, False}
     assert all(tile_from_id(t.id) == t for t in tiles)
+
+
+def test_tile_to_dict_wire_shape():
+    """Tile.to_dict() is the one tile wire shape (API /tile-at, /scans, /granules); pin it against the
+    fields it was hand-built from at three call sites before."""
+    from engine.tiling.mgrs import tile_at
+
+    t = tile_at(-118.5, 34.0, size=10_000)
+    d = t.to_dict()
+    assert list(d) == ["id", "epsg", "size_m", "bbox_lonlat", "center_lonlat", "polygon_lonlat"]
+    assert d["id"] == t.id and d["epsg"] == int(t.epsg) and d["size_m"] == 10_000
+    assert d["bbox_lonlat"] == [float(v) for v in t.bbox(0.0)]
+    assert d["center_lonlat"] == [float(v) for v in t.center]
+    assert d["polygon_lonlat"] == [[float(x), float(y)] for x, y in t.polygon_lonlat(0.0)]
+    assert d["polygon_lonlat"][0] == d["polygon_lonlat"][-1]

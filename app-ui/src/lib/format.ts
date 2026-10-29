@@ -1,5 +1,7 @@
 /** Display formatting only — no science, no thresholds. */
 
+export const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+
 /** "3 h ago" / "just now" / "in 2 min" for an ISO timestamp; "—" when it cannot be parsed. */
 export function timeAgo(iso: string | null | undefined, now: number = Date.now()): string {
   if (!iso) return "—";
