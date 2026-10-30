@@ -3,9 +3,11 @@
 /** AppNav (UI-build-2 §1) — the shared nav: Landing · Map · Background. Rendered by the full-bleed
  *  pages and the (site) layout, so every page offers the same three sections. `dark` switches the
  *  palette for the instrument themes (contrast pairs stay AA). `active` accepts null (pages that
- *  belong to none of the tabs, e.g. /runs/* and /verdicts/*). */
+ *  belong to none of the tabs, e.g. /runs/* and /verdicts/*). The trailing EngineLink pill shows
+ *  which engine the UI talks to and lets the person paste a different URL (e.g. a Colab tunnel). */
 import { useEffect, useState } from "react";
 import Link from "next/link";
+import EngineLink from "./EngineLink";
 import {
   loadQueryContext, mapHref, retrievalHref, subscribeQueryContext, type QueryContext,
 } from "@/lib/queryContext";
@@ -63,6 +65,7 @@ export default function AppNav({ active, dark = false }: { active: AppNavItem | 
           );
         })}
       </ul>
+      <EngineLink dark={dark} />
     </nav>
   );
 }

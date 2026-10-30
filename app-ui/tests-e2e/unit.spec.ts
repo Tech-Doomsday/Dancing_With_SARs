@@ -13,6 +13,7 @@ import { parseExplorerState, writeExplorerState } from "../src/lib/urlstate";
 import { groupTimes, groupKindLabel, variantFactsLabel, compareEnds, zoomBox, panBox } from "../src/lib/groups";
 import { ticks as ticksForExplorer } from "../src/lib/timescale";
 import { mapHref, retrievalHref, sanitize, toDateOnly } from "../src/lib/queryContext";
+import { normalizeEngineUrl } from "../src/lib/engineUrl";
 
 /** §8.2 pure-logic tests — no browser needed. Playwright transpiles the TS imports directly. */
 
@@ -479,5 +480,33 @@ test.describe("queryContext (map → Background hand-off)", () => {
     expect(toDateOnly("2026-07-02T10:00:00Z")).toBe("2026-07-02");
     expect(toDateOnly("garbage")).toBeUndefined();
     expect(toDateOnly(undefined)).toBeUndefined();
+  });
+});
+
+test.describe("normalizeEngineUrl (paste-an-engine-URL box)", () => {
+  const ok = (s: string) => {
+    const r = normalizeEngineUrl(s);
+    if (!r.ok) throw new Error(`${s} should normalise: ${r.error}`);
+    return r.url;
+  };
+  test("accepts a plain tunnel URL and strips slashes / api tails", () => {
+    expect(ok("https://abc-def.trycloudflare.com")).toBe("https://abc-def.trycloudflare.com");
+    expect(ok("  https://abc-def.trycloudflare.com/  ")).toBe("https://abc-def.trycloudflare.com");
+    expect(ok("https://abc-def.trycloudflare.com/api/health")).toBe("https://abc-def.trycloudflare.com");
+    expect(ok("https://abc-def.trycloudflare.com/api/")).toBe("https://abc-def.trycloudflare.com");
+  });
+  test("accepts the Colab cell's NEXT_PUBLIC_ENGINE_API=… line, with or without quotes", () => {
+    expect(ok("NEXT_PUBLIC_ENGINE_API=https://x.trycloudflare.com")).toBe("https://x.trycloudflare.com");
+    expect(ok('NEXT_PUBLIC_ENGINE_API="https://x.trycloudflare.com"')).toBe("https://x.trycloudflare.com");
+  });
+  test("adds a scheme: https for hosts, http for localhost", () => {
+    expect(ok("x.trycloudflare.com")).toBe("https://x.trycloudflare.com");
+    expect(ok("127.0.0.1:8900")).toBe("http://127.0.0.1:8900");
+    expect(ok("localhost:8900/")).toBe("http://localhost:8900");
+  });
+  test("rejects empty, spaced, non-http and remote-http input", () => {
+    for (const bad of ["", "   ", "two words", "ftp://x.com", "http://x.trycloudflare.com", "https://"]) {
+      expect(normalizeEngineUrl(bad).ok, `${bad} should be rejected`).toBe(false);
+    }
   });
 });

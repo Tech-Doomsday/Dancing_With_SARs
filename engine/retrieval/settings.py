@@ -28,7 +28,7 @@ DEFAULTS: dict[str, dict] = {
         "ttl_s": {"granule_clip": None, "search": 21600, "layout_index": None},
         "stale_on_error": True,
     },
-    "search": {"max_results": 250, "keep_all_versions": False},
+    "search": {"max_results": 250, "keep_all_versions": False, "timeout_s": 90, "retry_incomplete": 1},
     "poll": {"products": ["GCOV", "GUNW"], "lookback_days": 45, "max_results": 2000, "interval_hours": 6, "region": None},
     "tiling": {"scheme": "mgrs", "cell_size_m": 10000, "margin_m": 300},
 }

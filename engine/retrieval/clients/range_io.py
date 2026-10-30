@@ -109,16 +109,28 @@ class Metrics:
     retries: int = 0
     resolves: int = 0
     seconds_in_flight: float = 0.0
+    inflight: int = 0          # range GETs started and not yet finished (live gauge)
+    last_activity: float = 0.0  # time.monotonic() of the last completed range read (0 = none yet)
     _lock: threading.Lock = field(default_factory=threading.Lock, repr=False)
 
     def add(self, **kw):
         with self._lock:
             for k, v in kw.items():
                 setattr(self, k, getattr(self, k) + v)
+            if kw.get("bytes_fetched"):
+                self.last_activity = time.monotonic()
 
     def snapshot(self) -> dict:
         return {k: getattr(self, k) for k in
                 ("requests", "bytes_fetched", "bytes_useful", "retries", "resolves")}
+
+    def live(self) -> dict:
+        """snapshot() plus the live gauges (read-only; used by the scan progress display)."""
+        with self._lock:
+            idle = (time.monotonic() - self.last_activity) if self.last_activity else None
+            return {**{k: getattr(self, k) for k in ("requests", "bytes_fetched", "bytes_useful", "retries",
+                                                     "resolves", "inflight")},
+                    "seconds_in_flight": round(self.seconds_in_flight, 1), "idle_s": idle}
 
 
 # --------------------------------------------------------------------------- coalescing
@@ -242,24 +254,28 @@ class HttpIO:
                 final, _ = await self.resolve(url)
                 hdr = {"Range": f"bytes={start}-{end - 1}", **self._headers_for(final)}
                 t0 = time.perf_counter()
-                async with self._sem:
-                    async with self._session.get(final, headers=hdr, allow_redirects=False) as r:
-                        if r.status in (401, 403) and not reresolved:
-                            reresolved = True
-                            await r.read()
-                            await self.resolve(url, force=True)
-                            continue
-                        if r.status in (401, 403):
-                            raise AuthError(f"HTTP {r.status} on range read")
-                        if r.status == 416:
-                            raise RangeError(f"range {start}-{end} beyond end of file")
-                        if r.status in (408, 429) or r.status >= 500:
-                            raise aiohttp.ClientResponseError(r.request_info, (), status=r.status)
-                        if r.status == 200 and start > 0:
-                            raise RangeError("server ignored Range header (HTTP 200)")
-                        if r.status not in (200, 206):
-                            raise RangeError(f"HTTP {r.status}")
-                        body = await r.read()
+                self.metrics.add(inflight=1)
+                try:
+                    async with self._sem:
+                        async with self._session.get(final, headers=hdr, allow_redirects=False) as r:
+                            if r.status in (401, 403) and not reresolved:
+                                reresolved = True
+                                await r.read()
+                                await self.resolve(url, force=True)
+                                continue
+                            if r.status in (401, 403):
+                                raise AuthError(f"HTTP {r.status} on range read")
+                            if r.status == 416:
+                                raise RangeError(f"range {start}-{end} beyond end of file")
+                            if r.status in (408, 429) or r.status >= 500:
+                                raise aiohttp.ClientResponseError(r.request_info, (), status=r.status)
+                            if r.status == 200 and start > 0:
+                                raise RangeError("server ignored Range header (HTTP 200)")
+                            if r.status not in (200, 206):
+                                raise RangeError(f"HTTP {r.status}")
+                            body = await r.read()
+                finally:
+                    self.metrics.add(inflight=-1)
                 if r.status == 200:
                     body = body[start:end]
                 if len(body) != want:

@@ -5,7 +5,8 @@
  *  discovery: it never triggers a scan. Loading/empty/error states follow the honesty rules. */
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
-import { api, ENGINE_API } from "@/lib/api";
+import { api } from "@/lib/api";
+import { useEngineUrl } from "@/lib/engineUrl";
 import { retrievalHref, saveQueryContext, toDateOnly } from "@/lib/queryContext";
 import type { GranuleSearchResponse } from "@/lib/types";
 import GranuleTimeline, { type TimelineSelection } from "./GranuleTimeline";
@@ -25,6 +26,7 @@ export interface DataPanelProps {
 }
 
 export default function DataPanel(props: DataPanelProps) {
+  const engineUrl = useEngineUrl();
   const [data, setData] = useState<GranuleSearchResponse | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
@@ -133,7 +135,7 @@ export default function DataPanel(props: DataPanelProps) {
           the engine is offline — granule availability needs it (this tab is live-engine-only and
           is never cached, so it will not show stale data).
         </p>
-        <p className="mono mt-2 text-[10px] text-[#8a837b]">engine: {ENGINE_API}</p>
+        <p className="mono mt-2 text-[10px] text-[#8a837b]">engine: {engineUrl}</p>
       </div>
     );
   }
@@ -174,7 +176,7 @@ export default function DataPanel(props: DataPanelProps) {
           {([["w", "West"], ["s", "South"], ["e", "East"], ["n", "North"]] as const).map(([k, label]) => (
             <label key={k} className="text-[10px] text-[#8a837b]">
               {label}
-              <input
+              <input suppressHydrationWarning
                 inputMode="decimal"
                 value={area[k]}
                 onChange={(ev) => setArea((a) => ({ ...a, [k]: ev.target.value }))}
@@ -187,7 +189,7 @@ export default function DataPanel(props: DataPanelProps) {
           {([["from", "From (UTC)"], ["to", "To (UTC)"]] as const).map(([k, label]) => (
             <label key={k} className="text-[10px] text-[#8a837b]">
               {label}
-              <input
+              <input suppressHydrationWarning
                 type="date"
                 value={area[k]}
                 onChange={(ev) => setArea((a) => ({ ...a, [k]: ev.target.value }))}
@@ -242,9 +244,9 @@ export default function DataPanel(props: DataPanelProps) {
       )}
       {data && (
         <>
-          {data.search_degraded && (
+          {(data.search_degraded || data.search_incomplete) && (
             <p role="status" className="rounded-lg border border-[#b08d57]/40 bg-[#f7f2e7] px-3 py-2 text-[11px] text-[#7a6438]">
-              degraded search: results may be incomplete (see flags below)
+              {data.search_incomplete ? "ASF/CMR returned a short listing even after a retry: some granules may be missing (see flags below)" : "degraded search: results may be incomplete (see flags below)"}
             </p>
           )}
           <GranuleTimeline

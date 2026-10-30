@@ -180,7 +180,7 @@ function FindingCard(props: FindingsPanelProps & { result: PipelineResult }) {
                   {name}
                 </button>
                 {on && (
-                  <input
+                  <input suppressHydrationWarning
                     type="range"
                     min={0.2}
                     max={1}

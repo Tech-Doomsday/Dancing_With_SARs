@@ -237,7 +237,7 @@ export default function ExplorerDetail({ granule, group, stack, stackGranules, b
             {group.variants.map((v) => (
               <li key={v.id}>
                 <label className="flex cursor-pointer items-center gap-2 text-[10px]">
-                  <input
+                  <input suppressHydrationWarning
                     type="radio"
                     name="variant"
                     checked={v.id === (variantId ?? group.variants[0]?.id)}

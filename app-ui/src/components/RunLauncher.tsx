@@ -81,7 +81,7 @@ export default function RunLauncher({
         {PARAM_FIELDS.map((f) => (
           <label key={f.key} className="text-xs">
             <span className="block font-medium text-[#4a443c]">{f.label}</span>
-            <input
+            <input suppressHydrationWarning
               type="number"
               inputMode="decimal"
               min={f.min}

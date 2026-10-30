@@ -42,7 +42,7 @@ export default function ExplorerFiltersRow({ filters, onChange }: {
     <div className="flex flex-wrap items-center gap-x-4 gap-y-1.5 px-4 py-1.5 text-[11px] text-[#8b949e]">
       <label className="flex items-center gap-1.5">
         day of month
-        <input
+        <input suppressHydrationWarning
           value={domText}
           onChange={(e) => applyDom(e.target.value)}
           placeholder="20-25, 5"
@@ -52,7 +52,7 @@ export default function ExplorerFiltersRow({ filters, onChange }: {
       </label>
       <label className="flex items-center gap-1.5">
         UTC time of day
-        <input
+        <input suppressHydrationWarning
           value={todText}
           onChange={(e) => applyTod(e.target.value)}
           placeholder="13:00-14:30"
@@ -86,7 +86,7 @@ export default function ExplorerFiltersRow({ filters, onChange }: {
       </label>
       <label className="flex items-center gap-1.5">
         track
-        <input
+        <input suppressHydrationWarning
           value={filters.track ?? ""}
           onChange={(e) => {
             const v = e.target.value.trim();
@@ -101,7 +101,7 @@ export default function ExplorerFiltersRow({ filters, onChange }: {
       </label>
       <label className="flex items-center gap-1.5">
         text
-        <input
+        <input suppressHydrationWarning
           value={filters.text}
           onChange={(e) => onChange({ ...filters, text: e.target.value })}
           placeholder="file-name substring"

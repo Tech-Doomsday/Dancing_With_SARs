@@ -9,7 +9,8 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import dynamic from "next/dynamic";
 import { useRouter, useSearchParams } from "next/navigation";
 import { X } from "lucide-react";
-import { api, ENGINE_API, pollWhile } from "@/lib/api";
+import { api, engineBase, pollWhile } from "@/lib/api";
+import { useEngineUrl } from "@/lib/engineUrl";
 import { cache, cacheConfigured } from "@/lib/cache";
 import { colorize, validateLayerPayload, decodeLayer } from "@/lib/raster";
 import { parseCoordinates } from "@/lib/geo-input";
@@ -44,6 +45,7 @@ interface LayerCacheEntry {
 }
 
 export default function GlobeApp() {
+  const engineUrl = useEngineUrl();
   const router = useRouter();
   const searchParams = useSearchParams();
 
@@ -209,7 +211,7 @@ export default function GlobeApp() {
     const ctrl = new AbortController();
     setTileLoading(true);
     const id = setTimeout(() => {
-      fetch(`${ENGINE_API}/api/tile-at?lon=${pin[1]}&lat=${pin[0]}`, { signal: ctrl.signal, cache: "no-store" })
+      fetch(`${engineBase()}/api/tile-at?lon=${pin[1]}&lat=${pin[0]}`, { signal: ctrl.signal, cache: "no-store" })
         .then(async (res) => {
           const body = await res.json().catch(() => ({}));
           if (!res.ok) throw new Error(body?.detail?.error ?? body?.detail ?? `${res.status} ${res.statusText}`);
@@ -619,7 +621,7 @@ export default function GlobeApp() {
             </>
           ) : (
             <>
-              engine offline at <span className="mono">{ENGINE_API}</span> — cached results still open;
+              engine offline at <span className="mono">{engineUrl}</span> — cached results still open;
               scans and the Data tab need the engine.
             </>
           )}
@@ -848,7 +850,7 @@ export default function GlobeApp() {
         />
         {!engineOnline && healthChecked && (
           <p role="status" className="pointer-events-auto w-[min(92vw,340px)] rounded-xl border border-[#b08d57]/40 bg-[#f7f2e7]/95 px-3 py-2 text-[11px] text-[#7a6438] backdrop-blur">
-            engine offline at <span className="mono">{ENGINE_API}</span> — Scan is disabled; cached
+            engine offline at <span className="mono">{engineUrl}</span> — Scan is disabled; cached
             results still open from Explore.
           </p>
         )}

@@ -26,6 +26,7 @@ Serving slice for the unified UI (docs/IMPLEMENTATION_PLAN.md 10 + the port desi
 """
 from __future__ import annotations
 
+import logging
 import os
 
 from fastapi import FastAPI
@@ -43,6 +44,12 @@ from .routes_pipelines import router as pipelines_router
 from .routes_runs import router as runs_router
 from .routes_scanner import router as scanner_router
 from .routes_tiles import router as tiles_router
+
+# Without a root handler every INFO line from nisar.* (scan steps, ASF search, byte heartbeat) is dropped.
+# NISAR_LOG_LEVEL=WARNING restores the old quiet behaviour.
+if not logging.getLogger().handlers:
+    logging.basicConfig(level=os.environ.get("NISAR_LOG_LEVEL", "INFO").upper(),
+                        format="%(asctime)s %(levelname)s %(name)s: %(message)s", datefmt="%H:%M:%S")
 
 _LOCAL_ORIGINS = ["http://localhost:3000", "http://127.0.0.1:3000"]
 

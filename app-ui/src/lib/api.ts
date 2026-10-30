@@ -12,8 +12,11 @@ import type {
   TileInfo,
 } from "./types";
 
-const BASE = process.env.NEXT_PUBLIC_ENGINE_API ?? "http://127.0.0.1:8900";
-export const ENGINE_API = BASE;
+import { engineBase } from "./engineUrl";
+
+/** The engine base is read at CALL time (not module load) so a URL pasted into the nav's engine
+ *  link applies immediately. Components that DISPLAY it use useEngineUrl() from ./engineUrl. */
+export { engineBase };
 
 /** FastAPI wraps HTTPException payloads under `detail`; the engine's own error
  *  convention nests {ok: false, error} there. Unwrap every shape in one place. */
@@ -31,7 +34,7 @@ function extractError(body: unknown, res: Response): string {
 }
 
 async function get<T>(path: string, opts?: { signal?: AbortSignal }): Promise<T> {
-  const res = await fetch(`${BASE}${path}`, { cache: "no-store", signal: opts?.signal });
+  const res = await fetch(`${engineBase()}${path}`, { cache: "no-store", signal: opts?.signal });
   if (!res.ok) {
     const body = await res.json().catch(() => ({}));
     throw new Error(extractError(body, res));
@@ -40,7 +43,7 @@ async function get<T>(path: string, opts?: { signal?: AbortSignal }): Promise<T>
 }
 
 async function post<T>(path: string, body: unknown): Promise<T> {
-  const res = await fetch(`${BASE}${path}`, {
+  const res = await fetch(`${engineBase()}${path}`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(body),

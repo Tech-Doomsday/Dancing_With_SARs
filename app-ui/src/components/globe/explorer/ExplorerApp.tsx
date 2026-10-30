@@ -13,7 +13,8 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import dynamic from "next/dynamic";
 import { useRouter, useSearchParams } from "next/navigation";
 import { ChevronDown, ChevronUp, RotateCcw, Search } from "lucide-react";
-import { api, ENGINE_API, granulesBbox } from "@/lib/api";
+import { api, granulesBbox } from "@/lib/api";
+import { useEngineUrl } from "@/lib/engineUrl";
 import type { BackgroundGroup, ExplorerGranule, ExplorerStack, GranuleExplorerResponse } from "@/lib/types";
 import {
   emptyFilters, filterGranules,
@@ -43,6 +44,7 @@ function num(v: string): number | undefined {
 }
 
 export default function ExplorerApp() {
+  const engineUrl = useEngineUrl();
   const router = useRouter();
   const searchParams = useSearchParams();
 
@@ -323,7 +325,7 @@ export default function ExplorerApp() {
       {/* ---- banners ---- */}
       {health === false && (
         <p role="alert" className="border-b border-[#4a2f24] bg-[#2a1712] px-4 py-2 text-xs text-[#e8a087]">
-          the engine API is not reachable at <span className="font-mono">{ENGINE_API}</span> — the
+          the engine API is not reachable at <span className="font-mono">{engineUrl}</span> — the
           granule search runs on the engine (it searches ASF live), so nothing can be listed right now.
         </p>
       )}
@@ -388,11 +390,11 @@ export default function ExplorerApp() {
             <div className="flex min-h-0 flex-1 flex-col p-2">
               <div className="mb-1 flex items-center justify-between px-1 text-[11px] text-[#8b949e]">
                 <label className="flex items-center gap-1.5">
-                  <input type="checkbox" checked={onlyInView} onChange={(e) => setOnlyInView(e.target.checked)} />
+                  <input suppressHydrationWarning type="checkbox" checked={onlyInView} onChange={(e) => setOnlyInView(e.target.checked)} />
                   only in view
                 </label>
                 <label className="flex items-center gap-1.5">
-                  <input type="checkbox" checked={listView} onChange={(e) => setListView(e.target.checked)} />
+                  <input suppressHydrationWarning type="checkbox" checked={listView} onChange={(e) => setListView(e.target.checked)} />
                   List view
                 </label>
               </div>
@@ -493,7 +495,7 @@ function LabeledInput({ label, value, onChange, placeholder, width = "w-24", typ
   return (
     <label className="flex items-center gap-1 text-[11px] text-[#8b949e]">
       {label}
-      <input
+      <input suppressHydrationWarning
         type={type}
         value={value}
         placeholder={placeholder}

@@ -34,6 +34,8 @@ cache:
 search:
   max_results: 250
   keep_all_versions: false
+  retry_incomplete: 1        # re-ask ASF this many times when CMR reports a short/incomplete page (never cached if still short)
+  timeout_s: 90              # give up waiting on one ASF search after this long (asf_search itself has no timeout)
 
 poll:
   products: [GCOV, GUNW]     # processing levels the granule poller watches

@@ -51,6 +51,9 @@ def drop_older_versions(refs: list[GranuleRef]) -> tuple[list[GranuleRef], int]:
     return [refs[i] for i in keep], len(refs) - len(keep)
 
 
+_slog = logging.getLogger("nisar.retrieval")
+
+
 @lru_cache(maxsize=64)
 def _transformer(epsg: int):
     from pyproj import Transformer
@@ -99,6 +102,11 @@ class NisarClient:
         self.blocking = ThreadPoolExecutor(8, thread_name_prefix="blocking")  # index build, fallback, clip IO
         self._indexes: dict[str, GranuleIndex] = {}
         self.last_search_truncated = False   # set by search(): the result list hit maxResults
+        self.last_search_incomplete = False  # set by search(): ASF/CMR reported a short or failed page (not cached)
+        self.last_search_warnings: list = []
+        self._prog_lock = threading.Lock()
+        self.progress = {"product": "", "total": 0, "done": 0, "failed": 0, "skipped": 0, "cached": 0,
+                         "started": 0.0, "active": {}, "cum_done": 0, "cum_total": 0, "recent": []}
         self._inflight: dict[str, asyncio.Future] = {}
         self._index_inflight: dict[str, asyncio.Future] = {}
         self._fb: OrderedDict = OrderedDict()
@@ -124,6 +132,8 @@ class NisarClient:
         hit = None if fresh else self.searches.get(k)
         if hit:
             self.last_search_truncated = False
+            self.last_search_incomplete = False
+            self.last_search_warnings = []
             return [GranuleRef(**d) for d in hit[0]], False
         try:
             import asf_search as asf
@@ -136,7 +146,25 @@ class NisarClient:
             if prods: kw["processingLevel"] = prods
             if maturity: kw["dataMaturity"] = maturity
             refs = []
-            for r in asf.search(**kw):
+            t_search = time.monotonic()
+            _slog.info("ASF search start: product=%s bbox=%s window=%s..%s", prods or "any", bbox, t0, t1)
+            tmo = float(self.cfg.search.get("timeout_s", 90) or 0)
+            warns: list = []
+            found = self._asf_search_bounded(asf, kw, tmo, warns)
+            tries = int(self.cfg.search.get("retry_incomplete", 1) or 0)
+            while warns and tries > 0:                   # CMR sometimes serves a short page; a second ask usually fixes it
+                tries -= 1
+                _slog.warning("ASF/CMR reported an incomplete result (%s); retrying the search", warns[0][:160])
+                time.sleep(2.0)
+                warns = []
+                found = self._asf_search_bounded(asf, kw, tmo, warns)
+            self.last_search_incomplete = bool(warns)
+            self.last_search_warnings = list(warns)
+            if warns:
+                _slog.warning("ASF search still INCOMPLETE after retry (%s) — listing used but NOT cached", warns[0][:160])
+            _slog.info("ASF search done: %d result(s) in %.1fs%s", len(found), time.monotonic() - t_search,
+                       " [INCOMPLETE]" if warns else "")
+            for r in found:
                 p = r.properties
                 name = p.get("fileName") or str(p.get("url", "")).rsplit("/", 1)[-1]
                 gid = re.sub(r"\.h5$", "", str(p.get("fileID") or name))
@@ -160,13 +188,55 @@ class NisarClient:
                 self.last_search_truncated = False
             if not keep_all:
                 refs, _ = drop_older_versions(refs)
-            self.searches.put(k, [r.to_dict() for r in refs])
+            if not self.last_search_incomplete:          # never keep a short listing for the whole TTL
+                self.searches.put(k, [r.to_dict() for r in refs])
             return refs, False
         except Exception:
             stale = self.searches.get(k, allow_stale=True)
             if stale and self.cfg.cache["stale_on_error"]:
                 return [GranuleRef(**d) for d in stale[0]], True
             raise
+
+    @staticmethod
+    def _asf_search_bounded(asf, kw: dict, timeout_s: float, warnings: list | None = None):
+        """asf.search() has no network timeout of its own, so a dead connection hangs the scan forever.
+        Run it on a daemon thread and stop waiting after `timeout_s` (0/None = wait indefinitely).
+        Every WARNING/ERROR the asf_search logger emits on that thread (e.g. "CMR returned page of incomplete
+        results") is appended to `warnings`, so the caller can tell a complete listing from a short one."""
+        class _Cap(logging.Handler):
+            ident = None
+
+            def emit(self, rec):
+                if warnings is not None and rec.levelno >= logging.WARNING and rec.thread == self.ident:
+                    warnings.append(rec.getMessage())
+        cap = _Cap(level=logging.WARNING)
+        alog = logging.getLogger("asf_search")
+        # asf_search logs a ~60-line option dump per query at INFO; keep WARNING+ (NISAR_ASF_LOG_LEVEL=INFO restores it)
+        alog.setLevel(os.environ.get("NISAR_ASF_LOG_LEVEL", "WARNING").upper())
+        alog.addHandler(cap)
+        try:
+            if not timeout_s:
+                cap.ident = threading.get_ident()
+                return asf.search(**kw)
+            box: dict = {}
+
+            def work():
+                cap.ident = threading.get_ident()
+                try:
+                    box["res"] = asf.search(**kw)
+                except BaseException as ex:                      # re-raised in the caller
+                    box["err"] = ex
+            th = threading.Thread(target=work, name="asf-search", daemon=True)
+            th.start()
+            th.join(timeout_s)
+            if th.is_alive():
+                raise TimeoutError(f"ASF search did not answer within {timeout_s:.0f}s "
+                                   f"(network/Earthdata problem? raise search.timeout_s or NISAR_SEARCH_TIMEOUT_S)")
+            if "err" in box:
+                raise box["err"]
+            return box["res"]
+        finally:
+            alog.removeHandler(cap)
 
     # ---------------------------------------------------------------- public fetch
     def fetch(self, bbox, t0=None, t1=None, product=None, layers: str | None = None,
@@ -177,7 +247,15 @@ class NisarClient:
         degraded = False
         if granules is None:
             granules, degraded = self.search(bbox, t0, t1, product, maturity)
+        with self._prog_lock:
+            self.progress["product"] = product if isinstance(product, str) else ",".join(product or [])
+        _slog.info("fetch start: %d granule(s), layers=%s", len(granules), (layers or "all")[:80])
+        t_fetch = time.monotonic()
         res = self.io.lt.run(self._fetch_many(granules, tuple(bbox), layers))
+        _m = self.io.metrics.snapshot()
+        _slog.info("fetch done: %d clip(s), %d error(s) in %.1fs | %.1f MB on wire, %d requests, %d retries",
+                   len(res.clips), len(res.errors), time.monotonic() - t_fetch,
+                   _m["bytes_fetched"] / 1e6, _m["requests"], _m["retries"])
         res.degraded = res.degraded or degraded
         res.stats = {**self.io.metrics.snapshot(), **self.counters,
                      "ram_hits": self.ram.hits, "disk_hits": self.disk.hits}
@@ -216,23 +294,71 @@ class NisarClient:
     # ---------------------------------------------------------------- internals
     async def _fetch_many(self, granules, bbox, layers) -> FetchResult:
         res = FetchResult([], {}, {})
+        n = len(granules)
+        with self._prog_lock:
+            pg = self.progress
+            pg.update(total=n, done=0, failed=0, skipped=0, cached=0, started=time.monotonic(), active={})
+            pg["cum_total"] += n
+
+        def finish(g, how: str, t_start: float, extra: str = "") -> None:
+            with self._prog_lock:
+                pg["active"].pop(g.granule_id, None)
+                pg["done"] += 1
+                pg["cum_done"] += 1
+                if how == "failed":
+                    pg["failed"] += 1
+                elif how == "skipped":
+                    pg["skipped"] += 1
+                elif how.startswith(("clip-cache", "stale")):
+                    pg["cached"] += 1
+                done, total = pg["done"], pg["total"]
+                pg["recent"] = (pg["recent"] + [{"id": g.granule_id, "how": how, "s": round(time.monotonic() - t_start, 1)}])[-8:]
+            _slog.info("granule %d/%d %s in %.1fs: %s%s", done, total, how, time.monotonic() - t_start,
+                       g.granule_id, f" ({extra})" if extra else "")
 
         async def one(g):
+            t_start = time.monotonic()
+            with self._prog_lock:
+                pg["active"][g.granule_id] = t_start
             try:
                 clip = await self._granule_clip(g, bbox, layers)
                 if clip is None:
                     res.skipped[g.granule_id] = "bbox does not overlap this granule's grids"
+                    finish(g, "skipped", t_start, "bbox does not overlap this granule")
                 else:
                     res.clips.append(clip)
                     res.degraded |= clip.source.startswith("stale")
+                    finish(g, clip.source, t_start)
             except Exception as ex:  # reported, never swallowed
                 res.errors[g.granule_id] = f"{type(ex).__name__}: {ex}"
                 logging.getLogger("nisar.client").error("granule %s failed", g.granule_id, exc_info=True)   # keep the traceback
+                finish(g, "failed", t_start, f"{type(ex).__name__}: {ex}"[:160])
 
         await asyncio.gather(*(one(g) for g in granules))
         order = {g.granule_id: i for i, g in enumerate(granules)}
         res.clips.sort(key=lambda c: order[c.granule.granule_id])
         return res
+
+    def progress_snapshot(self) -> dict:
+        """Everything the scan display can show about the retriever, read-only and cheap: wire counters
+        (+ live gauges), per-granule progress of the current fetch, cache hit counters."""
+        now = time.monotonic()
+        with self._prog_lock:
+            pg = self.progress
+            active = sorted(((now - t0, gid) for gid, t0 in pg["active"].items()), reverse=True)
+            done, total, started = pg["done"], pg["total"], pg["started"]
+            elapsed = (now - started) if started else 0.0
+            eta = (elapsed / done * (total - done)) if done >= 2 and total > done else None
+            gran = {"product": pg["product"], "total": total, "done": done, "failed": pg["failed"],
+                    "skipped": pg["skipped"], "cached": pg["cached"], "in_flight": len(active),
+                    "elapsed_s": round(elapsed, 1), "eta_s": None if eta is None else round(eta),
+                    "cum_done": pg["cum_done"], "cum_total": pg["cum_total"],
+                    "oldest": [{"id": gid, "age_s": round(age, 1)} for age, gid in active[:4]],
+                    "recent": list(pg["recent"][-4:])}
+        cache = {**{k: v for k, v in self.counters.items() if not k.endswith("_s")},
+                 "ram_hits": self.ram.hits, "disk_hits": self.disk.hits}
+        return {"net": self.io.metrics.live(), "granules": gran, "cache": cache,
+                "search": {"truncated": bool(self.last_search_truncated), "incomplete": bool(self.last_search_incomplete)}}
 
     async def _granule_clip(self, g: GranuleRef, bbox, layers) -> GranuleClip | None:
         k = self.clips.key(g.granule_id, bbox, [layers] if layers else None)

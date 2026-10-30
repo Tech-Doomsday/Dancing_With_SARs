@@ -238,6 +238,8 @@ export interface GranuleSearchResponse {
   stacks: Record<string, GranuleStack>;
   search_errors: Record<string, string>;
   search_degraded: boolean;
+  /** ASF/CMR served a short page even after a retry; the listing may miss granules (not cached). */
+  search_incomplete?: boolean;
   dropped_older: number;
   flags: { code: string; severity: string; step: string; message: string }[];
 }

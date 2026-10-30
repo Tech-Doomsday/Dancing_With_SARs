@@ -165,7 +165,7 @@ export default function AreasPanel(props: AreasPanelProps) {
         <div className="mt-3">
           {props.cacheConfigured && props.cachedRows && (
             <div className="mb-2 flex flex-wrap items-center gap-1.5">
-              <input
+              <input suppressHydrationWarning
                 value={filter}
                 onChange={(e) => setFilter(e.target.value)}
                 placeholder="filter by tile id"

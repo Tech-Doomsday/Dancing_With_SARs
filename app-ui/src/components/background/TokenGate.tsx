@@ -39,7 +39,7 @@ export default function TokenGate({ onRetry, kind }: { onRetry: () => void; kind
           submit();
         }}
       >
-        <input
+        <input suppressHydrationWarning
           type="password"
           value={value}
           onChange={(e) => setValue(e.target.value)}

@@ -19,6 +19,7 @@ from __future__ import annotations
 import base64
 import dataclasses
 import json
+import logging
 import os
 import threading
 import time
@@ -40,6 +41,8 @@ from engine.verdict.cloud_cache import CloudCache
 from .store import RunsStore
 
 _MAX_COMPLETED_IN_MEMORY = 10
+_log = logging.getLogger("nisar.scan")
+_HEARTBEAT_S = 2.0
 
 
 def scans_enabled() -> bool:
@@ -269,6 +272,7 @@ class JobRunner:
         self.store.set_status(run_id, "running")
         t0 = time.monotonic()
         retriever = None
+        hb_stop = threading.Event()
         try:
             from engine.common.ancillary import DirectoryAncillary, NullAncillary
             from engine.common.chain import STEPS, build_scene_bundle
@@ -279,8 +283,7 @@ class JobRunner:
             tile = tile_at(lon, lat, size=tile_cell_size_m())
             with self._lock:
                 self._states[run_id]["progress"] = {
-                    "stage": f"P01 {STEPS[0].name}", "step_index": 1, "step_total": len(STEPS),
-                    "tile": tile.id}
+                    "stage": "preparing retriever", "step_total": len(STEPS), "tile": tile.id}
             self.store.set_run_meta(run_id, tile=tile.id)
 
             factory = retriever_factory or _default_retriever_factory()
@@ -296,16 +299,34 @@ class JobRunner:
             from engine.api import background as _bgmod
             tracer = Tracer()
 
+            holder: dict = {}                             # the live BuildContext, for the heartbeat
+
+            def on_start(step, ctx) -> None:              # names the step that is running NOW
+                holder["ctx"] = ctx
+                with self._lock:
+                    idx = next((i for i, s_ in enumerate(STEPS) if s_.code == step.code), 0) + 1
+                    self._states[run_id]["progress"] = {
+                        "stage": f"{step.code} {step.name}", "step_index": idx, "step_total": len(STEPS),
+                        "tile": tile.id, "running": True, "elapsed_s": round(time.monotonic() - t0, 1),
+                        "step_started_s": round(time.monotonic() - t0, 1)}
+                _log.info("[%s] %s %s: started (step %d/%d)", run_id, step.code, step.name, idx, len(STEPS))
+
             def observer(step, ctx, record) -> None:      # chain steps verbatim (§5.3 item 5)
                 tracer(step, ctx, record)
-                idx = next((i for i, s in enumerate(STEPS) if s.code == step.code), 0) + 1
-                with self._lock:
-                    self._states[run_id]["progress"] = {
-                        "stage": f"{step.code} {step.name}", "step_index": idx,
-                        "step_total": len(STEPS), "tile": tile.id}
+                _log.info("[%s] %s %s: %s in %.1fs%s", run_id, step.code, step.name, record.status, record.seconds,
+                          f" — {record.message}" if getattr(record, "message", None) else "")
+                if step.code == "P01":
+                    for ln in _p01_summary_lines(ctx):
+                        _log.info("[%s] P01 result: %s", run_id, ln)
+
+            hb_stop = threading.Event()
+            hb = threading.Thread(target=self._heartbeat, args=(run_id, retriever, t0, hb_stop, holder),
+                                  name=f"scan-heartbeat-{run_id}", daemon=True)
+            hb.start()
 
             bundle = build_scene_bundle(tile, retriever, as_of=as_of, ancillary=ancillary,
-                                        cfg=cfg, lookback_days=lookback_days, observer=observer)
+                                        cfg=cfg, lookback_days=lookback_days, observer=observer, on_start=on_start)
+            hb_stop.set()
             try:
                 self.attach_trace(run_id, _bgmod.build_trace_payload(tracer, bundle))
             except Exception:                    # trace assembly never blocks the run
@@ -328,11 +349,87 @@ class JobRunner:
                 "lon": lon, "lat": lat, "as_of": as_of, "lookback_days": lookback_days}},
                 self._states[run_id])
         finally:
+            hb_stop.set()
             if retriever is not None:
                 try:
                     retriever.close()
                 except Exception:
                     pass
+
+    def _heartbeat(self, run_id: str, retriever, t0: float, stop: threading.Event, holder: dict | None = None) -> None:
+        """While a scan runs, every ~2 s publish EVERYTHING observable into the run's progress and (every ~6 s)
+        the terminal: wire counters and live gauges (MB, useful MB, requests, in flight, retries, URL resolves,
+        MB/s now and average, seconds since the last byte), per-granule progress with a rough ETA and the slowest
+        in-flight granules, cache counters, the steps finished so far, the P01 result and the flags raised so
+        far. Read-only; never raises."""
+        beats = 0
+        window: list = []                                    # (monotonic, bytes) for the MB/s-now estimate
+        last_bytes = -1
+        holder = holder if holder is not None else {}
+        while not stop.wait(_HEARTBEAT_S):
+            beats += 1
+            try:
+                now = time.monotonic()
+                snap = {}
+                fn = getattr(retriever, "progress_snapshot", None)
+                if callable(fn):
+                    snap = fn() or {}
+                else:                                         # fakes / older retrievers: wire counters only
+                    m0 = getattr(getattr(getattr(retriever, "io", None), "metrics", None), "snapshot", lambda: None)()
+                    if m0:
+                        snap = {"net": m0}
+                net = dict(snap.get("net") or {})
+                if net:
+                    window.append((now, net.get("bytes_fetched", 0)))
+                    window[:] = [w for w in window if now - w[0] <= 15.0]
+                    mbps_now = ((window[-1][1] - window[0][1]) / 1e6 / (window[-1][0] - window[0][0])
+                                if len(window) >= 2 and window[-1][0] > window[0][0] else 0.0)
+                    el = max(now - t0, 1e-6)
+                    net_out = {"mb": round(net.get("bytes_fetched", 0) / 1e6, 2),
+                               "mb_useful": round(net.get("bytes_useful", 0) / 1e6, 2),
+                               "requests": net.get("requests", 0), "inflight": net.get("inflight"),
+                               "retries": net.get("retries", 0), "resolves": net.get("resolves", 0),
+                               "mbps_now": round(mbps_now, 2), "mbps_avg": round(net.get("bytes_fetched", 0) / 1e6 / el, 2),
+                               "idle_s": None if net.get("idle_s") is None else round(net["idle_s"], 1)}
+                else:
+                    net_out = None
+                ctx = holder.get("ctx")
+                info = _ctx_info(ctx) if ctx is not None else None
+                with self._lock:
+                    st = self._states.get(run_id)
+                    if st is None or st.get("status") != "running":
+                        return
+                    prog = dict(st.get("progress") or {})      # replaced, never mutated: the API may be serialising the old one
+                    if prog.get("running"):
+                        prog["elapsed_s"] = round(now - t0, 1)
+                        if net_out:
+                            prog["net"] = net_out
+                        for k in ("granules", "cache", "search"):
+                            if snap.get(k) is not None:
+                                prog[k] = snap[k]
+                        if info is not None:
+                            prog["steps"], prog["info"] = info["steps"], info["info"]
+                        st["progress"] = prog
+                    stage = prog.get("stage")
+                if net_out and (beats % 3 == 0):
+                    g = snap.get("granules") or {}
+                    gtxt = (f" | {g.get('product') or '?'} granules {g['done']}/{g['total']}"
+                            f"{'' if not g.get('failed') else ' (' + str(g['failed']) + ' failed)'}"
+                            f"{'' if g.get('eta_s') is None else ', ETA ~' + format(g['eta_s'] / 60, '.0f') + ' min'}"
+                            if g.get("total") else "")
+                    idle = net_out["idle_s"]
+                    note = ("" if net_out["mb"] * 1e6 != last_bytes else "  (no new bytes since last report)")
+                    _log.info("[%s] %s | %.1f MB on wire (%.1f MB useful) | %.2f MB/s now, %.2f avg | %s requests, %s in flight, "
+                              "%s retries, %s URL resolves | last byte %s ago%s%s", run_id, stage, net_out["mb"],
+                              net_out["mb_useful"], net_out["mbps_now"], net_out["mbps_avg"], net_out["requests"],
+                              net_out["inflight"] if net_out["inflight"] is not None else "?", net_out["retries"],
+                              net_out["resolves"], "n/a" if idle is None else f"{idle:.0f}s", gtxt, note)
+                    last_bytes = net_out["mb"] * 1e6
+                    for o in (g.get("oldest") or [])[:2]:
+                        if o["age_s"] > 60:
+                            _log.info("[%s]   slow granule (%.0fs in flight): %s", run_id, o["age_s"], o["id"])
+            except Exception:
+                pass
 
     # ------------------------------------------------------------------ shared tail
     def _run_registered(self, run_id: str, bundle_id: str, bundle_path: Path,
@@ -537,6 +634,7 @@ class JobRunner:
             "stacks": stacks,
             "search_errors": dict(res.search_errors),
             "search_degraded": res.search_degraded,
+            "search_incomplete": res.search_incomplete,
             "dropped_older": res.dropped_older,
             "flags": [{"code": f.code, "severity": f.severity, "step": f.step, "message": f.message}
                       for f in ctx.flags],
@@ -546,6 +644,51 @@ class JobRunner:
         self._pool.shutdown(wait=False)
         self.heavy.close()
         self.verdicts.close()
+
+
+def _p01_summary_lines(ctx) -> list:
+    """Human lines describing what P01 resolved (also logged to the terminal)."""
+    out: list = []
+    try:
+        res = ctx.resolved
+        if res is None:
+            return out
+        for prod, target in (("GUNW", res.gunw), ("GCOV", res.gcov), ("GOFF", res.goff)):
+            if not target:
+                continue
+            n_groups = sum(len(g) for g in target.values())
+            n_gran = sum(len(x.granules) for g in target.values() for x in g)
+            out.append(f"{prod}: {n_gran} granule(s) in {n_groups} {'pair' if prod != 'GCOV' else 'epoch'}(s) "
+                       f"across {len(target)} stack(s): " + ", ".join(f"{k}×{len(v)}" for k, v in sorted(target.items())))
+        for prod, ids in res.to_fetch.items():
+            out.append(f"to fetch: {prod} {len(ids)} granule(s)")
+        if res.dropped_older:
+            out.append(f"{res.dropped_older} superseded processing version(s) ignored")
+        for prod, why in res.search_errors.items():
+            out.append(f"{prod} SEARCH ERROR: {why}")
+    except Exception:
+        pass
+    return out
+
+
+def _ctx_info(ctx) -> dict:
+    """Read-only digest of a running BuildContext for the progress display: steps done so far, the P01 result,
+    flag counts and the latest flags. Copies lists first (the worker thread keeps appending)."""
+    steps = [{"code": r.code, "name": r.name, "status": r.status, "seconds": r.seconds}
+             for r in list(getattr(ctx, "steps", []) or [])]
+    flags = list(getattr(ctx, "flags", []) or [])
+    counts: dict = {}
+    for f in flags:
+        counts[f.severity] = counts.get(f.severity, 0) + 1
+    res = getattr(ctx, "resolved", None)
+    p01 = None
+    if res is not None:
+        p01 = {"lines": _p01_summary_lines(ctx), "dropped_older": res.dropped_older,
+               "degraded": bool(res.search_degraded), "incomplete": bool(getattr(res, "search_incomplete", False)),
+               "errors": dict(res.search_errors)}
+    return {"steps": steps, "info": {"p01": p01, "flag_counts": counts,
+                                      "recent_flags": [{"severity": f.severity, "step": f.step, "code": f.code,
+                                                        "message": f.message[:220]} for f in flags[-6:]]}}
 
 
 def _default_retriever_factory():

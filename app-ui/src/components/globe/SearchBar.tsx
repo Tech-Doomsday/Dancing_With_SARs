@@ -89,7 +89,7 @@ export default function SearchBar(props: SearchBarProps) {
       >
         <label className="flex-1 text-[11px] font-medium text-[#4a443c]">
           Latitude
-          <input
+          <input suppressHydrationWarning
             ref={latRef}
             value={props.lat}
             onChange={(e) => props.onLat(e.target.value)}
@@ -102,7 +102,7 @@ export default function SearchBar(props: SearchBarProps) {
         </label>
         <label className="flex-1 text-[11px] font-medium text-[#4a443c]">
           Longitude
-          <input
+          <input suppressHydrationWarning
             value={props.lon}
             onChange={(e) => props.onLon(e.target.value)}
             inputMode="decimal"

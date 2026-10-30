@@ -125,6 +125,7 @@ def resolve(ctx: BuildContext, products: list[str]) -> Resolved:
     names = {"GUNW": cfg.products.gunw, "GCOV": cfg.products.gcov, "GOFF": cfg.products.goff}
     as_of = ctx.request.as_of
     merge = cfg.window.epoch_merge_minutes
+    rtv = ctx.retriever
 
     for prod in products:
         name = names[prod]
@@ -137,6 +138,13 @@ def resolve(ctx: BuildContext, products: list[str]) -> Resolved:
         if degraded:
             res.search_degraded = True
             ctx.flag("search_degraded", "warn", "P01", f"{prod} listing served from a stale cache (ASF unreachable)", product=prod)
+        if getattr(rtv, "last_search_incomplete", False) is True:       # ASF/CMR served a short page, even after a retry
+            res.search_incomplete = True
+            warns = getattr(rtv, "last_search_warnings", None)
+            ctx.flag("search_incomplete", "warn", "P01",
+                     f"{prod} listing may be missing granules: ASF/CMR reported an incomplete result"
+                     + (f" ({str(warns[0])[:120]})" if isinstance(warns, list) and warns else "") + "; not cached",
+                     product=prod)
         refs = [r for r in refs if (r.product or name) == name]
         refs, dropped = _drop_older(refs)
         res.dropped_older += dropped

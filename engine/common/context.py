@@ -100,6 +100,7 @@ class Resolved:
     to_fetch: dict = field(default_factory=dict)        # product -> [GranuleRef]
     dropped_older: int = 0
     search_degraded: bool = False
+    search_incomplete: bool = False
     search_errors: dict = field(default_factory=dict)   # product -> reason
 
 

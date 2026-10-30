@@ -78,6 +78,29 @@ function ScanButton(props: ScanPanelProps) {
   );
 }
 
+type ScanNet = {
+  mb: number; mb_useful: number; requests: number; inflight: number | null; retries: number; resolves: number;
+  mbps_now: number; mbps_avg: number; idle_s: number | null;
+};
+type ScanGranules = {
+  product: string; total: number; done: number; failed: number; skipped: number; cached: number; in_flight: number;
+  elapsed_s: number; eta_s: number | null; cum_done: number; cum_total: number;
+  oldest: { id: string; age_s: number }[]; recent: { id: string; how: string; s: number }[];
+};
+type ScanInfo = {
+  p01: { lines: string[]; dropped_older: number; degraded: boolean; incomplete: boolean; errors: Record<string, string> } | null;
+  flag_counts: Record<string, number>;
+  recent_flags: { severity: string; step: string; code: string; message: string }[];
+};
+type ScanProgress = {
+  stage?: string; step_index?: number; step_total?: number; elapsed_s?: number; net?: ScanNet; granules?: ScanGranules;
+  cache?: Record<string, number>; search?: { truncated: boolean; incomplete: boolean };
+  steps?: { code: string; name: string; status: string; seconds: number }[]; info?: ScanInfo;
+};
+
+const fmtDur = (s: number) => (s >= 3600 ? `${Math.floor(s / 3600)}h ${Math.round((s % 3600) / 60)}m` : s >= 60 ? `${Math.floor(s / 60)}m ${Math.round(s % 60)}s` : `${Math.round(s)}s`);
+const shortId = (id: string) => (id.length > 46 ? `${id.slice(0, 22)}…${id.slice(-20)}` : id);
+
 function Progress(props: { runState: RunState; onFollow: () => void }) {
   const [elapsed, setElapsed] = useState(0);
   const run = props.runState;
@@ -86,24 +109,96 @@ function Progress(props: { runState: RunState; onFollow: () => void }) {
     const id = setInterval(() => setElapsed(Math.round((Date.now() - t0) / 1000)), 1000);
     return () => clearInterval(id);
   }, [run.id]);
-  const stage = String((run.progress as { stage?: string }).stage ?? "queued");
-  const stepIndex = (run.progress as { step_index?: number }).step_index;
-  const stepTotal = (run.progress as { step_total?: number }).step_total;
+  const pr = run.progress as ScanProgress;
+  const stage = String(pr.stage ?? "queued");
+  const stepIndex = pr.step_index;
+  const stepTotal = pr.step_total;
+  const shownElapsed = typeof pr.elapsed_s === "number" ? Math.round(pr.elapsed_s) : elapsed;
+  const net = pr.net;
+  const g = pr.granules && pr.granules.total > 0 ? pr.granules : undefined;
+  const stalled = net?.idle_s != null && net.idle_s > 30;
+  const info = pr.info;
+  const flagTxt = info ? Object.entries(info.flag_counts).map(([k, v]) => `${v} ${k}`).join(" · ") : "";
+  // bar: finished steps + the running step's share when its granule counter is known
+  const stepFrac = g ? g.done / g.total : 0;
+  const barPct = stepIndex && stepTotal ? Math.max(4, Math.round(((stepIndex - 1 + stepFrac) / stepTotal) * 100)) : 4;
   return (
     <div className="rounded-lg border border-[#b08d57]/40 bg-[#f7f2e7] p-3" role="status" aria-live="polite">
       <p className="text-sm font-semibold text-[#7a6438]">Scanning… {stage}</p>
       {stepIndex != null && stepTotal != null && (
         <p className="mono mt-0.5 text-[11px] text-[#7a6438]">
-          step {stepIndex}/{stepTotal}
+          step {stepIndex}/{stepTotal} · running now
         </p>
       )}
-      <p className="mono mt-0.5 text-[11px] text-[#7a6438]">elapsed {elapsed}s</p>
+      <p className="mono mt-0.5 text-[11px] text-[#7a6438]">elapsed {fmtDur(shownElapsed)}</p>
       <div className="mt-2 h-1.5 overflow-hidden rounded-full bg-[#e7e2da]">
-        <div
-          className="h-full bg-[#b08d57] transition-all"
-          style={{ width: stepIndex && stepTotal ? `${Math.round((stepIndex / stepTotal) * 100)}%` : "12%" }}
-        />
+        <div className="h-full bg-[#b08d57] transition-all" style={{ width: `${barPct}%` }} />
       </div>
+
+      {g && (
+        <p className="mono mt-2 text-[11px] text-[#7a6438]" data-testid="scan-granules">
+          {g.product || "granules"} {g.done}/{g.total} done
+          {g.in_flight > 0 ? ` · ${g.in_flight} in flight` : ""}
+          {g.cached > 0 ? ` · ${g.cached} from cache` : ""}
+          {g.skipped > 0 ? ` · ${g.skipped} skipped` : ""}
+          {g.failed > 0 ? ` · ${g.failed} FAILED` : ""}
+          {g.eta_s != null ? ` · rough ETA ${fmtDur(g.eta_s)}` : ""}
+        </p>
+      )}
+      {net && (
+        <div className="mono mt-1 space-y-0.5 text-[11px] text-[#7a6438]" data-testid="scan-net">
+          <p>
+            {net.mb.toFixed(1)} MB on wire ({net.mb_useful.toFixed(1)} MB useful) · {net.mbps_now.toFixed(2)} MB/s now ·{" "}
+            {net.mbps_avg.toFixed(2)} avg
+          </p>
+          <p>
+            {net.requests} requests{net.inflight != null ? ` · ${net.inflight} in flight` : ""} · {net.retries} retries ·{" "}
+            {net.resolves} URL resolves
+          </p>
+          <p className={stalled ? "font-semibold text-[#9e3b2c]" : ""}>
+            {net.idle_s == null ? "no bytes yet (resolving URLs / opening files)" : `last byte ${fmtDur(net.idle_s)} ago${stalled ? " — stalled? reads time out and retry" : ""}`}
+          </p>
+        </div>
+      )}
+      {g && g.oldest.length > 0 && g.oldest[0].age_s > 20 && (
+        <p className="mono mt-1 text-[10px] text-[#7a6438]" title={g.oldest.map((o) => o.id).join("\n")}>
+          slowest in flight: {shortId(g.oldest[0].id)} ({fmtDur(g.oldest[0].age_s)})
+        </p>
+      )}
+
+      <details className="mt-2" open>
+        <summary className="cursor-pointer text-[11px] font-semibold text-[#7a6438]">details</summary>
+        <div className="mono mt-1 space-y-1 text-[10px] leading-snug text-[#7a6438]">
+          {pr.steps && pr.steps.length > 0 && (
+            <p>
+              done:{" "}
+              {pr.steps.map((s) => `${s.code} ${s.status === "ok" ? "✓" : s.status === "skipped" ? "–" : "✗"} ${fmtDur(s.seconds)}`).join(" · ")}
+            </p>
+          )}
+          {info?.p01 && info.p01.lines.map((l, k) => <p key={k}>P01: {l}</p>)}
+          {pr.search?.incomplete && (
+            <p className="font-semibold text-[#9e3b2c]">ASF/CMR returned a short listing even after a retry — some granules may be missing</p>
+          )}
+          {pr.cache && Object.keys(pr.cache).length > 0 && (
+            <p>
+              cache:{" "}
+              {Object.entries(pr.cache).filter(([, v]) => v > 0).map(([k, v]) => `${k.replace(/_/g, " ")} ${v}`).join(" · ") || "no hits yet"}
+            </p>
+          )}
+          {g && g.recent.length > 0 && (
+            <p title={g.recent.map((r) => `${r.id}: ${r.how} ${r.s}s`).join("\n")}>
+              last finished: {g.recent.map((r) => `${r.how} ${fmtDur(r.s)}`).join(" · ")}
+            </p>
+          )}
+          {flagTxt && <p>flags so far: {flagTxt}</p>}
+          {info?.recent_flags.map((f, k) => (
+            <p key={k} className={f.severity === "error" ? "text-[#9e3b2c]" : ""}>
+              {f.severity} {f.step} {f.code}: {f.message}
+            </p>
+          ))}
+        </div>
+      </details>
+
       <p className="mt-2 text-[10px] text-[#7a6438]">
         this cannot be cancelled yet — you can leave and return to this scan with its link.
       </p>

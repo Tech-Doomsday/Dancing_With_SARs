@@ -11,6 +11,8 @@
  *
  *  This is a STOPGAP: real authentication is an owner action (see the docs). */
 
+import { engineBase } from "./engineUrl";
+
 const KEY = "nisar_bg_token";
 
 export class GateError extends Error {
@@ -66,7 +68,9 @@ export async function bgFetch(path: string, init?: RequestInit & { signal?: Abor
   const token = getToken();
   const headers = new Headers(init?.headers);
   if (token) headers.set("Authorization", `Bearer ${token}`);
-  const res = await fetch(path, { ...init, headers, cache: "no-store" });
+  // paths are engine-relative ("/api/..."); resolve them against the engine in use
+  const url = /^https?:\/\//i.test(path) ? path : `${engineBase()}${path}`;
+  const res = await fetch(url, { ...init, headers, cache: "no-store" });
   if (res.status === 401) {
     throw new GateError("unauthorized", await engineText(res, "missing or wrong background token"));
   }
