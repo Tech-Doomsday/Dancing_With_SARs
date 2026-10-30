@@ -34,7 +34,7 @@ export function VerdictCard({ result }: { result: PipelineResult }) {
   )?.narrative;
   const headline = narrative?.headline || result.summary || null;
   return (
-    <section className="rounded-lg border border-[#e7e2da] bg-white p-5">
+    <section className="rounded-lg border border-[#e7e2da] bg-white p-5 text-[#1c1a17]">
       <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
         <StatusBadge status={result.status} />
         <span className="mono text-xs text-[#8a837b]">
@@ -118,7 +118,7 @@ export function EvidenceList({ result }: { result: PipelineResult }) {
     .filter((g) => g.items.length > 0);
 
   return (
-    <section className="rounded-lg border border-[#e7e2da] bg-white p-5">
+    <section className="rounded-lg border border-[#e7e2da] bg-white p-5 text-[#1c1a17]">
       <h3 className="text-sm font-semibold">Evidence</h3>
       {groups.length === 0 && <p className="mt-2 text-xs text-[#8a837b]">The engine attached no evidence items.</p>}
       {groups.map((g) => (

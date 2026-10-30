@@ -42,7 +42,7 @@ test("initial globe, pin + footprint, scan progress, results, Data tab", async (
   // initial globe (engine online) — give the imagery a few seconds to load before judging
   {
     const page = await browser.newPage();
-    await page.goto("/");
+    await page.goto("/map");
     await expect(page.getByText(/engine online/)).toBeVisible({ timeout: 30_000 });
     await page.waitForTimeout(6_000);
     for (const [w, h] of SIZES) await snap(page, "initial-globe", w, h);
@@ -58,7 +58,7 @@ test("initial globe, pin + footprint, scan progress, results, Data tab", async (
   // scan progress: start the scan through the engine, re-attach via ?scan= (the leave-and-return flow)
   {
     const page = await browser.newPage();
-    await page.goto("/");
+    await page.goto("/map");
     await expect(page.getByText(/engine online/)).toBeVisible({ timeout: 30_000 });
     const res = await fetch(`${ENGINE}/api/scans`, {
       method: "POST", headers: { "content-type": "application/json" },
@@ -92,7 +92,7 @@ test("initial globe, pin + footprint, scan progress, results, Data tab", async (
   // Data tab with a populated multi-stack timeline (gap label + flipped pair)
   {
     const page = await browser.newPage();
-    await page.goto("/?panel=granules&tile=11SLT66");
+    await page.goto("/map?panel=granules&tile=11SLT66");
     await expect(page.getByText("A005", { exact: true })).toBeVisible({ timeout: 30_000 });
     await expect(page.getByText("26 d gap")).toBeVisible();
     await page.getByRole("button", { name: /baseline 24 days/ }).click({ position: { x: 30, y: 9 } });
@@ -108,14 +108,16 @@ test("granule explorer: full range, zoomed gap brackets, selected pair with map,
 
   // full range against the LIVE (synthetic) engine — the seed's FakeRetriever answers any box
   const page = await browser.newPage();
-  await page.goto("/granules?west=-118.45&south=33.7&east=-118.05&north=34.3&level=GUNW,GCOV");
+  await page.goto("/background/retrieval?west=-118.45&south=33.7&east=-118.05&north=34.3&level=GUNW,GCOV");
   await expect(page.getByText(/granules/).first()).toBeVisible({ timeout: 30_000 });
   await expect(page.locator('canvas[role="application"]')).toBeVisible();
   await page.waitForTimeout(2_000);
   for (const [w, h] of SIZES) await snap(page, "explorer-full-range", w, h);
+  await page.setViewportSize({ width: 1440, height: 900 });   // back to desktop before interacting
 
   // zoomed to days with gap brackets: zoom in a few steps, screenshot
-  await page.locator('canvas[role="application"]').click(); // focus for keyboard
+  // (click a header strip spot, NOT a bar end — an end click opens the gated Compare view)
+  await page.locator('canvas[role="application"]').click({ position: { x: 120, y: 8 } });
   for (let i = 0; i < 5; i++) await page.keyboard.press("+");
   await page.waitForTimeout(800);
   await snap(page, "explorer-zoomed-days", 1440, 900);
@@ -135,14 +137,14 @@ test("granule explorer: full range, zoomed gap brackets, selected pair with map,
             n_total: 250, truncated: true, degraded: false, search_budget: 250,
             generated_at: new Date().toISOString(), granules: [], stacks: [] },
   }));
-  await page.goto("/granules?west=-118.45&south=33.7&east=-118.05&north=34.3");
+  await page.goto("/background/retrieval?west=-118.45&south=33.7&east=-118.05&north=34.3");
   await expect(page.getByText("result budget hit — this list is incomplete")).toBeVisible({ timeout: 20_000 });
   await snap(page, "explorer-truncated", 1440, 900);
 
   // mobile filters drawer
   const mobile = await browser.newPage();
   await mobile.setViewportSize({ width: 390, height: 844 });
-  await mobile.goto("/granules?west=-118.45&south=33.7&east=-118.05&north=34.3&level=GUNW,GCOV");
+  await mobile.goto("/background/retrieval?west=-118.45&south=33.7&east=-118.05&north=34.3&level=GUNW,GCOV");
   await expect(mobile.getByText(/granules/).first()).toBeVisible({ timeout: 30_000 });
   await mobile.getByRole("button", { name: /filters/ }).click();
   await mobile.waitForTimeout(400);

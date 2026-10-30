@@ -10,6 +10,7 @@ import {
   type BarInterval,
 } from "../src/lib/explorer";
 import { parseExplorerState, writeExplorerState } from "../src/lib/urlstate";
+import { groupTimes, groupKindLabel, variantFactsLabel, compareEnds, zoomBox, panBox } from "../src/lib/groups";
 import { ticks as ticksForExplorer } from "../src/lib/timescale";
 
 /** §8.2 pure-logic tests — no browser needed. Playwright transpiles the TS imports directly. */
@@ -381,5 +382,59 @@ test.describe("post-audit regressions", () => {
     expect(st.from).toBe("2026-10-01T12:00");
     expect(st.to).toBe("2026-10-20T08:30:00Z");
     expect(parseExplorerState(new URLSearchParams("from=2026-13-45")).from).toBeUndefined();
+  });
+});
+
+test.describe("UI-build-2 — grouping display helpers (§4.2)", () => {
+  test("groupTimes: pair bars use TRUE time order; singles use the start; null without times", () => {
+    expect(groupTimes({ ref_time: "2026-10-14T13:08:23Z", sec_time: "2026-09-20T13:08:23Z", start: null }))
+      .toEqual({ start: Date.parse("2026-09-20T13:08:23Z"), end: Date.parse("2026-10-14T13:08:23Z") });
+    expect(groupTimes({ ref_time: null, sec_time: null, start: "2026-07-14T13:08:23Z" }))
+      .toEqual({ start: Date.parse("2026-07-14T13:08:23Z"), end: Date.parse("2026-07-14T13:08:23Z") });
+    expect(groupTimes({ ref_time: null, sec_time: null, start: null })).toBeNull();
+  });
+
+  test("groupKindLabel + variantFactsLabel: text always accompanies the glyph/colour", () => {
+    expect(groupKindLabel({ kind: "pair", product: "GUNW", grouped: true })).toBe("GUNW pair");
+    expect(groupKindLabel({ kind: "single", product: "GCOV", grouped: true })).toBe("GCOV single date");
+    expect(groupKindLabel({ kind: "unknown", product: null, grouped: false })).toBe("ungrouped");
+    expect(variantFactsLabel({ n_variants: 1, variant_facts: [] })).toBeNull();
+    expect(variantFactsLabel({ n_variants: 2, variant_facts: ["range_bandwidth_mhz"] }))
+      .toBe("2 variants (differ in bandwidth)");
+  });
+
+  test("compareEnds: first variant per end; absent ends stay null (never substituted)", () => {
+    const a = { id: "a" } as never;
+    const b = { id: "b" } as never;
+    expect(compareEnds({ ref: { granules: [a, b] }, sec: { granules: [] } }))
+      .toEqual({ before: a, after: null });
+  });
+});
+
+test.describe("UI-build-2 — Compare view box math (§4.4/§4.5)", () => {
+  test("zoomBox: zoom = a NEW sub-box around the focus, clamped, with a minimum span", () => {
+    const box: [number, number, number, number] = [-2, -1, 2, 1];
+    const z = zoomBox(box, 0.5, 0.5, 4);
+    expect(z[0]).toBeCloseTo(-0.5, 6);
+    expect(z[2]).toBeCloseTo(0.5, 6);
+    expect(z[2] - z[0]).toBeCloseTo(1, 6);
+    // clamped at the world edge
+    const edge = zoomBox(box, 0, 0, 8);
+    expect(edge[0]).toBeGreaterThanOrEqual(-180);
+    expect(edge[3]).toBeLessThanOrEqual(90);
+    // minimum span keeps the request sane
+    const tiny = zoomBox([1, 1, 1.0001, 1.0001], 0.5, 0.5, 10);
+    expect(tiny[2] - tiny[0]).toBeGreaterThanOrEqual(0.02 - 1e-9);
+  });
+
+  test("panBox: pans by a fraction of the span without changing size, clamped to the world", () => {
+    const box: [number, number, number, number] = [-2, -1, 2, 1];
+    const p = panBox(box, 0.5, -0.5);
+    expect(p[2] - p[0]).toBe(4);
+    expect(p[0]).toBeCloseTo(-4, 6);
+    expect(p[3]).toBeCloseTo(2, 6);
+    const clamped = panBox([-180, -90, -176, -86], 1, 1);   // pan left/down past the world edge
+    expect(clamped[0]).toBe(-180);
+    expect(clamped[1]).toBe(-90);
   });
 });

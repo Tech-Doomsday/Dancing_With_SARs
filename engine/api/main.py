@@ -19,6 +19,10 @@ Serving slice for the unified UI (docs/IMPLEMENTATION_PLAN.md 10 + the port desi
                                        (west/south/east/north, globe task E8 — the Granule
                                        Explorer; antimeridian box -> 400, 429 + Retry-After);
                                        metadata only
+    GET  /api/background/*             GATED background routes (UI-build-2 §1/§4.5/§5/§6):
+                                       bearer NISAR_BACKGROUND_TOKEN required (unset -> 503);
+                                       granule / preview / probe / stack-pair + run
+                                       preprocessing traces and per-pipeline detail
 """
 from __future__ import annotations
 
@@ -31,6 +35,7 @@ from engine.common.config import data_root
 from engine.registry import Registry
 
 from .jobs import earthdata_present, scans_enabled
+from .routes_background import router as background_router
 from .routes_bundles import router as bundles_router
 from .routes_events import router as events_router
 from .routes_jobs import router as jobs_router
@@ -68,6 +73,7 @@ def create_app() -> FastAPI:
     app.include_router(events_router)
     app.include_router(jobs_router)
     app.include_router(scanner_router)
+    app.include_router(background_router)
 
     @app.get("/api/health")
     def health():

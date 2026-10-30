@@ -191,7 +191,7 @@ export default function GlobeApp() {
       const next = { ...st, ...patch };
       const params = new URLSearchParams(window.location.search);
       writeUrlState(params, next);
-      router.replace(`/?${params.toString()}`, { scroll: false });
+      router.replace(`/map?${params.toString()}`, { scroll: false });
     }, 350);
   }, [router]);
 
@@ -794,7 +794,7 @@ export default function GlobeApp() {
       {/* top-left floating nav + search pill */}
       <div className="pointer-events-none absolute left-3 top-3 z-30 flex flex-col gap-2">
         <div className="pointer-events-auto w-fit rounded-xl border border-[#262c36] bg-[#0e1116]/95 px-3 py-2 shadow-lg backdrop-blur">
-          <AppNav active="globe" dark />
+          <AppNav active="map" dark />
         </div>
         <SearchBar
           lat={latInput}

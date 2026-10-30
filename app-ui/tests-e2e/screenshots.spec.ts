@@ -101,7 +101,7 @@ test.describe("screenshots (engine down)", () => {
       const ctx = await browser.newContext();
       const page = await ctx.newPage();
       for (const [label, w, h] of SIZES) {
-        await page.goto("/");
+        await page.goto("/map");
         await expect(page.getByText(/engine offline/).first()).toBeVisible({ timeout: 20_000 });
         await snap(page, label === "1440x900" ? "engine-offline" : "engine-offline", w, h)
           .then(() => { void label; });
@@ -113,7 +113,7 @@ test.describe("screenshots (engine down)", () => {
       const ctx = await browser.newContext();
       const page = await ctx.newPage();
       await interceptSupabase(page);
-      await page.goto("/");
+      await page.goto("/map");
       await page.getByRole("tab", { name: "cached" }).click();
       await expect(page.getByText("11SLT66").first()).toBeVisible({ timeout: 20_000 });
       for (const [, w, h] of SIZES) await snap(page, "cached-tab", w, h);
@@ -124,7 +124,7 @@ test.describe("screenshots (engine down)", () => {
       const ctx = await browser.newContext();
       const page = await ctx.newPage();
       await interceptSupabase(page, { featured: [] });
-      await page.goto("/");
+      await page.goto("/map");
       await expect(page.getByText(/No featured areas have been added yet/)).toBeVisible({ timeout: 20_000 });
       for (const [, w, h] of SIZES) await snap(page, "featured-empty", w, h);
       await ctx.close();
@@ -144,7 +144,7 @@ test.describe("screenshots (engine down)", () => {
           return (orig as any).apply(this, [type, ...rest]);
         };
       });
-      await page.goto("/");
+      await page.goto("/map");
       await expect(page.getByText(/WebGL/i).first()).toBeVisible({ timeout: 20_000 });
       await snap(page, "webgl-unavailable", 1440, 900);
       await ctx.close();

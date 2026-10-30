@@ -72,7 +72,7 @@ export default function CachedView({ bundleId }: { bundleId: string }) {
       <section className="rounded-lg border border-[#e7e2da] bg-white p-5 text-sm">
         <p className="font-semibold">Nothing is cached for this bundle yet.</p>
         <p className="mt-1 text-xs text-[#8a837b]">
-          Run it once from the <Link href="/" className="text-[#2c5f58] underline">home page</Link>; the verdict is saved
+          Run it once from the <Link href="/map" className="text-[#2c5f58] underline">map</Link>; the verdict is saved
           automatically.
         </p>
       </section>

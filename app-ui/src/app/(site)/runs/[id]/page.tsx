@@ -38,7 +38,7 @@ export default function RunPage({ params }: { params: Promise<{ id: string }> })
     <div className="space-y-4">
       <div className="flex items-center justify-between">
         <h1 className="mono text-sm font-semibold text-[#8a837b]">run {id}</h1>
-        <a href="/" className="text-xs text-[#2c5f58] hover:underline">
+        <a href="/map" className="text-xs text-[#2c5f58] hover:underline">
           ← all bundles
         </a>
       </div>

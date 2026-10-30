@@ -15,7 +15,7 @@ export default function CachedVerdictPage({ params }: { params: Promise<{ bundle
   const { bundle } = use(params);
   return (
     <div className="space-y-4">
-      <a href="/" className="text-xs text-[#2c5f58] hover:underline">
+      <a href="/map" className="text-xs text-[#2c5f58] hover:underline">
         ← all verdicts
       </a>
       <CachedView bundleId={safeDecode(bundle)} />

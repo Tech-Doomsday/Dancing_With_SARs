@@ -17,7 +17,8 @@
  *    hit-testing (sorted starts + binary search) so ≥5,000 bars pan at interactive rates.
  *  Time is UTC only, stated on screen. All gap values come from the engine response. */
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import type { ExplorerGranule, ExplorerStack, GranuleExplorerResponse } from "@/lib/types";
+import type { BackgroundGroup, ExplorerGranule, ExplorerStack, GranuleExplorerResponse } from "@/lib/types";
+import { groupTimes } from "@/lib/groups";
 import { clamp, pan as panScale, pxPerMs, ticks as ticksFor, tToX, xToT, zoom as zoomScale, type TimeScale } from "@/lib/timescale";
 import { packLanes, type BarInterval } from "@/lib/explorer";
 
@@ -36,24 +37,35 @@ const INK = "#d9dee4";
 const MUTED = "#8b949e";
 
 export interface PackedGranuleBar {
-  id: string;
+  id: string;                 // the granule id (first variant when bars come from groups)
   stackKey: string;
-  kind: "gunw" | "gcov" | "goff";
+  kind: "gunw" | "gcov" | "goff" | "unknown";
   start: number;
   end: number;
   lane: number;
   granule: ExplorerGranule;
+  /** §4.2: engine-computed acquisition group behind this bar (one bar per group) */
+  group?: BackgroundGroup;
+}
+
+export interface PackedHit {
+  bar: PackedGranuleBar;
+  /** §4.4: the pair END the pointer is on (within the end-dot tolerance) — null otherwise */
+  end: "ref" | "sec" | null;
 }
 
 interface Props {
   data: GranuleExplorerResponse;
   granules: ExplorerGranule[];
   stacks: ExplorerStack[];
+  groups?: BackgroundGroup[];
   selectedIds: string[];
   focusedId: string | null;
   onSelect: (id: string, extend: boolean) => void;
   onFocus: (id: string | null) => void;
   onViewWindow: (w: { t0: number; t1: number }) => void;
+  /** §4.4: clicking a pair bar's END opens the Compare view for that end */
+  onEndClick?: (groupId: string, end: "ref" | "sec") => void;
 }
 
 function fmtUtcFull(ms: number): string {
@@ -78,18 +90,29 @@ export default function TimelineCanvas(props: Props) {
   const brushRef = useRef<HTMLCanvasElement | null>(null);
   const [width, setWidth] = useState(900);
   const [scale, setScale] = useState<TimeScale>({ t0: bounds.min, t1: bounds.max, widthPx: 900 });
-  const [hover, setHover] = useState<{ x: number; y: number; t: number; bar: PackedGranuleBar | null } | null>(null);
+  const [hover, setHover] = useState<{ x: number; y: number; t: number; bar: PackedGranuleBar | null; end: "ref" | "sec" | null } | null>(null);
   const dragRef = useRef<{ x: number; t0: number; t1: number } | null>(null);
   const brushDragRef = useRef<{ x: number; t0: number; t1: number } | null>(null);
   const needDraw = useRef(true);
 
   // ---- data → packed bars per stack (memoized; deterministic order) ----------------------------
+  // §4.2: when the engine answered with groups, ONE bar is drawn per acquisition group (the
+  // first variant's id carries selection); otherwise the per-granule shape is kept (older
+  // fixtures / an engine without groups). Granules/groups without a verified time are not
+  // drawn (no dates to place — the honest absence), matching the previous behaviour.
   const stackLayout = useMemo(() => {
     const byStack = new Map<string, ExplorerGranule[]>();
     for (const g of props.granules) {
       const list = byStack.get(g.stack) ?? [];
       list.push(g);
       byStack.set(g.stack, list);
+    }
+    const useGroups = (props.groups?.length ?? 0) > 0;
+    const groupOf = new Map<string, BackgroundGroup>();
+    if (useGroups) {
+      for (const grp of props.groups!) {
+        for (const gid of grp.granule_ids) groupOf.set(gid, grp);
+      }
     }
     const groups: {
       stack: ExplorerStack;
@@ -101,20 +124,34 @@ export default function TimelineCanvas(props: Props) {
     for (const stack of props.stacks) {
       const members = byStack.get(stack.key) ?? [];
       const intervals: BarInterval[] = [];
-      const kindOf = new Map<string, "gunw" | "gcov" | "goff">();
-      for (const g of members) {
-        if (g.ref_time && g.sec_time) {
-          const a = Date.parse(g.ref_time);
-          const b = Date.parse(g.sec_time);
-          if (Number.isFinite(a) && Number.isFinite(b)) {
-            intervals.push({ key: g.id, start: Math.min(a, b), end: Math.max(a, b) });
-            kindOf.set(g.id, g.product === "GCOV" ? "gcov" : g.product === "GOFF" ? "goff" : "gunw");
-          }
-        } else if (g.start) {
-          const a = Date.parse(g.start);
-          if (Number.isFinite(a)) {
-            intervals.push({ key: g.id, start: a, end: a });
-            kindOf.set(g.id, "gcov");
+      const kindOf = new Map<string, "gunw" | "gcov" | "goff" | "unknown">();
+      if (useGroups) {
+        for (const grp of props.groups!) {
+          if (grp.stack !== stack.key) continue;
+          const times = groupTimes(grp);
+          if (!times) continue;
+          const first = grp.variants[0] ?? props.granules.find((g) => g.id === grp.granule_ids[0]);
+          if (!first) continue;
+          intervals.push({ key: first.id, start: times.start, end: times.end });
+          kindOf.set(first.id, grp.kind === "pair"
+            ? (grp.product === "GOFF" ? "goff" : "gunw")
+            : grp.kind === "single" ? "gcov" : "unknown");
+        }
+      } else {
+        for (const g of members) {
+          if (g.ref_time && g.sec_time) {
+            const a = Date.parse(g.ref_time);
+            const b = Date.parse(g.sec_time);
+            if (Number.isFinite(a) && Number.isFinite(b)) {
+              intervals.push({ key: g.id, start: Math.min(a, b), end: Math.max(a, b) });
+              kindOf.set(g.id, g.product === "GCOV" ? "gcov" : g.product === "GOFF" ? "goff" : "gunw");
+            }
+          } else if (g.start) {
+            const a = Date.parse(g.start);
+            if (Number.isFinite(a)) {
+              intervals.push({ key: g.id, start: a, end: a });
+              kindOf.set(g.id, "gcov");
+            }
           }
         }
       }
@@ -131,7 +168,10 @@ export default function TimelineCanvas(props: Props) {
           start: p.start,
           end: p.end,
           lane: p.lane,
-          granule: members.find((m) => m.id === p.key)!,
+          granule: members.find((m) => m.id === p.key)
+            ?? props.granules.find((g) => g.id === p.key)
+            ?? (useGroups ? props.groups!.find((grp) => grp.granule_ids.includes(p.key))?.variants[0] : undefined)!,
+          group: groupOf.get(p.key),
         });
       }
       for (const row of rows) row.sort((a, b) => a.start - b.start);
@@ -140,7 +180,7 @@ export default function TimelineCanvas(props: Props) {
       y += height;
     }
     return { groups, contentHeight: Math.max(y, AXIS_H + LANE_H) };
-  }, [props.granules, props.stacks]);
+  }, [props.granules, props.stacks, props.groups]);
 
   const flatBars = useMemo(() => {
     const out: PackedGranuleBar[] = [];
@@ -347,9 +387,17 @@ export default function TimelineCanvas(props: Props) {
               const selected = p.selectedIds.includes(bar.id);
               const focused = p.focusedId === bar.id;
               const hovered = hoverRef.current?.bar?.id === bar.id;
+              const hoverEnd = hoverRef.current?.bar?.id === bar.id ? hoverRef.current?.end : null;
               ctx.globalAlpha = selected || hovered || focused ? 1 : 0.82;
               ctx.fillStyle = color;
-              if (bar.kind === "gcov") {
+              if (bar.kind === "unknown") {
+                // an id that matches no layout: a hollow diamond, never a invented pair/dot shape
+                const cx = x1 + 1.5, cy = yBar + LANE_H / 2 - 5;
+                ctx.beginPath();
+                ctx.moveTo(cx, cy - 4); ctx.lineTo(cx + 4, cy); ctx.lineTo(cx, cy + 4); ctx.lineTo(cx - 4, cy);
+                ctx.closePath();
+                ctx.strokeStyle = color; ctx.lineWidth = 1.4; ctx.stroke(); ctx.lineWidth = 1;
+              } else if (bar.kind === "gcov") {
                 // a dot/tick at its time (minimum visible width)
                 ctx.beginPath();
                 ctx.arc(x1 + 1.5, yBar + LANE_H / 2 - 5, 3.5, 0, Math.PI * 2);
@@ -357,7 +405,7 @@ export default function TimelineCanvas(props: Props) {
               } else {
                 const yH = LANE_H - 12;
                 ctx.fillRect(x1, yBar, Math.max(2, x2 - x1), yH);
-                // dots at both acquisition times
+                // dots at both acquisition times (the §4.4 compare entries)
                 ctx.fillStyle = "#0e1116";
                 ctx.beginPath();
                 ctx.arc(x1 + 1.5, yBar + yH / 2, 2, 0, Math.PI * 2);
@@ -365,6 +413,24 @@ export default function TimelineCanvas(props: Props) {
                 ctx.beginPath();
                 ctx.arc(Math.max(x1 + 1.5, x2 - 1.5), yBar + yH / 2, 2, 0, Math.PI * 2);
                 ctx.fill();
+                if (hoverEnd) {
+                  // the END the pointer is on gets a ring — it opens the Compare view (§4.4)
+                  ctx.strokeStyle = AMBER;
+                  ctx.lineWidth = 1.6;
+                  ctx.beginPath();
+                  ctx.arc(hoverEnd === "ref" ? x1 + 1.5 : Math.max(x1 + 1.5, x2 - 1.5), yBar + yH / 2, 4, 0, Math.PI * 2);
+                  ctx.stroke();
+                  ctx.lineWidth = 1;
+                }
+              }
+              // §4.2: the variant badge — "×N" right of the bar when the engine grouped variants
+              const nV = bar.group?.n_variants ?? 1;
+              if (nV > 1) {
+                ctx.globalAlpha = 1;
+                ctx.fillStyle = AMBER;
+                ctx.font = "9px ui-monospace, monospace";
+                ctx.textAlign = "left";
+                ctx.fillText(`×${nV}`, x2 + 4, bar.kind === "gcov" ? yBar + LANE_H / 2 - 2 : yBar + LANE_H - 9);
               }
               ctx.globalAlpha = 1;
               if (selected || focused || hovered) {
@@ -391,14 +457,20 @@ export default function TimelineCanvas(props: Props) {
           ctx.fillText(fmtUtcFull(h.t), h.x + (h.x > width - 130 ? -4 : 4), 10);
           if (h.bar) {
             const g = h.bar.granule;
+            const nV = h.bar.group?.n_variants ?? 1;
+            const kindText = h.bar.kind === "gunw" ? "pair (two dates)"
+              : h.bar.kind === "goff" ? "offset pair (two dates)"
+              : h.bar.kind === "gcov" ? "single date"
+              : "unknown layout (raw)";
             const lines = [
               `${g.id.slice(0, 44)}${g.id.length > 44 ? "…" : ""}`,
-              `${g.stack} · ${g.product ?? "?"}`,
+              `${g.stack} · ${g.product ?? "?"} · ${kindText}${nV > 1 ? ` · ×${nV} variants` : ""}` +
+                (h.end ? ` · click to compare the ${h.end === "ref" ? "reference" : "secondary"} end` : ""),
               g.ref_time ? `ref ${fmtSpan(Date.parse(g.ref_time))}` : g.start ? `start ${fmtSpan(Date.parse(g.start))}` : "undated",
               g.sec_time ? `sec ${fmtSpan(Date.parse(g.sec_time))}` : null,
               g.baseline_days != null ? `baseline ${g.baseline_days} d` : null,
             ].filter(Boolean) as string[];
-            const boxW = 252;
+            const boxW = 300;
             const boxH = lines.length * 12 + 8;
             const bx = Math.min(width - boxW - 4, Math.max(4, h.x + 10));
             const by = Math.min(layout.contentHeight - boxH - 4, h.y + 12);
@@ -459,7 +531,8 @@ export default function TimelineCanvas(props: Props) {
   }, [barsByStart, bounds, width]);
 
   // ---- interaction: pan / zoom / hover / click / dblclick / keyboard ----------------------------
-  const hitTest = useCallback((x: number, y: number): PackedGranuleBar | null => {
+  const END_PX = 8;                                     // pair end-dot tolerance (§4.4)
+  const hitTest = useCallback((x: number, y: number): PackedHit | null => {
     const s = scaleRef.current;
     const layout = stackLayoutRef.current;
     const t = xToT({ ...s, widthPx: width }, x);
@@ -472,7 +545,13 @@ export default function TimelineCanvas(props: Props) {
       for (const bar of row) {
         const x1 = tToX({ ...s, widthPx: width }, bar.start);
         const x2 = Math.max(tToX({ ...s, widthPx: width }, bar.end), x1 + 3);
-        if (x >= x1 - 3 && x <= x2 + 3) return bar;
+        if (x >= x1 - 3 && x <= x2 + 3) {
+          const isPair = bar.kind === "gunw" || bar.kind === "goff";
+          let end: "ref" | "sec" | null = null;
+          if (isPair && Math.abs(x - x1) <= END_PX) end = "ref";
+          else if (isPair && Math.abs(x - x2) <= END_PX) end = "sec";
+          return { bar, end };
+        }
       }
       void t;
     }
@@ -494,7 +573,8 @@ export default function TimelineCanvas(props: Props) {
       setHover(null);
       return;
     }
-    setHover({ x, y, t, bar: hitTest(x, y) });
+    const hit = hitTest(x, y);
+    setHover({ x, y, t, bar: hit?.bar ?? null, end: hit?.end ?? null });
   }, [bounds, width, hitTest]);
   const onPointerUp = useCallback((e: React.PointerEvent<HTMLCanvasElement>) => {
     const drag = dragRef.current;
@@ -503,8 +583,14 @@ export default function TimelineCanvas(props: Props) {
     const moved = Math.abs(e.clientX - drag.x) > 4;
     if (!moved) {
       const rect = e.currentTarget.getBoundingClientRect();
-      const bar = hitTest(e.clientX - rect.left, e.clientY - rect.top);
-      if (bar) {
+      const hit = hitTest(e.clientX - rect.left, e.clientY - rect.top);
+      if (hit) {
+        const { bar, end } = hit;
+        // §4.4: a click on a pair END opens the Compare view for that date
+        if (end && bar.group && propsRef.current.onEndClick) {
+          propsRef.current.onEndClick(bar.group.key, end);
+          return;
+        }
         propsRef.current.onSelect(bar.id, e.shiftKey || e.ctrlKey || e.metaKey);
         propsRef.current.onFocus(bar.id);
       } else if (!e.shiftKey && !e.ctrlKey && !e.metaKey) {
@@ -514,8 +600,9 @@ export default function TimelineCanvas(props: Props) {
   }, [hitTest]);
   const onDoubleClick = useCallback((e: React.MouseEvent<HTMLCanvasElement>) => {
     const rect = e.currentTarget.getBoundingClientRect();
-    const bar = hitTest(e.clientX - rect.left, e.clientY - rect.top);
-    if (!bar) return;
+    const hit = hitTest(e.clientX - rect.left, e.clientY - rect.top);
+    if (!hit) return;
+    const bar = hit.bar;
     const span = Math.max(bar.end - bar.start, DAY_MS / 24) * 2.4;
     const center = (bar.start + bar.end) / 2;
     setScale(clamp({ t0: center - span / 2, t1: center + span / 2, widthPx: width }, bounds));
@@ -622,8 +709,10 @@ export default function TimelineCanvas(props: Props) {
         }}
       />
       <p className="border-t border-[#262c36] px-2 py-1 text-[10px] text-[#5a636e]">
-        drag to pan · wheel to zoom at the cursor · double-click a bar to zoom to it · ←/→ pan ·
-        +/− zoom · ↑/↓ move between granules · Home fits the searched window · all times UTC
+        bar = pair: two dates, one dot per end (click a dot to compare that date) · dot = single
+        date · hollow diamond = unknown layout (raw) · ×N = engine-grouped variants · drag to pan ·
+        wheel to zoom at the cursor · double-click a bar to zoom to it · ←/→ pan · +/− zoom ·
+        ↑/↓ move between granules · Home fits the searched window · all times UTC
         {" · "}{flatBars.length} bars
       </p>
     </div>

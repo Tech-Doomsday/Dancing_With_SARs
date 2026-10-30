@@ -39,8 +39,8 @@ def gunw_id(cycle: int, track: int, frame: int, sec_cycle: int, ref: datetime, s
             f"{stamp(sec + timedelta(seconds=34))}_P05023_N_F_J_001")
 
 
-def gcov_id(cycle: int, track: int, frame: int, t: datetime) -> str:
-    return (f"NISAR_L2_PR_GCOV_{cycle:03d}_{track:03d}_A_{frame:03d}_4005_SHNA_A_"
+def gcov_id(cycle: int, track: int, frame: int, t: datetime, bw: str = "4005") -> str:
+    return (f"NISAR_L2_PR_GCOV_{cycle:03d}_{track:03d}_A_{frame:03d}_{bw}_SHNA_A_"
             f"{t.strftime('%Y%m%dT%H%M%S')}_{(t + timedelta(seconds=30)).strftime('%Y%m%dT%H%M%S')}"
             f"_P05023_N_F_J_001")
 
@@ -53,7 +53,10 @@ def ring(lon: float, lat: float, half_km: float = 35.0) -> list:
 
 def make_refs() -> list[GranuleRef]:
     """A believable stack family around Los Angeles: two ascending tracks, one descending,
-    GUNW pairs on the 12-day repeat plus GCOV epochs — SYNTHETIC ids and footprints."""
+    GUNW pairs on the 12-day repeat plus GCOV epochs — SYNTHETIC ids and footprints.
+    UI-build-2 §4.2 additions: two GCOV resolution variants of ONE epoch (differing bandwidth),
+    a GUNW stored secondary-first (flipped), and one id that matches no verified layout (it must
+    come back UNGROUPED and raw)."""
     refs: list[GranuleRef] = []
     t0 = datetime(2026, 6, 20, 13, 8, 23, tzinfo=timezone.utc)
     # ascending track 34, frame 19: GUNW pairs every 24 days + the TASK vector among them
@@ -67,7 +70,21 @@ def make_refs() -> list[GranuleRef]:
                                34, 19, "ASCENDING", 231_000_000, ring(-118.25, 34.05),
                                {"collectionName": "NISAR_L2_GUNW_PROVISIONAL_V1", "orbitType": "MOE",
                                 "mainBandPolarization": "HH", "rangeBandwidth": 40, "crid": "P05023"}))
-    # ascending track 34 GCOV epochs (12-day repeat)
+    # a FLIPPED pair: the SAME true pair window as TEST_VECTOR, stored secondary-first
+    fl_ref = t0 + timedelta(days=24 * 2)
+    fl_sec = fl_ref + timedelta(days=24)
+    flipped = (f"NISAR_L2_PR_GUNW_033_034_A_019_031_4000_SH_"
+               f"{fl_sec.strftime('%Y%m%dT%H%M%S')}_{(fl_sec + timedelta(seconds=34)).strftime('%Y%m%dT%H%M%S')}_"
+               f"{fl_ref.strftime('%Y%m%dT%H%M%S')}_{(fl_ref + timedelta(seconds=34)).strftime('%Y%m%dT%H%M%S')}_"
+               f"P05023_N_F_J_001")
+    refs.append(GranuleRef(flipped, f"https://example.invalid/{flipped}.h5", "GUNW",
+                           fl_sec.strftime("%Y-%m-%dT%H:%M:%SZ"),
+                           (fl_sec + timedelta(seconds=34)).strftime("%Y-%m-%dT%H:%M:%SZ"),
+                           34, 19, "ASCENDING", 231_000_000, ring(-118.25, 34.05),
+                           {"collectionName": "NISAR_L2_GUNW_PROVISIONAL_V1", "orbitType": "MOE",
+                            "mainBandPolarization": "HH", "rangeBandwidth": 40, "crid": "P05023"}))
+    # ascending track 34 GCOV epochs (12-day repeat); the 3rd epoch carries TWO resolution
+    # variants (40 MHz + 77 MHz) -> the engine must answer ONE group with 2 variants
     for i in range(8):
         t = t0 + timedelta(days=12 * i)
         gid = gcov_id(27 + 2 * i, 34, 19, t)
@@ -77,6 +94,14 @@ def make_refs() -> list[GranuleRef]:
                                34, 19, "ASCENDING", 118_000_000, ring(-118.22, 34.02),
                                {"collectionName": "NISAR_L2_GCOV_PROVISIONAL_V1", "orbitType": "MOE",
                                 "mainBandPolarization": "HH", "rangeBandwidth": 40}))
+        if i == 2:
+            gid2 = gcov_id(31, 34, 19, t, bw="7700")
+            refs.append(GranuleRef(gid2, f"https://example.invalid/{gid2}.h5", "GCOV",
+                                   t.strftime("%Y-%m-%dT%H:%M:%SZ"),
+                                   (t + timedelta(seconds=30)).strftime("%Y-%m-%dT%H:%M:%SZ"),
+                                   34, 19, "ASCENDING", 124_000_000, ring(-118.22, 34.02),
+                                   {"collectionName": "NISAR_L2_GCOV_PROVISIONAL_V1", "orbitType": "MOE",
+                                    "mainBandPolarization": "HH", "rangeBandwidth": 77}))
     # descending track 71: GCOV epochs (a second lane family)
     t0d = datetime(2026, 6, 26, 1, 10, 0, tzinfo=timezone.utc)
     for i in range(6):
@@ -87,6 +112,11 @@ def make_refs() -> list[GranuleRef]:
                                (t + timedelta(seconds=30)).strftime("%Y-%m-%dT%H:%M:%SZ"),
                                71, 45, "DESCENDING", 121_000_000, ring(-118.31, 34.11),
                                {"collectionName": "NISAR_L2_GCOV_PROVISIONAL_V1", "orbitType": "MOE"}))
+    # one id that matches NO verified layout — ungrouped and raw, never invented into a group
+    unk = "NISAR_L2_PR_SYNTH_UNKNOWN-LAYOUT_001"
+    refs.append(GranuleRef(unk, f"https://example.invalid/{unk}.h5", "GCOV",
+                           "2026-07-20T13:09:00Z", "2026-07-20T13:09:30Z",
+                           34, 19, "ASCENDING", 90_000_000, ring(-118.22, 34.02), None))
     return refs
 
 

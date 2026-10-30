@@ -49,7 +49,7 @@ test.describe("granule explorer (fixtures)", () => {
   test("axis + lanes render; N-of-M chip matches; the test vector fills the detail panel", async ({ page }) => {
     await routeEngine(page);
     await page.goto("/granules?west=-118.45&south=33.7&east=-118.05&north=34.3&level=GUNW,GCOV");
-    await expect(page.getByText("17 granules")).toBeVisible();
+    await expect(page.getByText("20 granules")).toBeVisible();
     await expect(page.getByText("2 stacks")).toBeVisible();
 
     // canvas is present and painted (non-trivial size)
@@ -77,17 +77,17 @@ test.describe("granule explorer (fixtures)", () => {
   test("filters change the N-of-M chip client-side; List view stays in parity", async ({ page }) => {
     await routeEngine(page);
     await page.goto("/granules?west=-118.45&south=33.7&east=-118.05&north=34.3&level=GUNW,GCOV");
-    await expect(page.getByText("17 granules")).toBeVisible();
+    await expect(page.getByText("20 granules")).toBeVisible();
     // direction filter -> descending only (D071, 6 granules)
     await page.getByLabel("direction").selectOption("D");
-    await expect(page.getByText(/6 of 17 match/)).toBeVisible();
+    await expect(page.getByText(/6 of 20 match/)).toBeVisible();
     // track filter on top -> D071 has track 71
     await page.getByLabel("track", { exact: false }).fill("71");
-    await expect(page.getByText(/6 of 17 match/)).toBeVisible();
+    await expect(page.getByText(/6 of 20 match/)).toBeVisible();
     // junk day-of-month shows an inline message and is NOT applied
     await page.getByLabel("day of month").fill("banana");
     await expect(page.getByText("day-of-month: use 1–31")).toBeVisible();
-    await expect(page.getByText(/6 of 17 match/)).toBeVisible(); // unchanged
+    await expect(page.getByText(/6 of 20 match/)).toBeVisible(); // unchanged
   });
 
   test("truncated and degraded banners render from the engine's own flags", async ({ page }) => {

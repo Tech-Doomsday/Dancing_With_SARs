@@ -56,14 +56,14 @@ test("offline states: cached tab, featured empty, engine offline, WebGL unavaila
   {
     const page = await browser.newPage();
     await routeCache(page, [verdictRow("earthquake_coseismic", "SUPPORTED", "supported")], "1");
-    await page.goto("/");
+    await page.goto("/map");
     await page.goto(`/?panel=results&bundle=${BUNDLE}`);
     await expect(page.getByText("earthquake_coseismic").first()).toBeVisible({ timeout: 20_000 });
     for (const [w, h] of [[1440, 900], [390, 844]] as [number, number][]) {
       await snap(page, "cached-tab", w, h);
     }
     // engine offline notice (the engine is genuinely down in this config)
-    await page.goto("/");
+    await page.goto("/map");
     await expect(page.getByText(/engine offline at/).first()).toBeVisible({ timeout: 20_000 });
     await snap(page, "engine-offline", 1440, 900);
     await page.close();
@@ -73,7 +73,7 @@ test("offline states: cached tab, featured empty, engine offline, WebGL unavaila
   {
     const page = await browser.newPage();
     await routeCache(page, [], "0");
-    await page.goto("/?panel=explore");
+    await page.goto("/map?panel=explore");
     await expect(page.getByText(/No featured areas have been added yet/).first()).toBeVisible({ timeout: 20_000 });
     await snap(page, "featured-empty", 1440, 900);
     await page.close();

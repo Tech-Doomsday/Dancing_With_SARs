@@ -1,8 +1,10 @@
 "use client";
 
-/** ExplorerApp (§7.8) — the Granule Explorer: for any box, exactly which NISAR granules exist,
- *  on which tracks/passes, with what day gap, on a real UTC time scale. Layout (desktop):
- *  top bar → filter row → summary strip → timeline (fills height) | right detail panel → footer.
+/** ExplorerApp (§7.8 + UI-build-2 §4) — Data retrieval: for any box, exactly which NISAR
+ *  acquisitions exist, on which tracks/passes, with what day gap, on a real UTC time scale —
+ *  now grouped the ENGINE's way (one bar per acquisition, ×N variant badges), with a tabbed
+ *  detail panel and a Compare view for a pair's two ends. Layout (desktop): top bar → filter
+ *  row → summary strip → timeline (fills height) | right detail panel → footer.
  *  Mobile: filters collapsible, timeline full width, detail as bottom sheet.
  *  Honesty: counts come from the engine (N of M, truncation, degradation), day gaps are
  *  engine-computed (DEC13), "nominal repeat" appears only if the engine supplies it (it does
@@ -12,7 +14,7 @@ import dynamic from "next/dynamic";
 import { useRouter, useSearchParams } from "next/navigation";
 import { ChevronDown, ChevronUp, RotateCcw, Search } from "lucide-react";
 import { api, ENGINE_API, granulesBbox } from "@/lib/api";
-import type { ExplorerGranule, ExplorerStack, GranuleExplorerResponse } from "@/lib/types";
+import type { BackgroundGroup, ExplorerGranule, ExplorerStack, GranuleExplorerResponse } from "@/lib/types";
 import {
   emptyFilters, filterGranules,
   type ExplorerFilters,
@@ -24,6 +26,7 @@ import ExplorerFiltersRow from "./ExplorerFiltersRow";
 import ExplorerSummary from "./ExplorerSummary";
 import ExplorerDetail from "./ExplorerDetail";
 import ExplorerList from "./ExplorerList";
+import CompareView from "@/components/background/CompareView";
 
 const TimelineCanvas = dynamic(() => import("./TimelineCanvas"), {
   ssr: false,
@@ -115,7 +118,7 @@ export default function ExplorerApp() {
     const params = new URLSearchParams(window.location.search);
     const st = parseExplorerState(params);
     writeExplorerState(params, { ...st, ...patch });
-    router.replace(`/granules?${params.toString()}`, { scroll: false });
+    router.replace(`/background/retrieval?${params.toString()}`, { scroll: false });
   }, [router]);
 
   // ---- the search. The Search button runs it with the form values; a pasted link with a full
@@ -203,6 +206,16 @@ export default function ExplorerApp() {
     ? data?.granules.find((g) => g.id === selectedIds[selectedIds.length - 1]) ?? null
     : null;
   const selectedStack = selected ? visibleStacks.find((s) => s.key === selected.stack) ?? null : null;
+  const selectedGroup: BackgroundGroup | null = useMemo(() => {
+    if (!data?.groups || !selected) return null;
+    return data.groups.find((g) => g.granule_ids.includes(selected.id)) ?? null;
+  }, [data, selected]);
+
+  // ---- Compare view (§4.4): which pair group + which end opened it -----------------------------
+  const [compare, setCompare] = useState<{ group: BackgroundGroup; end: "ref" | "sec" } | null>(null);
+  const openCompare = useCallback((group: BackgroundGroup, end: "ref" | "sec") => {
+    setCompare({ group, end });
+  }, []);
 
   // ---- footer echo ------------------------------------------------------------------------------
   const queryEcho = data
@@ -213,7 +226,7 @@ export default function ExplorerApp() {
     <div className="explorer-root fixed inset-0 flex flex-col bg-[#0e1116] text-[#d9dee4]">
       {/* ---- top bar ---- */}
       <header className="flex flex-wrap items-center gap-x-4 gap-y-2 border-b border-[#262c36] px-4 py-2.5">
-        <AppNav active="granules" dark />
+        <AppNav active="background" dark />
         <div className="ml-auto flex flex-wrap items-center gap-2 text-xs">
           <LabeledInput label="West" value={west} onChange={setWest} placeholder="-119.0" width="w-24" />
           <LabeledInput label="South" value={south} onChange={setSouth} placeholder="33.5" width="w-20" />
@@ -361,12 +374,17 @@ export default function ExplorerApp() {
                   data={data}
                   granules={visible}
                   stacks={visibleStacks}
+                  groups={data.groups}
                   selectedIds={selectedIds}
                   focusedId={focusedId}
                   onSelect={(id, extend) =>
                     setSelectedIds((cur) => (extend ? (cur.includes(id) ? cur.filter((x) => x !== id) : [...cur, id]) : [id]))}
                   onFocus={setFocusedId}
                   onViewWindow={setViewWindow}
+                  onEndClick={(groupKey, end) => {
+                    const grp = data.groups?.find((g) => g.key === groupKey);
+                    if (grp) openCompare(grp, end);
+                  }}
                 />
               )}
             </div>
@@ -374,21 +392,32 @@ export default function ExplorerApp() {
         </section>
 
         {/* ---- detail panel (desktop right ≈380 px; mobile bottom sheet) ---- */}
-        <aside className="explorer-detail max-h-[45vh] overflow-y-auto border-t border-[#262c36] bg-[#12161d] lg:max-h-none lg:w-[380px] lg:shrink-0 lg:overflow-y-auto lg:border-l lg:border-t-0">
-          <ExplorerDetail
-            granule={selected}
-            stack={selectedStack}
-            stackGranules={selected ? visible.filter((g) => g.stack === selected.stack) : []}
-            bbox={data?.bbox ?? null}
-            engineOnline={health === true}
-            onClose={() => setSelectedIds([])}
-            onShowOnGlobe={(lat, lon) => {
-              window.location.href = `/?lat=${lat}&lon=${lon}&z=7`;
-            }}
-            onScanTile={(tileId) => {
-              window.location.href = `/?tile=${encodeURIComponent(tileId)}&panel=pin`;
-            }}
-          />
+        <aside className="explorer-detail max-h-[45vh] overflow-y-auto border-t border-[#262c36] bg-[#12161d] lg:max-h-none lg:w-[420px] lg:shrink-0 lg:overflow-y-auto lg:border-l lg:border-t-0">
+          {compare ? (
+            <CompareView
+              group={compare.group}
+              initialEnd={compare.end}
+              box={data?.bbox ?? [-118.45, 33.7, -118.05, 34.3]}
+              onClose={() => setCompare(null)}
+            />
+          ) : (
+            <ExplorerDetail
+              granule={selected}
+              group={selectedGroup}
+              stack={selectedStack}
+              stackGranules={selected ? visible.filter((g) => g.stack === selected.stack) : []}
+              bbox={data?.bbox ?? null}
+              engineOnline={health === true}
+              onClose={() => setSelectedIds([])}
+              onShowOnGlobe={(lat, lon) => {
+                window.location.href = `/map?lat=${lat}&lon=${lon}&z=7`;
+              }}
+              onScanTile={(tileId) => {
+                window.location.href = `/map?tile=${encodeURIComponent(tileId)}&panel=pin`;
+              }}
+              onCompare={openCompare}
+            />
+          )}
         </aside>
       </div>
 

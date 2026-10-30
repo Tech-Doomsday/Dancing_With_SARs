@@ -305,5 +305,185 @@ export interface GranuleExplorerResponse {
   generated_at: string;
   granules: ExplorerGranule[];
   stacks: ExplorerStack[];
+  groups?: BackgroundGroup[];
   epoch_merge_minutes?: number;
+}
+
+// ---------------------------------------------------------------------------------------------
+// UI-build-2 §4 — acquisition groups (engine-computed; the UI only draws). One group per distinct
+// acquisition; variants[] are the resolution variants (bandwidth/CRID/version/collection/pol).
+// ---------------------------------------------------------------------------------------------
+
+export interface BackgroundGroup {
+  key: string;
+  stack: string;
+  product: string | null;
+  kind: "pair" | "single" | "unknown";
+  ref_time: string | null;
+  sec_time: string | null;
+  start: string | null;
+  baseline_days: number | null;
+  n_variants: number;
+  grouped: boolean;
+  variant_facts: string[];
+  granule_ids: string[];
+  flags: string[];
+  variants: ExplorerGranule[];
+}
+
+/** GET /api/background/granule — decoded fields + layer inventory + the granule's group. */
+export interface GranuleDetailResponse {
+  ok: true;
+  id: string;
+  granule: ExplorerGranule;
+  decoded: Record<string, unknown>;
+  group: BackgroundGroup | null;
+  grouped: boolean;
+  inventory: {
+    grids: {
+      path: string; key: string; epsg: number | null;
+      nx: number; ny: number; dx: number | null; dy: number | null;
+      extras: { name: string; size: number }[];
+      layers: { path: string; key: string; shape: number[]; dtype: string;
+                chunks: number[] | null; readable: boolean; why_not: string | null;
+                requested_by_scan?: boolean }[];
+    }[];
+    source: string;
+    n_layers: number;
+    scan_request_regex?: string | null;
+    n_layers_requested_by_scan?: number;
+  } | null;
+  inventory_note: string | null;
+  footprint: [number, number][] | null;
+}
+
+export interface PreviewMeta {
+  id: string;
+  layer: string;
+  cmap: string;
+  lo: number;
+  hi: number;
+  shown_stride: number;
+  shown_shape: [number, number];
+  epsg: number | null;
+  clip_bbox_lonlat: [number, number, number, number] | null;
+  requested_bbox: [number, number, number, number];
+  slice_note?: string | null;
+  stats: { shape: number[]; dtype: string; min: number | null; max: number | null;
+           mean: number | null; p2: number | null; p50: number | null; p98: number | null;
+           nan_fraction: number; n_bytes: number };
+  wire_bytes?: Record<string, number>;
+  clip_source?: string;
+  max_px_cap?: number;
+  cache_hit: boolean;
+  generated_at?: string;
+}
+
+export interface StackPairResponse {
+  ok: true;
+  id: string;
+  product: string;
+  bbox_used: [number, number, number, number];
+  epoch_merge_minutes: number;
+  ref: { epoch: string; granules: ExplorerGranule[] };
+  sec: { epoch: string; granules: ExplorerGranule[] };
+  note: string;
+}
+
+/** §5 — the preprocessing payload (traced run or cached-bundle records). */
+export interface PreprocessingResponse {
+  ok: true;
+  run: { id: string | null; status: string | null; tile: string | null;
+         kind: string | null; bundle_id: string | null };
+  trace: PreprocessingTrace | null;
+  trace_arrays?: boolean;
+  empty_reason?: string;
+  note?: string;
+}
+
+export interface TraceArrayMeta {
+  aid: string;
+  path: string;
+  label: string;
+  group: string;
+  step: string;
+  first_step: string;
+  shape: number[];
+  dtype: string;
+  kind: string;
+  stats: Record<string, unknown>;
+  stride: number;
+  epsg: number | null;
+  extent: number[] | null;
+  note?: string | null;
+  fill?: number | null;
+  categories?: Record<string, number> | null;
+  thumb_shape?: number[];
+}
+
+export interface PreprocessingTrace {
+  steps: {
+    code: string; name: string; status: string; seconds: number; message: string;
+    new_flags: { code: string; severity: string; message: string }[];
+    new_assumptions: string[];
+    n_arrays_total: number;
+    reads?: string[];
+    arrays: TraceArrayMeta[];
+  }[];
+  arrays: Record<string, TraceArrayMeta>;
+  n_arrays?: number;
+  bundle_summary?: Record<string, unknown>;
+  handoff?: HandoffFeed;
+  flags?: { severity: string; step: string; code: string; message: string }[];
+  assumptions?: string[];
+  source?: string;
+}
+
+export interface HandoffRow {
+  name: string;
+  code: string;
+  sensor: string;
+  min_epochs: number | null;
+  routing: { route: string; reason?: string; reasons?: string[] } | Record<string, unknown> | null;
+  registry_status: string;
+  reasons: string[];
+  feed: string;
+  uses: { code: string; name: string; state: string; why: string }[];
+  own_fetch: { code: string; name: string; state: string; why: string }[];
+  missing_uses: string[];
+  own_missing: string[];
+  implemented: boolean;
+  verdict_state: string;
+}
+
+export interface HandoffFeed {
+  rows: HandoffRow[];
+  tally: Record<string, number>;
+  n_implemented: number;
+}
+
+/** §6 — one pipeline's input/process/output for one run. */
+export interface PipelineDetailResponse {
+  ok: true;
+  run: { id: string; status: string | null; tile: string | null; kind: string | null;
+         bundle_id: string | null };
+  manifest: {
+    name: string; code: string; sensor: string; applies: string;
+    uses_codes: string[]; fetch_codes: string[]; min_epochs: number | null;
+    status_values: string[]; execution: string;
+    method: string[]; own_prep: string[]; own_fetch: string[]; assumptions: string[];
+  };
+  routing: Record<string, unknown> | null;
+  feed: HandoffRow | null;
+  bundle_summary: Record<string, unknown> | null;
+  bundle_error: string | null;
+  result: PipelineResult;
+  result_missing: null;
+  process: {
+    runtime_s: number | null;
+    diagnostics: Record<string, unknown> | null;
+    detail_steps: unknown;
+    warnings: string[];
+    versions: Record<string, unknown>;
+  };
 }

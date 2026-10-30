@@ -27,7 +27,7 @@ test("WebGL unavailable: the globe says so; search/lists/scan-status still work"
   });
   const page: Page = await browser.newPage();
   await routeOffline(page);
-  await page.goto("/");
+  await page.goto("/map");
   await page.waitForTimeout(4_000);
   // the honest fallback message is on the page, the search pill still exists
   await expect(page.getByText(/The globe cannot start|could not start WebGL/i).first())

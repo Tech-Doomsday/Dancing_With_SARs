@@ -20,14 +20,14 @@ async function goToCoords(page: import("@playwright/test").Page) {
 
 test.describe("globe against the live (synthetic) engine", () => {
   test("health strip reports scans enabled and credentials present", async ({ page }) => {
-    await page.goto("/");
+    await page.goto("/map");
     await expect(page.getByText(/engine online/)).toBeVisible({ timeout: 20_000 });
     await expect(page.getByText(/scans enabled/)).toBeVisible();
     await expect(page.getByText(/Earthdata present/)).toBeVisible();
   });
 
   test("tile-at flow: typed coordinates resolve the MGRS tile and enable Scan", async ({ page }) => {
-    await page.goto("/");
+    await page.goto("/map");
     await expect(page.getByText(/engine online/)).toBeVisible({ timeout: 20_000 });
     await goToCoords(page);
     // the ScanPanel tile card carries the engine's own answer
@@ -64,7 +64,7 @@ test.describe("globe against the live (synthetic) engine", () => {
 
   test("scan flow: Scan this tile runs every pipeline and lands on results with findings", async ({ page }) => {
     test.setTimeout(120_000);
-    await page.goto("/");
+    await page.goto("/map");
     await expect(page.getByText(/engine online/)).toBeVisible({ timeout: 20_000 });
     await goToCoords(page);
     const scan = page.getByRole("button", { name: "Scan this tile" });
@@ -91,15 +91,26 @@ test.describe("globe against the live (synthetic) engine", () => {
     await expect(page.getByText("raster shown on its geographic bounding box")).toBeVisible({ timeout: 15_000 });
   });
 
-  test("workbench: POST /api/runs still works end to end from the old page", async ({ page }) => {
-    test.setTimeout(120_000);
-    await page.goto("/workbench");
-    await expect(page.getByText(/pipelines implemented/)).toBeVisible({ timeout: 20_000 });
-    // pick the OLDEST bundle — the seeded synthetic one (a concurrent scan adds a newer one)
-    await page.getByRole("button", { name: /^11SLT66/ }).last().click();
-    await page.getByRole("button", { name: /Run earthquake_coseismic|Redo verdict/ }).click();
-    // the run view polls to a terminal state and shows the verdict (StatusBadge labels, not raw codes)
+  test("POST /api/runs still works end to end (bundle run, driven through the browser)", async ({ page }) => {
+    test.setTimeout(180_000);
+    await page.goto("/background/pipelines");
+    await expect(page.getByRole("link", { name: /earthquake_coseismic implemented/ })).toBeVisible({ timeout: 20_000 });
+    // the bundle run: POST /api/runs from the page (browser-side), then the run view polls to a
+    // terminal state and shows the verdict (StatusBadge labels, not raw codes)
+    const runId = await page.evaluate(async () => {
+      const base = "http://127.0.0.1:8907";   // the live config's seeded engine
+      const bundles = await (await fetch(`${base}/api/bundles`)).json();
+      const oldest = [...bundles.bundles].sort((a, b) => String(a.created_at).localeCompare(String(b.created_at)))[0];
+      const res = await fetch(`${base}/api/runs`, {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ bundle_id: oldest.bundle_id, pipelines: ["earthquake_coseismic"] }),
+      });
+      const body = await res.json();
+      if (!res.ok || !body.ok) throw new Error(body?.error ?? `POST /api/runs failed: ${res.status}`);
+      return body.run_id;
+    });
+    await page.goto(`/runs/${runId}`);
     await expect(page.getByText(/supported by evidence|not supported by evidence|not enough evidence|no signal|run failed|not modelled yet|finished/i).first())
-      .toBeVisible({ timeout: 90_000 });
+      .toBeVisible({ timeout: 150_000 });
   });
 });

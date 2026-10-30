@@ -5,7 +5,7 @@ import { test, expect } from "@playwright/test";
  *  UI must degrade honestly (no fake data, no infinite spinners). */
 
 test("globe landing renders the map (or the honest WebGL message) and the search pill", async ({ page }) => {
-  await page.goto("/");
+  await page.goto("/map");
   // the map canvas or the WebGL-unavailable message must appear (no infinite spinner)
   const canvas = page.locator("canvas.maplibregl-canvas");
   const webglMsg = page.getByText("The globe cannot start");
@@ -19,7 +19,7 @@ test("globe landing renders the map (or the honest WebGL message) and the search
 });
 
 test("Data tab shows its own engine-offline message, never a stale or empty timeline", async ({ page }) => {
-  await page.goto("/");
+  await page.goto("/map");
   await page.getByRole("tab", { name: "Data" }).click();
   await expect(page.getByText(/the engine is offline — granule availability needs it/)).toBeVisible({ timeout: 20_000 });
   await expect(page.locator("svg[aria-label*='Granule timeline']")).toHaveCount(0);
@@ -28,15 +28,16 @@ test("Data tab shows its own engine-offline message, never a stale or empty time
 test("no console errors and no infinite spinners on the landing page", async ({ page }) => {
   const errors: string[] = [];
   page.on("pageerror", (e) => errors.push(String(e)));
-  await page.goto("/");
+  await page.goto("/map");
   await page.waitForTimeout(4000);
   expect(errors).toEqual([]);
 });
 
-test("/workbench still renders the old home (headline + engine-health line)", async ({ page }) => {
+test("legacy /workbench redirects to /background/pipelines and keeps working (§1)", async ({ page }) => {
   await page.goto("/workbench");
-  await expect(page.getByRole("heading", { level: 1 })).toContainText("Did the ground move?");
-  await expect(page.getByText(/engine data dir:/)).toBeVisible();
+  await expect(page).toHaveURL(/\/background\/pipelines/);
+  // with the engine deliberately absent, the catalogue shows its honest error (never a fake list)
+  await expect(page.getByRole("alert").first()).toBeVisible({ timeout: 20_000 });
 });
 
 test("/runs/run-does-not-exist still surfaces the API error, never 'Loading run…' forever", async ({ page }) => {

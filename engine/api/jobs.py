@@ -102,6 +102,11 @@ class JobRunner:
         self.cache = cache if cache is not None else CloudCache.from_env()   # Supabase mirror (4.6)
         self._pool = ThreadPoolExecutor(max_workers=1, thread_name_prefix="engine-run")
         self._states: dict[str, dict] = {}
+        # §5 preprocessing traces (in-memory, bounded): run_id -> {trace payload + array records}.
+        # Traces exist only for runs started WITH tracing in this process; they are evicted with
+        # the run state (never persisted — the endpoint says so honestly).
+        self._traces: dict[str, dict] = {}
+        self.trace_arrays: dict[str, dict] = {}
         self._lock = threading.Lock()
 
     # ------------------------------------------------------------------ API
@@ -282,7 +287,14 @@ class JobRunner:
                          if (droot / "ancillary").is_dir() else NullAncillary())
             cfg = load_common_config()
 
+            # §5: the same observer now also feeds the chain Tracer (read-only; the tracer
+            # swallows its own errors, so a broken trace can never fail the scan)
+            from engine.common.debug.trace import Tracer
+            from engine.api import background as _bgmod
+            tracer = Tracer()
+
             def observer(step, ctx, record) -> None:      # chain steps verbatim (§5.3 item 5)
+                tracer(step, ctx, record)
                 idx = next((i for i, s in enumerate(STEPS) if s.code == step.code), 0) + 1
                 with self._lock:
                     self._states[run_id]["progress"] = {
@@ -291,6 +303,10 @@ class JobRunner:
 
             bundle = build_scene_bundle(tile, retriever, as_of=as_of, ancillary=ancillary,
                                         cfg=cfg, lookback_days=lookback_days, observer=observer)
+            try:
+                self.attach_trace(run_id, _bgmod.build_trace_payload(tracer, bundle))
+            except Exception:                    # trace assembly never blocks the run
+                pass
             with self._lock:
                 self._states[run_id]["progress"] = {"stage": "saving bundle", "tile": tile.id}
             bundle_path = save_bundle(bundle, self.bundles_dir)
@@ -439,6 +455,28 @@ class JobRunner:
             if len(done) > _MAX_COMPLETED_IN_MEMORY:
                 for rid in done[: len(done) - _MAX_COMPLETED_IN_MEMORY]:
                     self._states.pop(rid, None)
+                    self._traces.pop(rid, None)          # §5: traces die with their run state
+                    self.trace_arrays.pop(rid, None)
+
+    # ------------------------------------------------------------------ §5 preprocessing traces
+    def attach_trace(self, run_id: str, payload: dict) -> None:
+        """Register a chain trace (from the Tracer observer) for a run, splitting the array
+        records into endpoint-visible metadata + in-memory thumbnails (bounded, evicted)."""
+        from . import background as bgmod
+        try:
+            out = bgmod.register_trace(self, run_id, payload)
+        except Exception:                        # a broken tracer must never fail the scan
+            return
+        with self._lock:
+            self._traces[run_id] = out
+
+    def get_trace(self, run_id: str) -> dict | None:
+        with self._lock:
+            return self._traces.get(run_id)
+
+    def get_trace_array(self, run_id: str, aid: str):
+        with self._lock:
+            return (self.trace_arrays.get(run_id) or {}).get(aid)
 
     # ------------------------------------------------------------------ granule search (§5.5)
     def _granule_search_sync(self, lon: float, lat: float, products: list[str],

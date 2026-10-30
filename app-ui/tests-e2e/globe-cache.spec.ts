@@ -144,7 +144,7 @@ async function interceptSupabase(page: Page, opts?: { featured?: unknown[]; stat
 test.describe("globe with intercepted Supabase cache", () => {
   test("featured list renders, joins the cached row, and opens the result", async ({ page }) => {
     await interceptSupabase(page);
-    await page.goto("/");
+    await page.goto("/map");
     await expect(page.getByText("Fixture Featured Area")).toBeVisible({ timeout: 20_000 });
     // the featured row joins to the cached verdict (tile 11SLT66)
     await expect(page.getByText(/supported by evidence|supported/).first()).toBeVisible();
@@ -159,7 +159,7 @@ test.describe("globe with intercepted Supabase cache", () => {
 
   test("layer chip toggles the overlay and the legend appears", async ({ page }) => {
     await interceptSupabase(page);
-    await page.goto("/");
+    await page.goto("/map");
     await page.getByRole("button", { name: "open result" }).first().click();
     await expect(page.getByText(/Cached verdict · tile 11SLT66/)).toBeVisible({ timeout: 15_000 });
     // toggle the displacement overlay on (chip inside the supported finding)
@@ -176,7 +176,7 @@ test.describe("globe with intercepted Supabase cache", () => {
 
   test("cached tab groups by tile and lists earlier scans", async ({ page }) => {
     await interceptSupabase(page);
-    await page.goto("/");
+    await page.goto("/map");
     await page.getByRole("tab", { name: "cached" }).click();
     await expect(page.getByText("11SLT66")).toBeVisible({ timeout: 15_000 });
     await expect(page.getByText("2 pipeline verdict(s)")).toBeVisible();
@@ -188,14 +188,14 @@ test.describe("globe with intercepted Supabase cache", () => {
 
   test("empty featured list is an honest, specific empty state", async ({ page }) => {
     await interceptSupabase(page, { featured: [] });
-    await page.goto("/");
+    await page.goto("/map");
     await expect(page.getByText(/No featured areas have been added yet/)).toBeVisible({ timeout: 20_000 });
     await expect(page.getByText(/tools\/feature_area\.py/)).toBeVisible();
   });
 
   test("a failing cache read shows the engine-shaped error, not an empty list", async ({ page }) => {
     await interceptSupabase(page, { status: 401 });
-    await page.goto("/");
+    await page.goto("/map");
     await expect(page.getByText(/cache read failed \(HTTP 401\)/)).toBeVisible({ timeout: 20_000 });
   });
 });

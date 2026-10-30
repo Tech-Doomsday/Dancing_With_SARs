@@ -158,7 +158,7 @@ function CheckCoverage(props: { tile: TileInfo; engineOnline: boolean; credentia
         {state === "loading" ? "checking…" : "Check coverage (GUNW + GCOV)"}
       </button>
       <a
-        href={`/granules?west=${w}&south=${s}&east=${e}&north=${n}&level=GUNW,GCOV`}
+        href={`/background/retrieval?west=${w}&south=${s}&east=${e}&north=${n}&level=GUNW,GCOV`}
         className="ml-2 text-[11px] text-[#2c5f58] underline"
       >
         Open in Granule Explorer

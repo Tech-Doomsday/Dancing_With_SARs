@@ -80,6 +80,9 @@ def check_install():
         record("install integrity", "WARN", "no MANIFEST.json (cannot verify the install)")
         return True
     want = json.loads(mf.read_text())
+    # shipped files on disk the manifest does not list — same skip rule as make_manifest (imported, not copied)
+    from tools.make_manifest import files as shipped_files
+    extra = sorted(rel.as_posix() for rel in shipped_files() if rel.as_posix() not in want)
     strict, soft = [], []
     for rel, h in want.items():
         p = ROOT / rel
@@ -91,8 +94,9 @@ def check_install():
         out("  files that are old or missing:\n    " + "\n    ".join(strict[:25]))
         record("install integrity", "FAIL", f"{len(strict)} code file(s) are stale/missing -> re-run the install block (it copies over ALL files)")
         return False
-    record("install integrity", "PASS" if not soft else "WARN",
-           f"all {len(want) - len(soft)} code files match" + (f"; {len(soft)} config/doc file(s) differ (fine if you edited them): {soft[:4]}" if soft else ""))
+    record("install integrity", "PASS" if not (soft or extra) else "WARN",
+           f"all {len(want) - len(soft)} code files match" + (f"; {len(soft)} config/doc file(s) differ (fine if you edited them): {soft[:4]}" if soft else "")
+           + (f"; {len(extra)} shipped file(s) not in MANIFEST.json (re-run tools/make_manifest.py): {extra[:4]}" if extra else ""))
     return True
 
 
