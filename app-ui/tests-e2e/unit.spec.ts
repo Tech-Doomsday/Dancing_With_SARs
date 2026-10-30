@@ -12,6 +12,7 @@ import {
 import { parseExplorerState, writeExplorerState } from "../src/lib/urlstate";
 import { groupTimes, groupKindLabel, variantFactsLabel, compareEnds, zoomBox, panBox } from "../src/lib/groups";
 import { ticks as ticksForExplorer } from "../src/lib/timescale";
+import { mapHref, retrievalHref, sanitize, toDateOnly } from "../src/lib/queryContext";
 
 /** §8.2 pure-logic tests — no browser needed. Playwright transpiles the TS imports directly. */
 
@@ -436,5 +437,47 @@ test.describe("UI-build-2 — Compare view box math (§4.4/§4.5)", () => {
     const clamped = panBox([-180, -90, -176, -86], 1, 1);   // pan left/down past the world edge
     expect(clamped[0]).toBe(-180);
     expect(clamped[1]).toBe(-90);
+  });
+});
+
+// ---- shared map → Background query context -------------------------------------------------------
+test.describe("queryContext (map → Background hand-off)", () => {
+  const TILE_BOX: [number, number, number, number] = [-118.45, 33.7, -118.05, 34.3];
+
+  test("retrievalHref carries a complete box so Retrieval auto-runs once on open", () => {
+    const href = retrievalHref({ bbox: TILE_BOX, tile: "11SLT86", level: "GUNW,GCOV", from: "2026-07-02", to: "2026-10-30" });
+    expect(href).toBe(
+      "/background/retrieval?west=-118.45&south=33.7&east=-118.05&north=34.3&tile=11SLT86&level=GUNW%2CGCOV&from=2026-07-02&to=2026-10-30");
+    // and the URL round-trips through the page's own validated parser
+    const st = parseExplorerState(new URLSearchParams(href.split("?")[1]));
+    expect([st.west, st.south, st.east, st.north]).toEqual(TILE_BOX);
+    expect(st.level).toBe("GUNW,GCOV");
+    expect(st.from).toBe("2026-07-02");
+  });
+
+  test("an empty context keeps the plain links (nothing invented)", () => {
+    expect(retrievalHref({})).toBe("/background/retrieval");
+    expect(mapHref({})).toBe("/map");
+  });
+
+  test("mapHref restores the pin, falling back to the tile id", () => {
+    expect(mapHref({ lat: 34.05, lon: -118.25 })).toBe("/map?lat=34.05&lon=-118.25");
+    expect(mapHref({ tile: "11SLT86" })).toBe("/map?tile=11SLT86");
+  });
+
+  test("sanitize drops anything malformed instead of trusting storage", () => {
+    expect(sanitize({ lat: 999, lon: 5 })).toEqual({});
+    expect(sanitize({ bbox: [10, 5, -10, 6] })).toEqual({});               // west > east
+    expect(sanitize({ bbox: [0, 5, 1, 5] })).toEqual({});                  // south == north
+    expect(sanitize({ tile: "DROP TABLE", level: "XYZ", from: "yesterday" })).toEqual({});
+    expect(sanitize("nope")).toEqual({});
+    expect(sanitize({ lat: 34, lon: -118, bbox: TILE_BOX, level: "gunw,gcov", from: "2026-07-02" }))
+      .toEqual({ lat: 34, lon: -118, bbox: TILE_BOX, level: "GUNW,GCOV", from: "2026-07-02" });
+  });
+
+  test("toDateOnly turns the engine's ISO window into what <input type=date> accepts", () => {
+    expect(toDateOnly("2026-07-02T10:00:00Z")).toBe("2026-07-02");
+    expect(toDateOnly("garbage")).toBeUndefined();
+    expect(toDateOnly(undefined)).toBeUndefined();
   });
 });

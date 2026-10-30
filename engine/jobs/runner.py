@@ -9,7 +9,7 @@ Design (port decisions 9 + Pipeline contract):
     chunk), and the job answers ERROR with the timeout reason — never a silent partial result.
   * Content-addressed result cache: key = sha256(pipeline_id + bundle_id + params + code versions).
     A repeated submit returns the cached verdict immediately (flagged `cached`).
-  * Bookkeeping in a SQLite WAL database (data/jobs/jobs.sqlite) and a per-job progress JSON file
+  * Bookkeeping in a SQLite database (jobs.sqlite, under NISAR_DB_DIR or data/jobs) and a per-job progress JSON file
     (data/jobs/<job_id>.json) the UI can poll without holding any lock.
 """
 from __future__ import annotations
@@ -53,14 +53,14 @@ def _utcnow() -> str:
 
 class HeavyJobRunner:
     def __init__(self, data_dir: Path | str | None = None, registry: Registry | None = None,
-                 bundles_dir: Path | str | None = None):
+                 bundles_dir: Path | str | None = None, db_dir: Path | str | None = None):
         from engine.common.config import data_root
         self.data_dir = Path(data_dir) if data_dir else data_root() / "jobs"
         self.data_dir.mkdir(parents=True, exist_ok=True)
         self.registry = registry or Registry(bundles_dir=bundles_dir)
         self.bundles_dir = Path(bundles_dir) if bundles_dir else (self.data_dir.parent / "bundles")
-        self._db = sqlite3.connect(self.data_dir / "jobs.sqlite", check_same_thread=False)
-        self._db.execute("PRAGMA journal_mode=WAL")
+        from engine.common.sqlite_util import connect
+        self._db = connect(Path(db_dir or self.data_dir) / "jobs.sqlite", check_same_thread=False)
         self._db.executescript(_JOBS_SCHEMA)
         self._db.commit()
         self._pool = ThreadPoolExecutor(max_workers=1, thread_name_prefix="heavy-job")

@@ -94,11 +94,14 @@ class JobRunner:
         self.store = store
         self.bundles_dir = Path(bundles_dir)
         self.data_dir = Path(data_dir) if data_dir else self.bundles_dir.parent
+        from engine.common.sqlite_util import resolve_db_dir
         from engine.jobs import HeavyJobRunner
+        self.db_dir = resolve_db_dir(self.data_dir)      # NISAR_DB_DIR (.env) or the data dir
         self.heavy = HeavyJobRunner(data_dir=self.data_dir / "jobs",
                                     registry=Registry(bundles_dir=self.bundles_dir),
-                                    bundles_dir=self.bundles_dir)
-        self.verdicts = VerdictStore(self.data_dir / "verdicts.db")
+                                    bundles_dir=self.bundles_dir,
+                                    db_dir=self.db_dir / "jobs")
+        self.verdicts = VerdictStore(self.db_dir / "verdicts.db")
         self.cache = cache if cache is not None else CloudCache.from_env()   # Supabase mirror (4.6)
         self._pool = ThreadPoolExecutor(max_workers=1, thread_name_prefix="engine-run")
         self._states: dict[str, dict] = {}

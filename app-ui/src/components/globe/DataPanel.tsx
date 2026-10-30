@@ -3,14 +3,18 @@
 /** DataPanel (§7.5) — the fourth tab: granule availability for the selected tile. LIVE-ENGINE-ONLY
  *  (DEC5): granule search is not cached in Supabase, so offline it says so plainly. Read-only
  *  discovery: it never triggers a scan. Loading/empty/error states follow the honesty rules. */
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import Link from "next/link";
 import { api, ENGINE_API } from "@/lib/api";
+import { retrievalHref, saveQueryContext, toDateOnly } from "@/lib/queryContext";
 import type { GranuleSearchResponse } from "@/lib/types";
 import GranuleTimeline, { type TimelineSelection } from "./GranuleTimeline";
 import GranuleDetail from "./GranuleDetail";
 
 export interface DataPanelProps {
   tileId: string | null;
+  /** the engine's bbox for the pinned tile (west, south, east, north) — the area this tab searches */
+  tileBbox?: [number, number, number, number] | null;
   lon: number | null;
   lat: number | null;
   engineOnline: boolean;
@@ -81,6 +85,47 @@ export default function DataPanel(props: DataPanelProps) {
     return () => clearTimeout(timer);
   }, [query, data, props.lon, props.lat]);
 
+  // ---- the search area + window, made visible and editable --------------------------------------
+  // The per-tile search is fixed by the ENGINE to the pin's MGRS tile (config/tiling.yaml
+  // cell_size_m) over its default lookback window (config/common.yaml window.lookback_days). That
+  // was invisible before. These fields show it, let the user change it, and hand the (possibly
+  // edited) box to Data retrieval, which is the screen that searches arbitrary boxes.
+  const [area, setArea] = useState({ w: "", s: "", e: "", n: "", from: "", to: "" });
+  const bboxSig = props.tileBbox ? props.tileBbox.join(",") : "";
+  useEffect(() => {
+    if (!props.tileBbox) return;
+    const [w, s, e, n] = props.tileBbox;
+    const r = (v: number) => String(Number(v.toFixed(4)));
+    setArea((a) => ({ ...a, w: r(w), s: r(s), e: r(e), n: r(n) }));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [bboxSig]);
+
+  // the window the engine actually used (default lookback, or the timeline's visible range)
+  const winFrom = toDateOnly(data?.window.t0);
+  const winTo = toDateOnly(data?.window.t1);
+  useEffect(() => {
+    if (!winFrom || !winTo) return;
+    setArea((a) => ({ ...a, from: winFrom, to: winTo }));
+    saveQueryContext({ from: winFrom, to: winTo });   // Background shows the same window
+  }, [winFrom, winTo]);
+
+  const areaCheck = useMemo(() => {
+    const [w, s, e, n] = [area.w, area.s, area.e, area.n].map((v) => (v.trim() === "" ? NaN : Number(v)));
+    if (![w, s, e, n].every(Number.isFinite)) return { ok: false as const, msg: "enter all four edges (decimal degrees)" };
+    if (w < -180 || e > 180 || s < -90 || n > 90) return { ok: false as const, msg: "edges outside the valid range" };
+    if (w > e) return { ok: false as const, msg: "west is east of east (antimeridian) — split the box at ±180" };
+    if (s >= n) return { ok: false as const, msg: "south must be below north" };
+    if (area.from && area.to && area.from >= area.to) return { ok: false as const, msg: "From must be before To" };
+    return { ok: true as const, bbox: [w, s, e, n] as [number, number, number, number] };
+  }, [area]);
+
+  const retrievalLink = areaCheck.ok
+    ? retrievalHref({
+        bbox: areaCheck.bbox, tile: props.tileId ?? undefined, level: "GUNW,GCOV",
+        from: area.from || undefined, to: area.to || undefined,
+      })
+    : null;
+
   if (!props.engineOnline) {
     return (
       <div className="p-3 text-xs">
@@ -118,6 +163,72 @@ export default function DataPanel(props: DataPanelProps) {
         every acquisition the engine can see, grouped exactly the way it groups them (stack =
         direction + track). read-only: this tab never fetches or processes data — Scan does that.
       </p>
+      <fieldset className="rounded-lg border border-[#e7e2da] bg-white px-3 py-2">
+        <legend className="px-1 text-[11px] font-medium text-[#4a443c]">Search area &amp; window</legend>
+        <p className="text-[10px] text-[#8a837b]">
+          this tab searches the pinned tile&apos;s box (the engine fixes it to the tile around your pin)
+          over the engine&apos;s default lookback window. Edit the box or dates and open it in Data
+          retrieval to search any area.
+        </p>
+        <div className="mt-1.5 grid grid-cols-4 gap-1.5">
+          {([["w", "West"], ["s", "South"], ["e", "East"], ["n", "North"]] as const).map(([k, label]) => (
+            <label key={k} className="text-[10px] text-[#8a837b]">
+              {label}
+              <input
+                inputMode="decimal"
+                value={area[k]}
+                onChange={(ev) => setArea((a) => ({ ...a, [k]: ev.target.value }))}
+                className="mono mt-0.5 w-full rounded border border-[#e7e2da] px-1.5 py-1 text-[11px] text-[#1c1a17]"
+              />
+            </label>
+          ))}
+        </div>
+        <div className="mt-1.5 grid grid-cols-2 gap-1.5">
+          {([["from", "From (UTC)"], ["to", "To (UTC)"]] as const).map(([k, label]) => (
+            <label key={k} className="text-[10px] text-[#8a837b]">
+              {label}
+              <input
+                type="date"
+                value={area[k]}
+                onChange={(ev) => setArea((a) => ({ ...a, [k]: ev.target.value }))}
+                className="mono mt-0.5 w-full rounded border border-[#e7e2da] px-1.5 py-1 text-[11px] text-[#1c1a17]"
+              />
+            </label>
+          ))}
+        </div>
+        <div className="mt-2 flex items-center gap-2">
+          {retrievalLink ? (
+            <Link
+              href={retrievalLink}
+              onClick={() => areaCheck.ok && saveQueryContext({
+                bbox: areaCheck.bbox, level: "GUNW,GCOV",
+                from: area.from || undefined, to: area.to || undefined,
+              })}
+              className="rounded-md bg-[#2c5f58] px-2.5 py-1 text-[11px] font-medium text-white hover:bg-[#37736a]"
+            >
+              Search this box in Data retrieval →
+            </Link>
+          ) : (
+            <span className="rounded-md bg-[#e7e2da] px-2.5 py-1 text-[11px] font-medium text-[#8a837b]">
+              Search this box in Data retrieval →
+            </span>
+          )}
+          {props.tileBbox && (
+            <button
+              type="button"
+              onClick={() => {
+                const [w, s, e, n] = props.tileBbox as [number, number, number, number];
+                const r = (v: number) => String(Number(v.toFixed(4)));
+                setArea((a) => ({ ...a, w: r(w), s: r(s), e: r(e), n: r(n) }));
+              }}
+              className="text-[11px] text-[#4a443c] underline"
+            >
+              reset to tile
+            </button>
+          )}
+        </div>
+        {!areaCheck.ok && <p role="status" className="mt-1 text-[10px] text-[#9e3b2c]">{areaCheck.msg}</p>}
+      </fieldset>
       {loading && !data && (
         <div className="space-y-2" aria-busy="true">
           <div className="skeleton h-24 rounded-lg" />

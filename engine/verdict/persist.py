@@ -1,7 +1,7 @@
 """4.5 persist — verdicts.db: the ONE store (Decision 1 of the port; Prisma dropped).
 
-Rows: tiles, verdicts (one per pipeline x tile x bundle), events (the 4.3 links). SQLite in WAL
-mode. DB write failures never block the science: callers treat persist as best-effort audit, and
+Rows: tiles, verdicts (one per pipeline x tile x bundle), events (the 4.3 links). SQLite (rollback journal; WAL opt-in via
+NISAR_SQLITE_WAL=1). DB write failures never block the science: callers treat persist as best-effort audit, and
 `write_run` reports failures in its return value instead of raising.
 """
 from __future__ import annotations
@@ -10,6 +10,8 @@ import json
 import sqlite3
 from datetime import datetime, timezone
 from pathlib import Path
+
+from engine.common.sqlite_util import connect
 
 _SCHEMA = """
 CREATE TABLE IF NOT EXISTS tiles(
@@ -55,8 +57,7 @@ class VerdictStore:
     def __init__(self, path: Path | str):
         self.path = Path(path)
         self.path.parent.mkdir(parents=True, exist_ok=True)
-        self._db = sqlite3.connect(self.path, check_same_thread=False)
-        self._db.execute("PRAGMA journal_mode=WAL")
+        self._db = connect(self.path, check_same_thread=False)
         self._db.executescript(_SCHEMA)
         self._db.commit()
 

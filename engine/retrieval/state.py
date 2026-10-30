@@ -1,5 +1,5 @@
 """SQLite state shared by the poller and the pipeline workers: which granules were seen, which
-versions superseded which, and a queue of tiles that need (re)processing. WAL mode + short
+versions superseded which, and a queue of tiles that need (re)processing. Rollback journal (WAL opt-in) + short
 transactions so several worker processes can claim work concurrently."""
 from __future__ import annotations
 
@@ -8,6 +8,8 @@ import sqlite3
 import time
 from contextlib import contextmanager
 from pathlib import Path
+
+from engine.common.sqlite_util import connect
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS granules(
@@ -26,16 +28,15 @@ class State:
     def __init__(self, path: Path):
         self.path = Path(path)
         self.path.parent.mkdir(parents=True, exist_ok=True)
-        c = sqlite3.connect(self.path, timeout=30, isolation_level=None)
+        c = connect(self.path, timeout=30, isolation_level=None)
         try:
-            c.execute("PRAGMA journal_mode=WAL")
             c.executescript(SCHEMA)           # executescript commits implicitly, so it stays out of _tx()
         finally:
             c.close()
 
     @contextmanager
     def _tx(self):
-        c = sqlite3.connect(self.path, timeout=30, isolation_level=None)
+        c = connect(self.path, timeout=30, isolation_level=None)
         c.row_factory = sqlite3.Row
         try:
             for attempt in range(60):                       # Windows can report 'locked' despite the busy timeout

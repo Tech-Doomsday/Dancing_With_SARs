@@ -21,6 +21,7 @@ import {
 } from "@/lib/explorer";
 import { parseExplorerState, writeExplorerState, type ExplorerUrlState } from "@/lib/urlstate";
 import { fmtUtc } from "@/lib/format";
+import { loadQueryContext, saveQueryContext, toDateOnly } from "@/lib/queryContext";
 import AppNav from "../AppNav";
 import ExplorerFiltersRow from "./ExplorerFiltersRow";
 import ExplorerSummary from "./ExplorerSummary";
@@ -91,21 +92,51 @@ export default function ExplorerApp() {
     if (st.dir) setFilters((f) => ({ ...f, direction: st.dir as ExplorerFilters["direction"] }));
     if (st.sel) setSelectedIds([st.sel]);
     const tile = new URLSearchParams(searchParams.toString()).get("tile");
-    if (tile && st.west === undefined) {
-      api.tileAtId(tile).then((r) => {
-        const [w, s, e, n] = r.tile.bbox_lonlat;
-        setWest(String(Number(w.toFixed(4))));
-        setSouth(String(Number(s.toFixed(4))));
-        setEast(String(Number(e.toFixed(4))));
-        setNorth(String(Number(n.toFixed(4))));
-        setTileForBox(r.tile.id);
-      }).catch(() => undefined);
+    const urlHasBox = st.west !== undefined && st.south !== undefined && st.east !== undefined && st.north !== undefined;
+
+    // fill the form from an engine tile and run the search ONCE (so the tab opens on results, not
+    // an empty form). Levels/window come from the URL first, then the shared map context.
+    const ctx = loadQueryContext();
+    const fillFromTile = (t: { id: string; bbox_lonlat: [number, number, number, number] }) => {
+      const [w, s, e, n] = t.bbox_lonlat.map((v) => Number(v.toFixed(4))) as [number, number, number, number];
+      setWest(String(w)); setSouth(String(s)); setEast(String(e)); setNorth(String(n));
+      setTileForBox(t.id);
+      const lv = st.level ? st.level.split(",") : ctx.level ? ctx.level.split(",") : ["GUNW"];
+      setLevels(lv);
+      const f = st.from ?? ctx.from ?? "";
+      const tt = st.to ?? ctx.to ?? "";
+      setFrom(toDateOnly(f) ?? f);
+      setTo(toDateOnly(tt) ?? tt);
+      setTimeout(() => runSearchRef.current?.(w, s, e, n, lv, toDateOnly(f) ?? f, toDateOnly(tt) ?? tt), 0);
+    };
+
+    if (tile && !urlHasBox) {
+      api.tileAtId(tile).then((r) => fillFromTile(r.tile)).catch(() => undefined);
     } else if (tile) {
       setTileForBox(tile);
+    } else if (!urlHasBox) {
+      // No box in the URL (e.g. the Background sub-nav link, or a hand-typed address): restore what
+      // the user was looking at on the map instead of making them re-enter it.
+      if (ctx.bbox) {
+        const [w, s, e, n] = ctx.bbox.map((v) => Number(v.toFixed(4))) as [number, number, number, number];
+        setWest(String(w)); setSouth(String(s)); setEast(String(e)); setNorth(String(n));
+        if (ctx.tile) setTileForBox(ctx.tile);
+        const lv = st.level ? st.level.split(",") : ctx.level ? ctx.level.split(",") : ["GUNW"];
+        setLevels(lv);
+        setFrom(st.from ?? ctx.from ?? "");
+        setTo(st.to ?? ctx.to ?? "");
+        setTimeout(() => runSearchRef.current?.(w, s, e, n, lv, st.from ?? ctx.from ?? "", st.to ?? ctx.to ?? ""), 0);
+      } else if (ctx.lat !== undefined && ctx.lon !== undefined) {
+        // the user switched tab before the map had resolved its tile: the ENGINE resolves it here
+        api.tileAt(ctx.lon, ctx.lat).then((r) => fillFromTile(r.tile)).catch(() => undefined);
+      } else {
+        if (st.from ?? ctx.from) setFrom((st.from ?? ctx.from) as string);
+        if (st.to ?? ctx.to) setTo((st.to ?? ctx.to) as string);
+      }
     }
     api.health().then(() => setHealth(true)).catch(() => setHealth(false));
-    // a pasted link restores the same view: a complete box in the URL runs the search ONCE
-    if (st.west !== undefined && st.south !== undefined && st.east !== undefined && st.north !== undefined) {
+    // a pasted link restores the same view: a complete box in the URL runs the search ONCE on boot
+    if (urlHasBox) {
       const bootLevels = st.level ? st.level.split(",") : ["GUNW"];
       // defer until after the first paint so the inputs render with the restored values
       setTimeout(() => runSearchRef.current?.(st.west!, st.south!, st.east!, st.north!, bootLevels, st.from ?? "", st.to ?? ""), 0);
@@ -146,6 +177,10 @@ export default function ExplorerApp() {
     }, ctrl.signal)
       .then((r) => {
         setData(r);
+        saveQueryContext({
+          bbox: [w, s, e, n], level: lvls.join(",") || undefined,
+          from: toDateOnly(fromIso), to: toDateOnly(toIso),
+        });
         pushUrl({ west: w, south: s, east: e, north: n, level: lvls.join(",") || undefined, from: fromIso || undefined, to: toIso || undefined });
       })
       .catch((err) => {

@@ -15,6 +15,7 @@ import { colorize, validateLayerPayload, decodeLayer } from "@/lib/raster";
 import { parseCoordinates } from "@/lib/geo-input";
 import { mostNotableTier, TIER_PIN_COLORS } from "@/lib/status";
 import { parseUrlState, writeUrlState, type PanelMode, type UrlState } from "@/lib/urlstate";
+import { clearQueryContext, saveQueryContext } from "@/lib/queryContext";
 import type {
   CachedSummary, CachedVerdict, FeaturedArea, Health, LayerPayload, PipelineInfo, RunState, TileInfo,
 } from "@/lib/types";
@@ -202,6 +203,9 @@ export default function GlobeApp() {
       setTileError(null);
       return;
     }
+    // remember the pin NOW (before the tile resolves) so Background can pick it up even if the
+    // user switches tab mid-load; the previous pin's tile/box is dropped so it can't leak across
+    saveQueryContext({ lat: pin[0], lon: pin[1], tile: undefined, bbox: undefined });
     const ctrl = new AbortController();
     setTileLoading(true);
     const id = setTimeout(() => {
@@ -215,6 +219,11 @@ export default function GlobeApp() {
           setTile(body.tile);
           setTileError(null);
           setSelectedTile(body.tile.id);
+          // the engine's own box for this tile — exactly the area the Data tab searches
+          saveQueryContext({
+            lat: pin[0], lon: pin[1], tile: body.tile.id, bbox: body.tile.bbox_lonlat,
+            level: "GUNW,GCOV",
+          });
           pushUrl({ tile: body.tile.id, lat: pin[0], lon: pin[1] });
         })
         .catch((e) => {
@@ -314,6 +323,7 @@ export default function GlobeApp() {
         setSelectedTile(null);
         setSelectedDetection(null);
         setPairFootprint(null);
+        clearQueryContext();
         pushUrl({ panel: undefined, tile: undefined, scan: undefined, bundle: undefined, lat: undefined, lon: undefined });
       }
     };
@@ -586,6 +596,7 @@ export default function GlobeApp() {
             setPin(null);
             setSelectedDetection(null);
             setPairFootprint(null);
+            clearQueryContext();
             pushUrl({ panel: undefined, tile: undefined, scan: undefined, bundle: undefined, lat: undefined, lon: undefined });
           }}
           className="rounded p-1 text-[#8a837b] hover:bg-[#f0ece4]"
@@ -741,6 +752,7 @@ export default function GlobeApp() {
       {panel === "granules" && (
         <DataPanel
           tileId={tile?.id ?? selectedTile}
+          tileBbox={tile?.bbox_lonlat ?? null}
           lon={pin ? pin[1] : null}
           lat={pin ? pin[0] : null}
           engineOnline={engineOnline}

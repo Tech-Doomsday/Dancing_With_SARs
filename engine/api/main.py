@@ -87,6 +87,11 @@ def create_app() -> FastAPI:
             cache_enabled, cache_reason = cache.enabled, cache.disabled_reason
         except Exception as ex:  # a broken singleton must not take health down
             cache_enabled, cache_reason = False, f"{type(ex).__name__}: {ex}"
+        try:
+            from engine.common.sqlite_util import resolve_db_dir
+            db_dir = str(resolve_db_dir(data_dir))
+        except Exception as ex:
+            db_dir = f"unavailable: {type(ex).__name__}: {ex}"
         creds = "present" if earthdata_present() else "absent"
         granule_search = {
             "status": "enabled" if creds == "present" else "disabled",
@@ -97,6 +102,7 @@ def create_app() -> FastAPI:
             "ok": True,
             "data_dir": str(data_dir),
             "data_dir_exists": data_dir.exists(),
+            "db_dir": db_dir,
             "bundles_dir": str(bundles_dir),
             "bundles_dir_exists": bundles_dir.exists(),
             "scans_enabled": scans_enabled(),

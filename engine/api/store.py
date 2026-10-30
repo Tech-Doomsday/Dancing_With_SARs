@@ -12,6 +12,8 @@ import threading
 import time
 from pathlib import Path
 
+from engine.common.sqlite_util import connect
+
 _SCHEMA = """
 CREATE TABLE IF NOT EXISTS runs(
   id TEXT PRIMARY KEY, created_at TEXT, bundle_id TEXT, tile TEXT,
@@ -39,9 +41,11 @@ class RunsStore:
                 conn.execute(_KIND_MIGRATION)
 
     def _conn(self) -> sqlite3.Connection:
-        conn = sqlite3.connect(self._path)
+        # Rollback journal by default (WAL's -shm file fails on some Windows filesystems and a failed
+        # attempt can leave the file stuck in WAL) - see engine/common/sqlite_util.py. The verdict
+        # store (4.5) shares this db file.
+        conn = connect(self._path)
         conn.row_factory = sqlite3.Row
-        conn.execute("PRAGMA journal_mode=WAL")   # the verdict store (4.5) shares this db file
         return conn
 
     def create_run(self, run_id: str, bundle_id: str, tile: str, pipelines: list, params: dict,
