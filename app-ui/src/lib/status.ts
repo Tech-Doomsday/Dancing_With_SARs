@@ -89,15 +89,15 @@ export const FALLBACK_CHIP_CLASSES = LOOK.mutedInk;
  *  legacy report pages). The UI does not derive a tier from a status, so these stay status-keyed. */
 export const STATUS_CHIP: Record<string, { cls: string; label: string }> = {
   SUPPORTED: { cls: LOOK.solid, label: "supported by evidence" },
-  POSSIBLE: { cls: LOOK.teal, label: "possible" },
+  POSSIBLE: { cls: LOOK.teal, label: "candidate / possible" },
   UNCATALOGUED_CANDIDATE: { cls: LOOK.teal, label: "uncatalogued candidate" },
   NOT_SUPPORTED: { cls: LOOK.mutedInk, label: "not supported by evidence" },
   INSUFFICIENT_EVIDENCE: { cls: LOOK.gold, label: "not enough evidence" },
   NO_SIGNAL: { cls: LOOK.muted, label: "no signal — quiet tile" },
-  NOT_APPLICABLE: { cls: LOOK.muted, label: "did not run here" },
+  NOT_APPLICABLE: { cls: LOOK.muted, label: "did not apply here" },
   NOT_RUN: { cls: LOOK.muted, label: "not launched" },
   NOT_MODELLED: { cls: LOOK.dashed, label: "not modelled yet" },
-  PENDING: { cls: LOOK.gold, label: "pending (heavy lane)" },
+  PENDING: { cls: LOOK.gold, label: "not run (yet)" },
   ERROR: { cls: LOOK.error, label: "run failed" },
   queued: { cls: LOOK.gold, label: "queued" },
   running: { cls: LOOK.gold, label: "running" },

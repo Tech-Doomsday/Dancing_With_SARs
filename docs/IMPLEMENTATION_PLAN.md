@@ -606,6 +606,16 @@ app-ui/
 
 No event picker driving runs (events are derived from the pair window by the pipeline — the picker is display-only context), no calibration UI, no time slider over verdict results (one bundle = one epoch set). Each of these is an M5+ item behind an API extension, not a UI hack.
 
+GLOBE TASK E8: `GET /api/granules` also answers a BBOX (west/south/east/north, level, from, to,
+max, fresh) for the Granule Explorer — granules[] enriched from the filename where the token
+layout is VERIFIED against real CMR metadata (`engine/common/granule_id.py`: cycle/track/direction/
+frame/secondary-cycle, bandwidth MHz×100, SH→HH, 4 pair timestamps, CRID, version) plus
+provider-side facts (ASF collection/orbit type/polarization/bandwidth, passed through verbatim,
+absent = null), and stacks[] grouped the P01 way with ENGINE-COMPUTED epochs and day gaps.
+Antimeridian boxes are refused (400); the bbox mode is rate limited (429 + Retry-After); the
+legacy per-tile shape is unchanged. Filename tokens that could NOT be verified (the single-letter
+orbit token; multi-frequency bandwidth tokens) stay RAW and are flagged — never guessed.
+
 SUPERSEDED (globe task): "No map-click AOI runs" is no longer true — the globe UI scans the one MGRS tile that contains a clicked/typed point through POST /api/scans (a real engine run with engine defaults, gated by NISAR_ENABLE_SCANS). A separate Data tab (GET /api/granules) browses granule availability on a real time-scaled timeline; that is metadata-only discovery, not the verdict time slider this section still excludes.
 
 ---

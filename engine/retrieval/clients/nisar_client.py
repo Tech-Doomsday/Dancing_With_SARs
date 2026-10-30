@@ -140,9 +140,15 @@ class NisarClient:
                 p = r.properties
                 name = p.get("fileName") or str(p.get("url", "")).rsplit("/", 1)[-1]
                 gid = re.sub(r"\.h5$", "", str(p.get("fileID") or name))
+                # E8: provider-side facts pass through verbatim (granule Explorer enrichment);
+                # absent keys mean "the provider did not say" — the route never guesses them.
+                extra = {k: p.get(k) for k in ("collectionName", "crid", "orbitType",
+                                               "mainBandPolarization", "rangeBandwidth",
+                                               "processingDate", "productionConfiguration")
+                         if p.get(k) is not None}
                 refs.append(GranuleRef(gid, p.get("url"), p.get("processingLevel"), p.get("startTime"),
                                        p.get("stopTime"), p.get("pathNumber"), p.get("frameNumber"),
-                                       p.get("flightDirection"), _size(p), _ring(r)))
+                                       p.get("flightDirection"), _size(p), _ring(r), extra))
             budget = int(max_results or self.cfg.search["max_results"])
             truncated = len(refs) >= budget
             if truncated:

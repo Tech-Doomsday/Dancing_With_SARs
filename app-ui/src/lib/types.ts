@@ -241,3 +241,69 @@ export interface GranuleSearchResponse {
   dropped_older: number;
   flags: { code: string; severity: string; step: string; message: string }[];
 }
+
+// ---------------------------------------------------------------------------------------------
+// E8 — the Granule Explorer's bbox-based /api/granules types. These sit ALONGSIDE the legacy
+// per-tile GranuleSearchResponse above (the old Data tab keeps its own shape; do not merge).
+// Field names are the engine's (engine/api/granules_bbox.py).
+// ---------------------------------------------------------------------------------------------
+
+/** One granule: filename-decoded fields (only where verified — see engine/common/granule_id.py),
+ *  provider-side facts (ASF/CMR via GranuleRef.extra), and per-granule honesty flags. An absent
+ *  fact is null — never guessed. */
+export interface ExplorerGranule {
+  id: string;
+  product: string | null;
+  stack: string;
+  direction: "A" | "D" | null;
+  track: number | null;
+  frame: number | null;
+  start: string | null;
+  stop: string | null;
+  ref_time: string | null;
+  sec_time: string | null;
+  baseline_days: number | null;
+  cycle_ref: number | null;
+  cycle_sec: number | null;
+  polarization: string | null;
+  range_bandwidth_mhz: number | null;
+  collection: string | null;
+  crid: string | null;
+  version: string | null;
+  orbit_accuracy: { asf: string | null; filename: string | null };
+  size_bytes: number | null;
+  footprint: [number, number][] | null;
+  flags: string[];
+}
+
+/** One stack = one (direction, relative orbit), the engine's P01 grouping. Day gaps and epochs
+ *  are engine-computed (DEC13); nominal_repeat_days is null unless the engine supplies it. */
+export interface ExplorerStack {
+  key: string;
+  direction: "A" | "D" | null;
+  track: number | null;
+  n_granules: number;
+  n_epochs: number;
+  epochs: string[];
+  gaps_days: number[];
+  min_gap_days: number | null;
+  median_gap_days: number | null;
+  max_gap_days: number | null;
+  nominal_repeat_days: number | null;
+  first: string | null;
+  last: string | null;
+}
+
+export interface GranuleExplorerResponse {
+  ok: true;
+  bbox: [number, number, number, number];
+  window: { t0: string; t1: string };
+  n_total: number;
+  truncated: boolean;
+  degraded: boolean;
+  search_budget: number;
+  generated_at: string;
+  granules: ExplorerGranule[];
+  stacks: ExplorerStack[];
+  epoch_merge_minutes?: number;
+}

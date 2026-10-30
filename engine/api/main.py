@@ -15,7 +15,10 @@ Serving slice for the unified UI (docs/IMPLEMENTATION_PLAN.md 10 + the port desi
     GET  /api/jobs/{id}                heavy-lane job state (progress + cache)
     GET  /api/tile-at                  lat/lon -> the MGRS tile that contains it (§5.2)
     POST /api/scans                    scan one tile by location (§5.3; NISAR_ENABLE_SCANS=1)
-    GET  /api/granules                 granule availability for one tile (§5.5; metadata only)
+    GET  /api/granules                 granule availability: per-tile (lon/lat, §5.5) or bbox
+                                       (west/south/east/north, globe task E8 — the Granule
+                                       Explorer; antimeridian box -> 400, 429 + Retry-After);
+                                       metadata only
 """
 from __future__ import annotations
 

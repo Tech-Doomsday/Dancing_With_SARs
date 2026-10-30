@@ -17,6 +17,10 @@ class GranuleRef:
     direction: str | None = None
     size_bytes: int | None = None
     footprint: list | None = None   # [[lon, lat], ...] outer ring from ASF, if known
+    # Provider-side metadata for the granule Explorer (E8): facts the search provider (ASF/CMR)
+    # states about the granule, passed through verbatim. Optional and never guessed; the
+    # Explorer treats an absent key as "the provider did not say".
+    extra: dict | None = None
 
     def to_dict(self) -> dict:
         return self.__dict__.copy()

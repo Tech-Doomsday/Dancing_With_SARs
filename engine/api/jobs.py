@@ -168,6 +168,33 @@ class JobRunner:
                                 retriever_factory)
         return fut.result(timeout=600)
 
+    def granule_search_bbox(self, *, bbox: tuple, levels: list[str], t0: str, t1: str,
+                            product_names: dict[str, str], max_results: int, fresh: bool,
+                            retriever_factory=None) -> dict:
+        """E8 (Granule Explorer): bbox granule availability — the same single worker pool, the
+        same metadata-only rules as granule_search. The route validates the box; this method answers
+        503 without credentials, then runs the real search and enrichment."""
+        if not earthdata_present():
+            raise ScanError(503, NO_EARTHDATA_MESSAGE)
+        fut = self._pool.submit(self._granule_search_bbox_sync, bbox, levels, t0, t1,
+                                product_names, max_results, fresh, retriever_factory)
+        return fut.result(timeout=600)
+
+    def _granule_search_bbox_sync(self, bbox, levels, t0, t1, product_names, max_results, fresh,
+                                  retriever_factory) -> dict:
+        from .granules_bbox import search_bbox_sync
+        factory = retriever_factory or _default_retriever_factory()
+        retriever = factory()
+        try:
+            return search_bbox_sync(bbox=bbox, levels=levels, t0=t0, t1=t1,
+                                    product_names=product_names, max_results=max_results,
+                                    fresh=fresh, retriever=retriever)
+        finally:
+            try:
+                retriever.close()
+            except Exception:
+                pass
+
     # ------------------------------------------------------------------ reads
     @staticmethod
     def _with_tier(result: dict) -> dict:

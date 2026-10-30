@@ -23,3 +23,8 @@ app-ui/test-results/
 app-ui/verify-screens/
 app-ui/tsconfig.tsbuildinfo
 app-ui/playwright-report/
+
+# local env (secrets)
+.env.local
+.env.*.local
+app-ui/.env.local

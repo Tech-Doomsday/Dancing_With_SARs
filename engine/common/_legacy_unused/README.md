@@ -38,3 +38,6 @@ fail the build.
 
 If this diagnosis is wrong, or you want the old pipeline brought back to life instead, just say so
 — happy to look further into it instead of leaving this quarantined.
+
+
+> Update: `_geo.py` and `_types.py` were kept live in `engine/common/` because `tools/debug_hub` imports `engine.common._geo.transform_xy`. Only the other files here are quarantined.

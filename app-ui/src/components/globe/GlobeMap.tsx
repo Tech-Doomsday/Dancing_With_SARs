@@ -11,6 +11,7 @@
 import { useEffect, useRef, useState } from "react";
 import maplibregl, { type Map as MlMap, type StyleSpecification } from "maplibre-gl";
 import "maplibre-gl/dist/maplibre-gl.css";
+import { seamSplits } from "@/lib/raster";
 import "./globe-overrides.css";
 
 const ESRI_ATTRIBUTION = "Source: Esri, Vantor, Earthstar Geographics, and the GIS User Community";
@@ -69,6 +70,36 @@ function ringToPolygon(ring: [number, number][]): GeoJSON.Feature<GeoJSON.Polygo
     properties: {},
     geometry: { type: "Polygon", coordinates: [closed as GeoJSON.Position[]] },
   };
+}
+
+/** crop a horizontal fraction of a colorized texture (data URL) — cached per (url, crop) so
+ *  opacity changes never re-decode; the common non-seam case ([0, 1]) returns the input. */
+const cropCache = new Map<string, string>();
+async function cropDataUrl(dataUrl: string, crop: [number, number]): Promise<string> {
+  if (crop[0] === 0 && crop[1] === 1) return dataUrl;
+  const key = `${crop[0]}|${crop[1]}|${dataUrl.length}|${dataUrl.slice(-24)}`;
+  const hit = cropCache.get(key);
+  if (hit) return hit;
+  const img = await new Promise<HTMLImageElement>((resolve, reject) => {
+    const el = new Image();
+    el.onload = () => resolve(el);
+    el.onerror = () => reject(new Error("overlay texture could not be decoded"));
+    el.src = dataUrl;
+  });
+  const x0 = Math.max(0, Math.min(1, crop[0]));
+  const x1 = Math.max(0, Math.min(1, crop[1]));
+  const sx = Math.round(img.naturalWidth * x0);
+  const sw = Math.max(1, Math.round(img.naturalWidth * (x1 - x0)));
+  const canvas = document.createElement("canvas");
+  canvas.width = sw;
+  canvas.height = img.naturalHeight;
+  const ctx = canvas.getContext("2d");
+  if (!ctx) throw new Error("overlay texture could not be cropped");
+  ctx.drawImage(img, sx, 0, sw, img.naturalHeight, 0, 0, sw, img.naturalHeight);
+  const out = canvas.toDataURL();
+  if (cropCache.size >= 48) cropCache.delete(cropCache.keys().next().value as string);
+  cropCache.set(key, out);
+  return out;
 }
 
 export default function GlobeMap(props: GlobeMapProps) {
@@ -283,30 +314,61 @@ export default function GlobeMap(props: GlobeMapProps) {
   }, [props.detectionOutline, ready]);
 
   // ---- overlays: add/update-in-place/remove (most recently enabled on top) ----
+  // S1/U6: bounds crossing the antimeridian are SPLIT at ±180 (maplibre 5.24 cannot draw a
+  // seam-crossing image source: the wrapped form stretches the long way round, the unwrapped
+  // form breaks tile enumeration — verified in the spike). Each part gets its own crop of the
+  // colorized texture. Pure display logic; the rectangle itself always comes from the engine.
   useEffect(() => {
     const map = mapRef.current;
     if (!map || !ready) return;
+    let cancelled = false;
     const wanted = new Map(props.overlays.map((o) => [o.id, o]));
-    for (const [id, o] of wanted) {
+
+    const applyPart = (id: string, url: string, bounds: [number, number, number, number], opacity: number) => {
       if (!map.getSource(id)) {
-        map.addSource(id, { type: "image", url: o.dataUrl, coordinates: [
-          [o.bounds[0], o.bounds[3]], [o.bounds[2], o.bounds[3]],
-          [o.bounds[2], o.bounds[1]], [o.bounds[0], o.bounds[1]],
+        map.addSource(id, { type: "image", url, coordinates: [
+          [bounds[0], bounds[3]], [bounds[2], bounds[3]],
+          [bounds[2], bounds[1]], [bounds[0], bounds[1]],
         ] });
       }
       if (!map.getLayer(id)) {
         // NOTE: default linear resampling — nearest renders black on maplibre 5.23/5.24 (S1)
-        map.addLayer({ id, type: "raster", source: id, paint: { "raster-opacity": o.opacity } });
+        map.addLayer({ id, type: "raster", source: id, paint: { "raster-opacity": opacity } });
       } else {
-        map.setPaintProperty(id, "raster-opacity", o.opacity);
+        map.setPaintProperty(id, "raster-opacity", opacity);
       }
-    }
-    for (const id of Object.keys(map.getStyle().sources)) {
-      if (id.startsWith("overlay:") && !wanted.has(id)) {
-        if (map.getLayer(id)) map.removeLayer(id);
-        map.removeSource(id);
+    };
+
+    void (async () => {
+      for (const [id, o] of wanted) {
+        const parts = seamSplits(o.bounds);
+        if (!parts.length) continue;
+        for (let i = 0; i < parts.length; i++) {
+          const p = parts[i];
+          const url = await cropDataUrl(o.dataUrl, p.crop);
+          if (cancelled) return;
+          applyPart(`${id}:${i}`, url, p.bounds, o.opacity);
+        }
+        // drop a stale second part when the overlay stopped crossing the seam
+        const stale = `${id}:${parts.length}`;
+        if (map.getLayer(stale)) map.removeLayer(stale);
+        if (map.getSource(stale)) map.removeSource(stale);
       }
-    }
+      if (cancelled) return;
+      for (const id of Object.keys(map.getStyle().sources)) {
+        if (!id.startsWith("overlay:")) continue;
+        // source ids are `overlay:<overlayId>:<part>`; the overlayId may itself contain ':'
+        const rest = id.slice("overlay:".length);
+        const overlayId = rest.slice(0, rest.lastIndexOf(":"));
+        if (!wanted.has(overlayId)) {
+          if (map.getLayer(id)) map.removeLayer(id);
+          map.removeSource(id);
+        }
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
   }, [props.overlays, ready]);
 
   return <div ref={containerRef} className="h-full w-full" aria-label="Earth globe — SAR results and granule coverage" role="application" />;

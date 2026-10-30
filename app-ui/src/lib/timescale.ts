@@ -76,7 +76,9 @@ function dayStart(ms: number): number {
   return Math.floor(ms / DAY_MS) * DAY_MS;
 }
 
-/** adaptive ticks for the visible window (UTC labels; day/week/month as the span demands) */
+/** adaptive ticks for the visible window (UTC labels). Levels: hours/6h (tiny spans, the
+ *  Explorer's zoom), days, weeks, months — as the span demands. The Data tab's behaviour for
+ *  its spans is unchanged (the hour branch only covers spans <= 3 days, below its 1-day zoom floor). */
 export function ticks(scale: TimeScale, targetCount = 8): Tick[] {
   const span = scale.t1 - scale.t0;
   const out: Tick[] = [];
@@ -89,10 +91,22 @@ export function ticks(scale: TimeScale, targetCount = 8): Tick[] {
     d.setTime(ms);
     return `${MONTHS[d.getUTCMonth()]} ${d.getUTCFullYear()}`;
   };
-  const fmtDayFull = (ms: number) => {
+  const fmtHour = (ms: number) => {
     d.setTime(ms);
-    return `${fmtDay(ms)} ${d.getUTCFullYear()}`;
+    return `${String(d.getUTCHours()).padStart(2, "0")}:${String(d.getUTCMinutes()).padStart(2, "0")}`;
   };
+  if (span <= 3 * DAY_MS) {
+    // hour ticks: 1 h when tight, 6 h when loose; the day rollover is the major label
+    const stepHours = span <= 10 * 3_600_000 ? 1 : 6;
+    let t = Math.ceil(scale.t0 / (stepHours * 3_600_000)) * stepHours * 3_600_000;
+    while (t <= scale.t1) {
+      const dt = new Date(t);
+      const major = dt.getUTCHours() === 0 && dt.getUTCMinutes() === 0;
+      out.push({ ms: t, label: major ? fmtDay(t) : fmtHour(t), major });
+      t += stepHours * 3_600_000;
+    }
+    return out;
+  }
   if (span <= 45 * DAY_MS) {
     const stepDays = Math.max(1, Math.round(span / targetCount / DAY_MS));
     let t = dayStart(scale.t0);
@@ -132,7 +146,6 @@ export function ticks(scale: TimeScale, targetCount = 8): Tick[] {
     y += Math.floor(m / 12);
     m = ((m % 12) + 12) % 12;
   }
-  void fmtDayFull;
   return out;
 }
 

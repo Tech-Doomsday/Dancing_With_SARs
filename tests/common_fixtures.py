@@ -34,8 +34,12 @@ def stamp(d: datetime, extra_s: int = 0) -> str:
 
 
 def gunw_id(ref: datetime, sec: datetime, track=5, direction="A", frame=219, version=5010, cycle=1) -> str:
-    return (f"NISAR_L2_PR_GUNW_{cycle:03d}_{track:03d}_{direction}_{frame:03d}_4005_SHNA_{stamp(ref)}_{stamp(ref, 30)}_"
-            f"{stamp(sec)}_{stamp(sec, 30)}_X{version:05d}_N_F_J_001")
+    # layout per the CMR-verified NISAR naming convention (see engine/common/granule_id.py):
+    # [cycle, track, direction, frame, SECONDARY cycle, bandwidth, pol, 4 timestamps, CRID, ...]
+    # the secondary cycle rides the actual pair spacing (12-day repeat, as the fixtures build)
+    sec_cycle = cycle + max(0, round((sec - ref).days / 12))
+    return (f"NISAR_L2_PR_GUNW_{cycle:03d}_{track:03d}_{direction}_{frame:03d}_{sec_cycle:03d}_4005_SHNA_"
+            f"{stamp(ref)}_{stamp(ref, 30)}_{stamp(sec)}_{stamp(sec, 30)}_X{version:05d}_N_F_J_001")
 
 
 def gcov_id(t: datetime, track=5, direction="A", frame=219, version=5010, cycle=1) -> str:

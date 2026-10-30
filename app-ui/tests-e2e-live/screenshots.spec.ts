@@ -101,3 +101,52 @@ test("initial globe, pin + footprint, scan progress, results, Data tab", async (
     await page.close();
   }
 });
+
+test("granule explorer: full range, zoomed gap brackets, selected pair with map, truncated, List, mobile drawer", async ({ browser }) => {
+  test.setTimeout(300_000);
+  mkdirSync(SHOTS, { recursive: true });
+
+  // full range against the LIVE (synthetic) engine — the seed's FakeRetriever answers any box
+  const page = await browser.newPage();
+  await page.goto("/granules?west=-118.45&south=33.7&east=-118.05&north=34.3&level=GUNW,GCOV");
+  await expect(page.getByText(/granules/).first()).toBeVisible({ timeout: 30_000 });
+  await expect(page.locator('canvas[role="application"]')).toBeVisible();
+  await page.waitForTimeout(2_000);
+  for (const [w, h] of SIZES) await snap(page, "explorer-full-range", w, h);
+
+  // zoomed to days with gap brackets: zoom in a few steps, screenshot
+  await page.locator('canvas[role="application"]').click(); // focus for keyboard
+  for (let i = 0; i < 5; i++) await page.keyboard.press("+");
+  await page.waitForTimeout(800);
+  await snap(page, "explorer-zoomed-days", 1440, 900);
+
+  // selection fills the detail panel (with the footprint mini-map) — deterministic via List view
+  await page.getByLabel("List view").check();
+  const row = page.locator("tr", { hasText: "GUNW" }).filter({ hasNotText: "notimes" }).first();
+  await row.click();
+  await expect(page.getByText(/Show on globe/)).toBeVisible();
+  await page.waitForTimeout(2_000); // mini-map tiles
+  await snap(page, "explorer-selected-pair", 1440, 900);
+  await snap(page, "explorer-selected-pair", 390, 844);
+
+  // truncated banner: the real engine never truncates this set, so the override is a LABELLED FIXTURE
+  await page.route("**/api/granules**", (r) => r.fulfill({
+    json: { ok: true, bbox: [-118.45, 33.7, -118.05, 34.3], window: { t0: "2026-06-01T00:00:00Z", t1: "2026-10-30T00:00:00Z" },
+            n_total: 250, truncated: true, degraded: false, search_budget: 250,
+            generated_at: new Date().toISOString(), granules: [], stacks: [] },
+  }));
+  await page.goto("/granules?west=-118.45&south=33.7&east=-118.05&north=34.3");
+  await expect(page.getByText("result budget hit — this list is incomplete")).toBeVisible({ timeout: 20_000 });
+  await snap(page, "explorer-truncated", 1440, 900);
+
+  // mobile filters drawer
+  const mobile = await browser.newPage();
+  await mobile.setViewportSize({ width: 390, height: 844 });
+  await mobile.goto("/granules?west=-118.45&south=33.7&east=-118.05&north=34.3&level=GUNW,GCOV");
+  await expect(mobile.getByText(/granules/).first()).toBeVisible({ timeout: 30_000 });
+  await mobile.getByRole("button", { name: /filters/ }).click();
+  await mobile.waitForTimeout(400);
+  await mobile.screenshot({ path: `${SHOTS}/explorer-mobile-drawer-390x844.png` });
+  await page.close();
+  await mobile.close();
+});

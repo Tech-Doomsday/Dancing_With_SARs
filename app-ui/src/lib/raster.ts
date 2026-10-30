@@ -145,13 +145,10 @@ export function legendStops(layer: LayerPayload): { kind: "continuous"; stops: L
 } {
   if (layer.dtype === "<u1") {
     const cats = layer.categories ?? [];
-    const values = new Set<number>();
-    for (let i = 0; i < 256; i++) void i; // (placeholder no-op; values come from categories)
     const stops: LegendStop[] = (cats.length ? cats : [fallbackCategory(1), fallbackCategory(2)]).map((c) => ({
       color: toneColor(c.tone),
       label: c.label,
     }));
-    void values;
     return { kind: "categorical", stops };
   }
   const vmin = layer.vmin ?? 0;
@@ -179,3 +176,49 @@ function fmtLegendValue(v: number): string {
 }
 
 export { TOKENS };
+
+// ---------------------------------------------------------------------------------------------
+// S1/U6 antimeridian fix: maplibre-gl 5.24 image sources CANNOT draw a bounds rectangle that
+// crosses the ±180 seam in one piece. Verified empirically (app-ui/spikes, deleted after):
+//   * wrapped form (W=179.985, E=-179.985): the texture stretches the LONG way round
+//     (~359.97°) — the overlay covers half the world instead of the 10 km box;
+//   * unwrapped form (E=180.015): the image is not rendered at the seam and the basemap tile
+//     enumeration breaks ("x=2048 … outside of bounds").
+// The engine's tile bboxes/polygons may legitimately straddle the seam, so the overlay is split
+// at ±180 into at most two image sources, each taking its own horizontal crop of the texture.
+// Pure display logic on an already-engine-provided rectangle — no tiling math.
+// ---------------------------------------------------------------------------------------------
+
+export interface SeamSplit {
+  /** the part's own rectangle, both sides normalised into [-180, 180] */
+  bounds: [number, number, number, number];
+  /** horizontal crop of the source texture in fractions [x0, x1] (of the full width) */
+  crop: [number, number];
+}
+
+function wrap180(lng: number): number {
+  let v = lng;
+  while (v > 180) v -= 360;
+  while (v < -180) v += 360;
+  return v;
+}
+
+/** split [W, S, E, N] at the antimeridian when it crosses it; otherwise one part covering all.
+ *  Handles all three engine-emittable forms: normal (W < E, both in [-180, 180]), the wrapped
+ *  crossing (E < W, e.g. W=179.985 / E=-179.985) and the unwrapped crossing (E > 180 or W < -180). */
+export function seamSplits(bounds: [number, number, number, number]): SeamSplit[] {
+  const [w0, s, e0, n] = bounds;
+  if (!bounds.every((v) => Number.isFinite(v))) return [];
+  let w = w0;
+  let e = e0;
+  if (e < w) e += 360;                     // wrapped crossing of +180 -> unwrapped E (e === w stays zero-width -> refused below)
+  if (w < -180) { w += 360; e += 360; }    // crossing of -180 with W below the range
+  const span = e - w;
+  if (span <= 0 || span > 360.5) return []; // degenerate; the caller reports it
+  if (e <= 180) return [{ bounds: [w, s, e, n], crop: [0, 1] }];
+  const fA = (180 - w) / span;             // texture fraction west of the seam
+  return [
+    { bounds: [w, s, 180, n], crop: [0, fA] },
+    { bounds: [-180, s, wrap180(e), n], crop: [fA, 1] },
+  ];
+}

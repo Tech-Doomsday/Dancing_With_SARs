@@ -72,3 +72,77 @@ export function writeUrlState(params: URLSearchParams, state: UrlState): void {
   setOrDrop("scan", state.scan);
   setOrDrop("panel", state.panel === "explore" ? undefined : state.panel);
 }
+
+// ---------------------------------------------------------------------------------------------
+// §7.8 Granule Explorer URL state (/granules?west=&south=&east=&north=&level=&from=&to=&track=&dir=&sel=)
+// Validated and ignorable: invalid values fall back to defaults without crashing.
+// ---------------------------------------------------------------------------------------------
+
+export interface ExplorerUrlState {
+  west?: number;
+  south?: number;
+  east?: number;
+  north?: number;
+  level?: string;      // comma list of GUNW|GCOV|GOFF
+  from?: string;       // ISO date (UTC)
+  to?: string;
+  track?: number;
+  dir?: "A" | "D";
+  sel?: string;        // selected granule id
+}
+
+const LEVEL_RE = /^(GUNW|GCOV|GOFF)(,(GUNW|GCOV|GOFF))*$/;
+
+export function parseExplorerState(params: URLSearchParams | Record<string, string | string[] | undefined>): ExplorerUrlState {
+  const get = (k: string): string | undefined => {
+    if (params instanceof URLSearchParams) return params.get(k) ?? undefined;
+    const v = params[k];
+    return Array.isArray(v) ? v[0] : v;
+  };
+  const num = (k: string, lo: number, hi: number): number | undefined => {
+    const raw = get(k);
+    if (raw === undefined || raw === "") return undefined;
+    const v = Number(raw);
+    if (!Number.isFinite(v) || v < lo || v > hi) return undefined;
+    return v;
+  };
+  const levelRaw = get("level");
+  const level = levelRaw && LEVEL_RE.test(levelRaw.toUpperCase()) ? levelRaw.toUpperCase() : undefined;
+  const isoDate = (k: string): string | undefined => {
+    const raw = get(k);
+    if (!raw || !/^\d{4}-\d{2}-\d{2}([T ]\d{2}:\d{2}(:\d{2})?)?Z?$/.test(raw)) return undefined;
+    const norm = raw.replace(" ", "T");              // "2026-10-01 12:00" is accepted by the pattern above
+    const t = Date.parse(norm.includes("T") ? (norm.endsWith("Z") ? norm : `${norm}Z`) : `${norm}T00:00:00Z`);
+    return Number.isFinite(t) ? norm : undefined;
+  };
+  const dirRaw = get("dir");
+  return {
+    west: num("west", -180, 180),
+    south: num("south", -90, 90),
+    east: num("east", -180, 180),
+    north: num("north", -90, 90),
+    level,
+    from: isoDate("from"),
+    to: isoDate("to"),
+    track: num("track", 1, 400),
+    dir: dirRaw === "A" || dirRaw === "D" ? dirRaw : undefined,
+    sel: get("sel") || undefined,
+  };
+}
+
+export function writeExplorerState(params: URLSearchParams, state: ExplorerUrlState): void {
+  const setOrDrop = (k: string, v: string | number | undefined) => {
+    if (v === undefined || v === null || v === "") params.delete(k);
+    else params.set(k, String(v));
+  };
+  setOrDrop("west", state.west);
+  setOrDrop("south", state.south);
+  setOrDrop("east", state.east);
+  setOrDrop("north", state.north);
+  setOrDrop("level", state.level);
+  setOrDrop("from", state.from);
+  setOrDrop("to", state.to);
+  setOrDrop("track", state.track);
+  setOrDrop("dir", state.dir);
+  setOrDrop("sel", state.sel);
+}

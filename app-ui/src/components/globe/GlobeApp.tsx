@@ -20,6 +20,7 @@ import type {
 } from "@/lib/types";
 import { timeAgo } from "@/lib/format";
 import SearchBar from "./SearchBar";
+import AppNav from "./AppNav";
 import Legend from "./Legend";
 import AreasPanel from "./AreasPanel";
 import ScanPanel from "./ScanPanel";
@@ -149,6 +150,13 @@ export default function GlobeApp() {
   const refreshLists = useCallback(() => {
     api.health().then(setHealth).catch(() => setHealth(null)).finally(() => setHealthChecked(true));
     api.pipelines().then((r) => setPipelines(r.pipelines)).catch(() => setPipelines(null));
+    const cacheErrorText = (e: unknown) => {
+      const message = e instanceof Error ? e.message : String(e);
+      // a bare network refusal ("Failed to fetch") names nothing — say what failed
+      return /failed to fetch|networkerror|load failed/i.test(message)
+        ? `the verdict cache is unreachable (${message})`
+        : message;
+    };
     if (cacheConfigured) {
       cache
         .pins(200)
@@ -157,11 +165,11 @@ export default function GlobeApp() {
           setCachedTotal(total);
           setCacheError(null);
         })
-        .catch((e) => setCacheError(e instanceof Error ? e.message : String(e)));
+        .catch((e) => setCacheError(cacheErrorText(e)));
       cache
         .featured()
         .then(setFeatured)
-        .catch((e) => setCacheError(e instanceof Error ? e.message : String(e)));
+        .catch((e) => setCacheError(cacheErrorText(e)));
     } else {
       setFeatured([]);
       setCachedRows([]);
@@ -783,8 +791,11 @@ export default function GlobeApp() {
         </div>
       )}
 
-      {/* top-left floating search pill */}
+      {/* top-left floating nav + search pill */}
       <div className="pointer-events-none absolute left-3 top-3 z-30 flex flex-col gap-2">
+        <div className="pointer-events-auto w-fit rounded-xl border border-[#262c36] bg-[#0e1116]/95 px-3 py-2 shadow-lg backdrop-blur">
+          <AppNav active="globe" dark />
+        </div>
         <SearchBar
           lat={latInput}
           lon={lonInput}

@@ -135,3 +135,38 @@ export function pollWhile<T>(
     stopped = true;
   };
 }
+
+// api object closed above; the Explorer's bbox search lives here as its own export (E8).
+export interface GranuleBboxParams {
+  west: number;
+  south: number;
+  east: number;
+  north: number;
+  level?: string;          // comma list from GUNW|GCOV|GOFF
+  from?: string;
+  to?: string;
+  max?: number;
+  fresh?: boolean;
+}
+
+/** E8: granule availability for a BOX (the Granule Explorer). Errors keep the engine's own text. */
+export function granulesBbox(
+  p: GranuleBboxParams,
+  signal?: AbortSignal,
+): Promise<import("./types").GranuleExplorerResponse & { ok: true }> {
+  const q = new URLSearchParams({
+    west: String(p.west),
+    south: String(p.south),
+    east: String(p.east),
+    north: String(p.north),
+  });
+  if (p.level) q.set("level", p.level);
+  if (p.from) q.set("from", p.from);
+  if (p.to) q.set("to", p.to);
+  if (p.max) q.set("max", String(p.max));
+  if (p.fresh) q.set("fresh", "1");
+  return get<import("./types").GranuleExplorerResponse & { ok: true }>(
+    `/api/granules?${q.toString()}`,
+    { signal },
+  );
+}

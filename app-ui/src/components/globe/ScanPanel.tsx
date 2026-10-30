@@ -7,7 +7,9 @@
 import { useEffect, useState } from "react";
 import Link from "next/link";
 import { timeAgo } from "@/lib/format";
+import { granulesBbox } from "@/lib/api";
 import type { CachedSummary, Health, RunState, TileInfo } from "@/lib/types";
+import type { GranuleExplorerResponse } from "@/lib/types";
 
 export interface ScanPanelProps {
   tile: TileInfo | null;
@@ -116,6 +118,80 @@ function Progress(props: { runState: RunState; onFollow: () => void }) {
   );
 }
 
+/** Check coverage (§7.4) — never automatic: the button fetches GET /api/granules for the tile's
+ *  bbox and shows counts per stack, the last acquisition, the largest gap and any
+ *  truncation/degradation notices — all from the engine, nothing invented. "Open in Granule
+ *  Explorer" hands the same box to /granules. */
+function CheckCoverage(props: { tile: TileInfo; engineOnline: boolean; credentials: "present" | "absent" | undefined }) {
+  const [state, setState] = useState<"idle" | "loading" | "done" | "error">("idle");
+  const [result, setResult] = useState<GranuleExplorerResponse | null>(null);
+  const [message, setMessage] = useState<string | null>(null);
+  if (!props.engineOnline || props.credentials !== "present") {
+    return (
+      <p className="mt-1.5 text-[11px] text-[#8a837b]">
+        coverage check needs the engine online with Earthdata credentials — the Granule Explorer
+        shows the same answer for any box.
+      </p>
+    );
+  }
+  const [w, s, e, n] = props.tile.bbox_lonlat;
+  const check = () => {
+    setState("loading");
+    setMessage(null);
+    granulesBbox({ west: w, south: s, east: e, north: n, level: "GUNW,GCOV" })
+      .then((r) => {
+        setResult(r);
+        setState("done");
+      })
+      .catch((err) => {
+        setMessage(err instanceof Error ? err.message : String(err));
+        setState("error");
+      });
+  };
+  return (
+    <div className="mt-2 border-t border-[#f0ece4] pt-2">
+      <button
+        onClick={check}
+        disabled={state === "loading"}
+        className="rounded-md border border-[#2c5f58] px-2 py-1 text-[11px] text-[#2c5f58] hover:bg-[#eff5f3] disabled:opacity-50"
+      >
+        {state === "loading" ? "checking…" : "Check coverage (GUNW + GCOV)"}
+      </button>
+      <a
+        href={`/granules?west=${w}&south=${s}&east=${e}&north=${n}&level=GUNW,GCOV`}
+        className="ml-2 text-[11px] text-[#2c5f58] underline"
+      >
+        Open in Granule Explorer
+      </a>
+      {message && (
+        <p role="alert" className="mono mt-1 text-[11px] text-[#9e3b2c]">{message}</p>
+      )}
+      {result && (
+        <div className="mt-1.5 text-[11px] text-[#4a443c]" role="status">
+          <p>
+            {result.n_total} granules in this tile&apos;s box
+            {result.truncated ? " — budget hit, the list is incomplete" : ""}
+            {result.degraded ? " — served from stale cache" : ""}.
+          </p>
+          <ul className="mt-1 space-y-0.5">
+            {result.stacks.map((st) => (
+              <li key={st.key} className="mono">
+                {st.key} ({st.direction === "D" ? "descending" : st.direction === "A" ? "ascending" : "?"}) · {st.n_granules} granules
+                {st.last ? ` · last ${timeAgo(st.last)}` : ""}
+                {st.max_gap_days != null ? ` · largest gap ${st.max_gap_days} d` : ""}
+              </li>
+            ))}
+            {result.stacks.length === 0 && <li className="text-[#8a837b]">no stacks — the engine found no granules in the window</li>}
+          </ul>
+          <p className="mt-1 text-[10px] text-[#8a837b]">
+            a coverage count never implies a detection — the scan decides that.
+          </p>
+        </div>
+      )}
+    </div>
+  );
+}
+
 export default function ScanPanel(props: ScanPanelProps) {
   const [showDataUsed, setShowDataUsed] = useState(false);
   if (props.tileError) {
@@ -170,6 +246,7 @@ export default function ScanPanel(props: ScanPanelProps) {
         >
           Data tab: how much SAR data exists here
         </button>
+        <CheckCoverage tile={props.tile} engineOnline={props.engineOnline} credentials={props.health?.earthdata_credentials} />
       </div>
 
       {props.runError && (
