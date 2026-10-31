@@ -30,6 +30,8 @@ def _wanted(p: Path) -> bool:
     rel = p.relative_to(ROOT)
     if any(part in SKIP_DIRS or fnmatch.fnmatch(part, "_backup_before_install_*") for part in rel.parts[:-1]):
         return False
+    if (rel.name == ".env" or rel.name.startswith(".env.")) and rel.name != ".env.example":
+        return False                                     # any env file is a secret; only --include-env packs the root .env
     return not any(fnmatch.fnmatch(rel.name, g) for g in SKIP_GLOBS)
 
 

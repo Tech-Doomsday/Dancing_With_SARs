@@ -107,6 +107,9 @@ def install(repo: str | os.PathLike | None = None) -> None:
     """pip install the engine's own requirement files. Run BEFORE the engine is imported."""
     repo = Path(repo or REPO)
     cmd = [sys.executable, "-m", "pip", "install", "-q"]
+    wheels = repo / "wheelhouse"                    # shipped by `build_hub.py --wheels`: used first, PyPI fills any gap
+    if wheels.is_dir():
+        cmd += ["--find-links", str(wheels)]
     for name in ("requirements-retrieval.txt", "requirements-engine.txt"):
         cmd += ["-r", str(repo / name)]
     subprocess.run(cmd, check=True)
@@ -602,8 +605,10 @@ def selftest(repo: str | os.PathLike | None = None) -> int:
 
 
 # ----------------------------------------------------------------------------- 6. optional: the FastAPI on Colab
-def serve(port: int = 8900, *, tunnel: bool = False, ui_origin: str | None = None) -> str:
+def serve(port: int = 8900, *, tunnel: bool = False, ui_origin: str | None = None, app=None) -> str:
     """Start engine.api.main:app in this process (shares the notebook's runner and verdicts.db).
+    `app`: serve this ASGI app instead (colab/hub.py passes the access-key-gated hub). A server or tunnel
+    left over from an earlier call in this kernel is stopped first, so re-running a cell never hits "port in use".
 
     tunnel=True also opens a Cloudflare quick tunnel and returns its https URL, which you put in the UI's
     NEXT_PUBLIC_ENGINE_API. WARNING: that URL is unauthenticated and scans are enabled, so anyone holding it
@@ -612,10 +617,12 @@ def serve(port: int = 8900, *, tunnel: bool = False, ui_origin: str | None = Non
     if ui_origin:
         os.environ["NISAR_UI_ORIGINS"] = ui_origin
     import uvicorn
-    cfg = uvicorn.Config("engine.api.main:app", host="127.0.0.1", port=port, log_level="warning")
+    stop_serve()
+    cfg = uvicorn.Config("engine.api.main:app" if app is None else app, host="127.0.0.1", port=port, log_level="warning")
     server = uvicorn.Server(cfg)
-    threading.Thread(target=server.run, name="engine-api", daemon=True).start()
-    _HANDLE["server"] = server
+    thread = threading.Thread(target=server.run, name="engine-api", daemon=True)
+    thread.start()
+    _HANDLE["server"], _HANDLE["thread"] = server, thread
     for _ in range(100):
         if server.started:
             break
@@ -649,6 +656,8 @@ def stop_serve() -> None:
     proc = _HANDLE.pop("tunnel", None)
     if proc:
         proc.terminate()
-    server = _HANDLE.pop("server", None)
+    server, thread = _HANDLE.pop("server", None), _HANDLE.pop("thread", None)
     if server:
         server.should_exit = True
+    if thread is not None:
+        thread.join(5)                                   # the port is free again when this returns

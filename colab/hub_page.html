@@ -1,0 +1,722 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>NISAR hub</title>
+<style>
+:root {
+  --bg: #f6f7f9; --card: #ffffff; --ink: #14181f; --muted: #5b6573; --line: #dde1e7; --accent: #1f6feb;
+  --accent-ink: #ffffff; --ok: #1a7f4b; --warn: #b26a00; --bad: #c62828; --tile-new: #cfe1ff; --tile-new-line: #2f6fdd;
+  --tile-have: #bfe8cf; --tile-have-line: #1a7f4b; --shadow: 0 1px 2px rgba(0,0,0,.06);
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #0f1318; --card: #171c23; --ink: #e8ecf2; --muted: #98a2b3; --line: #2b323c; --accent: #4b8dff;
+    --accent-ink: #08101c; --ok: #4cc38a; --warn: #f0a93c; --bad: #ff6b6b; --tile-new: #1f3558; --tile-new-line: #5b9bff;
+    --tile-have: #1b4130; --tile-have-line: #4cc38a; --shadow: none;
+  }
+}
+* { box-sizing: border-box; }
+html, body { margin: 0; background: var(--bg); color: var(--ink);
+  font: 14px/1.45 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; }
+header { display: flex; flex-wrap: wrap; gap: 12px 20px; align-items: center; padding: 12px 20px;
+  background: var(--card); border-bottom: 1px solid var(--line); position: sticky; top: 0; z-index: 5; }
+header h1 { font-size: 16px; margin: 0; letter-spacing: .2px; }
+nav { display: flex; gap: 4px; }
+nav button { background: none; border: 0; padding: 6px 12px; border-radius: 6px; color: var(--muted); font: inherit; cursor: pointer; }
+nav button[aria-selected="true"] { background: var(--accent); color: var(--accent-ink); }
+.pills { margin-left: auto; display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+.pill { font-size: 12px; padding: 2px 9px; border-radius: 999px; border: 1px solid var(--line); color: var(--muted); white-space: nowrap; }
+.pill.ok { color: var(--ok); border-color: var(--ok); } .pill.bad { color: var(--bad); border-color: var(--bad); }
+main { max-width: 1280px; margin: 0 auto; padding: 16px 20px 60px; }
+.grid { display: grid; gap: 16px; grid-template-columns: minmax(280px, 340px) 1fr; align-items: start; }
+.grid.data { grid-template-columns: minmax(260px, 340px) 1fr; }
+@media (max-width: 860px) { .grid, .grid.data { grid-template-columns: 1fr; } }
+.card { background: var(--card); border: 1px solid var(--line); border-radius: 10px; padding: 14px 16px; box-shadow: var(--shadow); }
+.card + .card { margin-top: 16px; }
+.card h2 { font-size: 13px; text-transform: uppercase; letter-spacing: .6px; color: var(--muted); margin: 0 0 10px; font-weight: 600; }
+label { display: block; font-size: 12px; color: var(--muted); margin: 10px 0 3px; }
+input[type=number], input[type=text], select { width: 100%; padding: 7px 9px; border: 1px solid var(--line); border-radius: 6px;
+  background: var(--bg); color: var(--ink); font: inherit; }
+input:focus-visible, button:focus-visible, select:focus-visible, [tabindex]:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+.row2 { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+.chips { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 6px; }
+.chip { padding: 3px 10px; border: 1px solid var(--line); border-radius: 999px; background: none; color: var(--ink); font: inherit; cursor: pointer; }
+.chip[aria-pressed="true"] { background: var(--accent); color: var(--accent-ink); border-color: var(--accent); }
+.check { display: flex; gap: 8px; align-items: center; margin: 8px 0 0; color: var(--ink); font-size: 13px; }
+.check input { margin: 0; }
+button.btn { padding: 8px 14px; border-radius: 7px; border: 1px solid var(--accent); background: var(--accent); color: var(--accent-ink);
+  font: inherit; font-weight: 600; cursor: pointer; }
+button.btn.ghost { background: none; color: var(--accent); }
+button.btn.danger { background: none; color: var(--bad); border-color: var(--bad); }
+button.btn:disabled { opacity: .5; cursor: not-allowed; }
+.actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 14px; }
+.hint { color: var(--muted); font-size: 12px; margin: 6px 0 0; }
+.msg { margin: 10px 0 0; padding: 8px 10px; border-radius: 6px; font-size: 13px; border: 1px solid var(--line); }
+.msg.bad { color: var(--bad); border-color: var(--bad); } .msg.ok { color: var(--ok); border-color: var(--ok); }
+svg.map { width: 100%; max-height: 480px; display: block; background: var(--bg); border: 1px solid var(--line); border-radius: 8px; }
+svg.map .t { fill: var(--tile-new); stroke: var(--tile-new-line); stroke-width: 1.2; vector-effect: non-scaling-stroke; }
+svg.map .t.have { fill: var(--tile-have); stroke: var(--tile-have-line); }
+svg.map .t.st-running, svg.map .t.st-queued { fill: #f6d38a; stroke: var(--warn); }
+svg.map .t.st-done { fill: var(--tile-have); stroke: var(--tile-have-line); }
+svg.map .t.st-planned { fill: #b8e3e8; stroke: #1a8a99; }
+svg.map .t.st-error, svg.map .t.st-failed { fill: #f4b8b8; stroke: var(--bad); }
+svg.map .t.st-skipped, svg.map .t.st-cancelled { fill: var(--bg); stroke: var(--muted); stroke-dasharray: 4 3; }
+svg.map .t.pick { stroke-width: 3; }
+svg.map .t.clickable { cursor: pointer; }
+svg.map text { fill: var(--ink); font: 11px system-ui, sans-serif; text-anchor: middle; pointer-events: none; }
+svg.map .box { fill: none; stroke: var(--ink); stroke-width: 1.2; stroke-dasharray: 5 4; vector-effect: non-scaling-stroke; }
+svg.map .pt { stroke: var(--bad); stroke-width: 1.6; vector-effect: non-scaling-stroke; }
+.legend { display: flex; flex-wrap: wrap; gap: 14px; font-size: 12px; color: var(--muted); margin-top: 8px; }
+.sw { display: inline-block; width: 10px; height: 10px; border-radius: 2px; margin-right: 5px; border: 1px solid; vertical-align: -1px; }
+table { width: 100%; border-collapse: collapse; font-size: 13px; }
+th { text-align: left; font-weight: 600; color: var(--muted); font-size: 12px; padding: 4px 8px 4px 0; border-bottom: 1px solid var(--line); }
+td { padding: 5px 8px 5px 0; border-bottom: 1px solid var(--line); vertical-align: top; }
+td.num, th.num { text-align: right; font-variant-numeric: tabular-nums; }
+.scroll { overflow-x: auto; }
+.st { font-size: 11px; padding: 1px 8px; border-radius: 999px; border: 1px solid var(--line); color: var(--muted); white-space: nowrap; }
+.st.done, .st.stored { color: var(--ok); border-color: var(--ok); } .st.planned { color: #1a8a99; border-color: #1a8a99; }
+.st.running, .st.queued, .st.cancelling { color: var(--warn); border-color: var(--warn); }
+.st.error, .st.failed, .st.interrupted { color: var(--bad); border-color: var(--bad); }
+.bar { height: 8px; background: var(--line); border-radius: 4px; overflow: hidden; display: flex; }
+.bar > i { display: block; height: 100%; background: var(--accent); }
+.bar.stack > i:nth-child(1) { background: #4b8dff; } .bar.stack > i:nth-child(2) { background: #4cc38a; }
+.bar.stack > i:nth-child(3) { background: #f0a93c; } .bar.stack > i:nth-child(4) { background: #b57bff; }
+.bar.stack > i:nth-child(n+5) { background: #98a2b3; }
+.list { display: flex; flex-direction: column; gap: 6px; max-height: 560px; overflow: auto; }
+.item { text-align: left; border: 1px solid var(--line); border-radius: 8px; padding: 8px 10px; background: var(--bg); color: var(--ink);
+  font: inherit; cursor: pointer; }
+.item[aria-current="true"] { border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent); }
+.item .l1 { display: flex; justify-content: space-between; gap: 8px; font-weight: 600; }
+.item .l2 { color: var(--muted); font-size: 12px; }
+.gallery { display: grid; gap: 10px; grid-template-columns: repeat(auto-fill, minmax(168px, 1fr)); }
+figure { margin: 0; border: 1px solid var(--line); border-radius: 8px; overflow: hidden; background: var(--bg); cursor: pointer; }
+figure .ph { aspect-ratio: 1; display: grid; place-items: center; color: var(--muted); font-size: 12px; padding: 6px; text-align: center;
+  background: repeating-conic-gradient(var(--line) 0 25%, transparent 0 50%) 0 0 / 14px 14px; }
+figure img { width: 100%; aspect-ratio: 1; object-fit: contain; display: block; image-rendering: pixelated; background: #000; }
+figcaption { padding: 5px 8px 7px; font-size: 12px; } figcaption b { display: block; font-size: 12px; overflow-wrap: anywhere; }
+figcaption span { color: var(--muted); }
+h3 { font-size: 14px; margin: 18px 0 8px; }
+dialog { border: 1px solid var(--line); border-radius: 12px; background: var(--card); color: var(--ink); padding: 0; width: min(980px, 96vw); max-height: 94vh; }
+dialog::backdrop { background: rgba(0,0,0,.55); }
+.dlg { display: grid; grid-template-columns: minmax(0, 1.5fr) minmax(220px, 1fr); gap: 16px; padding: 16px; }
+@media (max-width: 760px) { .dlg { grid-template-columns: 1fr; } }
+.dlg img { width: 100%; max-height: 74vh; object-fit: contain; background: #000; image-rendering: pixelated; cursor: crosshair; display: block; }
+.cbar { height: 10px; border-radius: 3px; margin-top: 6px; background: linear-gradient(90deg, #440154, #3b528b, #21918c, #5ec962, #fde725); }
+canvas.hist { width: 100%; height: 70px; display: block; }
+.kv { display: grid; grid-template-columns: auto 1fr; gap: 3px 12px; font-size: 12px; }
+.kv dt { color: var(--muted); } .kv dd { margin: 0; overflow-wrap: anywhere; }
+.spin { display: inline-block; width: 12px; height: 12px; border: 2px solid var(--line); border-top-color: var(--accent); border-radius: 50%;
+  animation: sp .8s linear infinite; vertical-align: -2px; margin-right: 6px; }
+@keyframes sp { to { transform: rotate(360deg); } }
+[hidden] { display: none !important; }
+.empty { color: var(--muted); padding: 18px 4px; text-align: center; }
+code { font-family: ui-monospace, Menlo, Consolas, monospace; font-size: 12px; }
+</style>
+</head>
+<body>
+<header>
+  <h1>NISAR hub</h1>
+  <nav role="tablist">
+    <button role="tab" id="t-get" aria-selected="true">Retrieve</button>
+    <button role="tab" id="t-data" aria-selected="false">Datasets</button>
+  </nav>
+  <div class="pills" aria-live="polite">
+    <span class="pill" id="p-creds">Earthdata …</span>
+    <span class="pill" id="p-disk">disk …</span>
+  </div>
+</header>
+
+<main>
+<!-- ============================================================ RETRIEVE -->
+<section id="tab-get">
+  <div class="grid">
+    <div>
+      <div class="card">
+        <h2>Where and how much</h2>
+        <div class="row2">
+          <div><label for="lat">Latitude</label><input id="lat" type="number" step="any" min="-90" max="90" inputmode="decimal"></div>
+          <div><label for="lon">Longitude</label><input id="lon" type="number" step="any" min="-180" max="180" inputmode="decimal"></div>
+        </div>
+        <p class="hint">Tip: paste <code>lat, lon</code> straight from a map into Latitude.</p>
+        <label for="size">Area size (km, a square around the point)</label>
+        <input id="size" type="number" step="any" min="1" max="200" value="30">
+        <div class="chips" id="size-chips"></div>
+        <label class="check"><input id="snap" type="checkbox"> Only the one tile under this point (ignore the size)</label>
+        <p class="hint" id="size-hint"></p>
+
+        <h2 style="margin-top:18px">What to download</h2>
+        <label for="look">History (days back from now)</label>
+        <input id="look" type="number" min="1" max="3650" value="60">
+        <div class="chips" id="prod-chips"></div>
+        <div class="row2">
+          <div><label for="maxe">Max GCOV epochs</label><input id="maxe" type="number" min="1" max="500" placeholder="engine default"></div>
+          <div><label for="maxp">Max GUNW pairs</label><input id="maxp" type="number" min="1" max="500" placeholder="engine default"></div>
+        </div>
+        <div class="actions">
+          <button class="btn ghost" id="b-plan" title="Searches and measures the exact bytes. Downloads no data.">Plan: measure size</button>
+          <button class="btn" id="b-get">Download</button>
+        </div>
+        <div id="start-msg"></div>
+      </div>
+    </div>
+
+    <div>
+      <div class="card">
+        <h2>What will be fetched <span id="cover-count" style="text-transform:none;letter-spacing:0"></span></h2>
+        <div id="cover-err" class="msg bad" hidden></div>
+        <svg class="map" id="map-get" role="img" aria-label="Footprint of the tiles that will be fetched"></svg>
+        <div class="legend">
+          <span><i class="sw" style="background:var(--tile-new);border-color:var(--tile-new-line)"></i>new tile</span>
+          <span><i class="sw" style="background:var(--tile-have);border-color:var(--tile-have-line)"></i>already stored</span>
+          <span>dashed = the area you typed, red cross = the point</span>
+        </div>
+        <div class="scroll" style="margin-top:10px"><table id="cover-table"></table></div>
+      </div>
+
+      <div class="card" id="queue-card" hidden>
+        <h2>Queue</h2>
+        <div id="queue-head" style="display:flex;gap:12px;align-items:center;flex-wrap:wrap"></div>
+        <div class="bar" style="margin:10px 0"><i id="queue-bar" style="width:0%"></i></div>
+        <div class="scroll"><table id="queue-table"></table></div>
+        <div id="plan-sum"></div>
+        <p class="hint">The queue runs inside the Colab process: you can close this tab and come back, it keeps going.</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ============================================================ DATASETS -->
+<section id="tab-data" hidden>
+  <div class="card">
+    <h2>What is on this runtime's disk</h2>
+    <div id="disk-sum"></div>
+    <div class="bar stack" id="disk-bar" style="margin:8px 0"></div>
+    <div class="legend" id="disk-legend"></div>
+    <p class="hint" id="disk-note"></p>
+  </div>
+  <div class="grid data" style="margin-top:16px">
+    <div>
+      <div class="card">
+        <h2>Retrievals</h2>
+        <label class="check" style="margin:0 0 8px"><input id="only-stored" type="checkbox" checked> Only those with stored data</label>
+        <div class="list" id="ret-list"></div>
+      </div>
+    </div>
+    <div>
+      <div class="card">
+        <h2>Stored tiles</h2>
+        <svg class="map" id="map-data" role="img" aria-label="Footprint of every stored tile"></svg>
+        <p class="hint" id="map-data-hint">Click a tile to open its data.</p>
+      </div>
+      <div class="card" id="detail" hidden></div>
+    </div>
+  </div>
+</section>
+</main>
+
+<dialog id="viewer"></dialog>
+
+<script>
+"use strict";
+const TOKEN = "__HUB_TOKEN__";
+const NS = "http://www.w3.org/2000/svg";
+const SIZES = [10, 20, 30, 50, 100];
+const PRODUCTS = ["GCOV", "GUNW", "GOFF"];
+const PRODUCT_HELP = {GCOV: "backscatter", GUNW: "interferograms", GOFF: "offsets"};
+
+// ------------------------------------------------------------------ small helpers
+const $ = (s, root = document) => root.querySelector(s);
+function h(tag, attrs, ...kids) {
+  const e = document.createElement(tag);
+  for (const [k, v] of Object.entries(attrs || {})) {
+    if (v === false || v == null) continue;
+    if (k === "class") e.className = v;
+    else if (k.startsWith("on")) e.addEventListener(k.slice(2), v);
+    else if (k === "text") e.textContent = v;
+    else e.setAttribute(k, v === true ? "" : v);
+  }
+  for (const c of kids.flat()) if (c != null && c !== false) e.append(c.nodeType ? c : document.createTextNode(String(c)));
+  return e;
+}
+function s(tag, attrs, text) {
+  const e = document.createElementNS(NS, tag);
+  for (const [k, v] of Object.entries(attrs || {})) e.setAttribute(k, v);
+  if (text != null) e.textContent = text;
+  return e;
+}
+function fmtBytes(n) {
+  if (n == null || isNaN(n)) return "–";
+  const u = ["B", "kB", "MB", "GB", "TB"]; let i = 0, x = Number(n);
+  while (x >= 1000 && i < u.length - 1) { x /= 1000; i++; }
+  return (i === 0 ? x.toFixed(0) : x.toFixed(x >= 100 ? 0 : x >= 10 ? 1 : 2)) + " " + u[i];
+}
+function fmtDur(sec) {
+  if (sec == null) return "–"; sec = Math.round(sec);
+  return sec < 90 ? sec + " s" : sec < 5400 ? Math.round(sec / 60) + " min" : (sec / 3600).toFixed(1) + " h";
+}
+function fmtWhen(epoch) { return epoch ? new Date(epoch * 1000).toLocaleString([], {dateStyle: "medium", timeStyle: "short"}) : "–"; }
+function fmtDay(iso) { return iso ? String(iso).slice(0, 10) : "–"; }
+function ll(lon, lat) { return `${Number(lat).toFixed(3)}, ${Number(lon).toFixed(3)}`; }
+function chip(status) { return h("span", {class: "st " + status}, status); }
+function put(el, ...kids) { el.replaceChildren(...kids.flat().filter(k => k != null && k !== false)); }   // replaceChildren(null) would print "null"
+function short(layer) {                       // science__LSAR__GCOV__grids__frequencyA__HHHH -> HHHH ; ...__HH__alongTrackOffset -> HH alongTrackOffset
+  const p = String(layer).split("__"), last = p[p.length - 1], pol = p[p.length - 2];
+  return /^(HH|HV|VH|VV)$/.test(pol || "") ? `${pol} ${last}` : last;
+}
+function sleep(ms) { return new Promise(r => setTimeout(r, ms)); }
+
+async function api(path, {method = "GET", json, raw = false} = {}) {
+  const init = {method, credentials: "same-origin", headers: {Authorization: "Bearer " + TOKEN}};
+  if (json !== undefined) { init.body = JSON.stringify(json); init.headers["Content-Type"] = "application/json"; }
+  const r = await fetch(path, init);
+  if (!r.ok) {
+    let msg = `${r.status} ${r.statusText}`;
+    try {
+      const d = (await r.json()).detail;
+      msg = (d && d.error) || (Array.isArray(d) ? d.map(x => x.msg).join("; ") : typeof d === "string" ? d : msg);
+    } catch (e) { /* not JSON */ }
+    throw Object.assign(new Error(msg), {status: r.status});
+  }
+  return raw ? r : r.json();
+}
+function saveBlob(blob, name) {
+  const a = h("a", {href: URL.createObjectURL(blob), download: name});
+  document.body.append(a); a.click(); a.remove(); setTimeout(() => URL.revokeObjectURL(a.href), 5000);
+}
+function store(key, val) { try { localStorage.setItem("nisarhub." + key, JSON.stringify(val)); } catch (e) { /* private mode */ } }
+function recall(key, dflt) { try { const v = localStorage.getItem("nisarhub." + key); return v == null ? dflt : JSON.parse(v); } catch (e) { return dflt; } }
+
+// ------------------------------------------------------------------ the footprint map (no basemap: just the tiles)
+function drawMap(svg, items, extra = {}) {
+  svg.replaceChildren();
+  const ref = items.length ? items[0].ring[0][0] : (extra.point ? extra.point[0] : 0);
+  const un = ([lon, lat]) => [ref + ((((lon - ref + 180) % 360) + 360) % 360) - 180, lat];
+  const rings = items.map(i => i.ring.map(un));
+  const box = extra.box ? extra.box.map(un) : null, pt = extra.point ? un(extra.point) : null;
+  const all = rings.flat().concat(box || []);
+  if (!all.length) return;
+  const lat0 = all.reduce((a, p) => a + p[1], 0) / all.length, k = Math.cos(lat0 * Math.PI / 180);
+  let x0 = Math.min(...all.map(p => p[0] * k)), x1 = Math.max(...all.map(p => p[0] * k));
+  let y0 = Math.min(...all.map(p => p[1])), y1 = Math.max(...all.map(p => p[1]));
+  const pad = Math.max(x1 - x0, y1 - y0, 1e-4) * 0.06;
+  x0 -= pad; x1 += pad; y0 -= pad; y1 += pad;
+  const sc = Math.min(600 / (x1 - x0), 460 / (y1 - y0)), W = (x1 - x0) * sc, H = (y1 - y0) * sc;
+  const P = ([lon, lat]) => [((lon * k) - x0) * sc, (y1 - lat) * sc];
+  svg.setAttribute("viewBox", `0 0 ${W.toFixed(1)} ${H.toFixed(1)}`);
+  items.forEach((it, n) => {
+    const pts = rings[n].map(P);
+    const poly = s("polygon", {points: pts.map(p => p.map(v => v.toFixed(1)).join(",")).join(" "),
+      class: "t " + (it.cls || "") + (it.onclick ? " clickable" : "")});
+    if (it.onclick) { poly.addEventListener("click", it.onclick); poly.setAttribute("tabindex", "0");
+      poly.addEventListener("keydown", e => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); it.onclick(); } }); }
+    poly.append(s("title", {}, it.title || it.id));
+    svg.append(poly);
+    const xs = pts.map(p => p[0]), ys = pts.map(p => p[1]);
+    if (Math.max(...xs) - Math.min(...xs) > 54 && it.label) {
+      svg.append(s("text", {x: (Math.min(...xs) + Math.max(...xs)) / 2, y: (Math.min(...ys) + Math.max(...ys)) / 2 + 4}, it.label));
+    }
+  });
+  if (box) svg.append(s("polygon", {class: "box", points: box.map(P).map(p => p.map(v => v.toFixed(1)).join(",")).join(" ")}));
+  if (pt) {
+    const [x, y] = P(pt);
+    svg.append(s("line", {class: "pt", x1: x - 7, y1: y, x2: x + 7, y2: y}), s("line", {class: "pt", x1: x, y1: y - 7, x2: x, y2: y + 7}));
+  }
+}
+function boxRing(lon, lat, km) {            // display only; the real cover is computed by the engine
+  const dlat = km / 2 / 111.32, dlon = dlat / Math.max(0.05, Math.cos(lat * Math.PI / 180));
+  return [[lon - dlon, lat - dlat], [lon + dlon, lat - dlat], [lon + dlon, lat + dlat], [lon - dlon, lat + dlat], [lon - dlon, lat - dlat]];
+}
+function tileRing(t) {
+  if (t.polygon_lonlat && t.polygon_lonlat.length > 2) return t.polygon_lonlat;
+  const [w, s_, e, n] = t.bbox_lonlat; return [[w, s_], [e, s_], [e, n], [w, n], [w, s_]];
+}
+
+// ------------------------------------------------------------------ tabs, header
+const tabs = {get: $("#tab-get"), data: $("#tab-data")};
+function showTab(name) {
+  for (const [k, sec] of Object.entries(tabs)) { sec.hidden = k !== name; $("#t-" + k).setAttribute("aria-selected", String(k === name)); }
+  store("tab", name);
+  if (name === "data") loadData();
+}
+$("#t-get").onclick = () => showTab("get");
+$("#t-data").onclick = () => showTab("data");
+
+async function refreshHealth() {
+  try {
+    const hl = await api("/api/health"), ok = hl.earthdata_credentials === "present";
+    const p = $("#p-creds"); p.textContent = ok ? "Earthdata token ok" : "no Earthdata token"; p.className = "pill " + (ok ? "ok" : "bad");
+    state.creds = ok; state.scans = hl.scans_enabled; syncButtons();
+  } catch (e) { $("#p-creds").textContent = "engine not answering"; $("#p-creds").className = "pill bad"; }
+}
+async function refreshDisk(fresh = false) {
+  try {
+    state.disk = await api("/hub/api/disk" + (fresh ? "?fresh=1" : ""));
+    $("#p-disk").textContent = `${fmtBytes(state.disk.used_bytes)} stored · ${fmtBytes(state.disk.free_bytes)} free${state.disk.partial ? " (partial)" : ""}`;
+    if (!tabs.data.hidden) renderDisk();
+  } catch (e) { /* header only */ }
+}
+
+// ------------------------------------------------------------------ the retrieve form
+const state = {cover: null, coverSeq: 0, batch: null, lastReq: null, lastPlanKey: null, polling: false, creds: false, scans: true,
+               rows: [], sel: null, products: new Set(recall("products", ["GCOV", "GUNW"]))};
+
+function renderChips() {
+  const size = $("#size-chips"); size.replaceChildren();
+  for (const v of SIZES) size.append(h("button", {type: "button", class: "chip", "aria-pressed": String(!$("#snap").checked && Number($("#size").value) === v),
+    onclick: () => { $("#size").value = v; $("#snap").checked = false; renderChips(); schedulePreview(); }}, v + " km"));
+  const prod = $("#prod-chips"); prod.replaceChildren();
+  for (const p of PRODUCTS) prod.append(h("button", {type: "button", class: "chip", title: PRODUCT_HELP[p],
+    "aria-pressed": String(state.products.has(p)), onclick: () => {
+      state.products.has(p) ? state.products.delete(p) : state.products.add(p);
+      store("products", [...state.products]); renderChips(); syncButtons(); }}, `${p} · ${PRODUCT_HELP[p]}`));
+}
+function readForm() {
+  const num = id => { const v = $(id).value.trim(); return v === "" ? null : Number(v); };
+  const f = {lat: num("#lat"), lon: num("#lon"), size_km: num("#size"), snap: $("#snap").checked,
+             lookback_days: num("#look"), max_gcov_epochs: num("#maxe"), max_gunw_pairs: num("#maxp"), products: [...state.products]};
+  if (f.lat == null || f.lon == null || isNaN(f.lat) || isNaN(f.lon)) return {err: "Enter a latitude and a longitude."};
+  if (f.lat < -90 || f.lat > 90) return {err: "Latitude must be between -90 and 90."};
+  if (f.lon < -180 || f.lon > 180) return {err: "Longitude must be between -180 and 180."};
+  if (!f.snap && (f.size_km == null || !(f.size_km > 0))) return {err: "Enter an area size in km, or tick “only the one tile”."};
+  if (f.size_km == null || !(f.size_km > 0)) f.size_km = 10;
+  return {req: f};
+}
+function persistForm() { store("form", {lat: $("#lat").value, lon: $("#lon").value, size: $("#size").value, snap: $("#snap").checked,
+  look: $("#look").value, maxe: $("#maxe").value, maxp: $("#maxp").value}); }
+
+function syncButtons() {
+  const running = state.batch && state.batch.status === "running";
+  const ok = !!(state.cover && state.cover.tiles.length) && state.products.size > 0 && !running;
+  $("#b-plan").disabled = !ok || !state.creds; $("#b-get").disabled = !ok || !state.creds;
+  $("#b-plan").title = state.creds ? "Searches and measures the exact bytes. Downloads no data." : "No Earthdata token on this runtime";
+}
+let previewTimer = null;
+function schedulePreview() { persistForm(); clearTimeout(previewTimer); previewTimer = setTimeout(preview, 350); }
+
+async function preview() {
+  const {req, err} = readForm(), box = $("#cover-err");
+  if (err) { state.cover = null; box.hidden = false; box.textContent = err; $("#cover-count").textContent = ""; renderCover(); syncButtons(); return; }
+  const seq = ++state.coverSeq;
+  try {
+    const q = new URLSearchParams({lon: req.lon, lat: req.lat, size_km: req.size_km, snap: req.snap});
+    const c = await api("/hub/api/cover?" + q);
+    if (seq !== state.coverSeq) return;                    // a newer preview is already on its way
+    state.cover = c; box.hidden = true;
+  } catch (e) {
+    if (seq !== state.coverSeq) return;
+    state.cover = null; box.hidden = false; box.textContent = e.message;
+  }
+  renderCover(); syncButtons();
+}
+function renderCover() {
+  const c = state.cover, svg = $("#map-get"), tbl = $("#cover-table"), f = readForm().req;
+  tbl.replaceChildren();
+  if (!c) { svg.replaceChildren(); $("#cover-count").textContent = ""; $("#size-hint").textContent = ""; return; }
+  const have = c.have || {}, nHave = c.tiles.filter(t => have[t.id]).length;
+  $("#cover-count").textContent = `· ${c.tiles.length} tile${c.tiles.length === 1 ? "" : "s"} of ${c.cell_m / 1000} km` +
+    (nHave ? `, ${nHave} already stored` : "");
+  $("#size-hint").textContent = f && f.snap ? `One ${c.cell_m / 1000} km tile.` :
+    `The engine works in ${c.cell_m / 1000} km tiles, so the area is covered by whole tiles (at most ${c.max_tiles} at a time).`;
+  const st = {}; if (state.batch) for (const t of state.batch.tiles) st[t.id] = t.status;
+  drawMap(svg, c.tiles.map((t, i) => ({id: t.id, ring: tileRing(t), label: t.id,
+    cls: (st[t.id] ? "st-" + st[t.id] : have[t.id] ? "have" : ""), title: `${t.id}${have[t.id] ? " · stored" : ""}`})),
+    f ? {box: f.snap ? null : boxRing(f.lon, f.lat, f.size_km), point: [f.lon, f.lat]} : {});
+  const byTile = {}; if (state.batch) for (const t of state.batch.tiles) byTile[t.id] = t;
+  tbl.append(h("tr", {}, h("th", {text: "#"}), h("th", {text: "Tile"}), h("th", {text: "Centre (lat, lon)"}), h("th", {text: "On disk"}),
+    state.batch ? h("th", {text: "Queue"}) : null));
+  c.tiles.forEach((t, i) => {
+    const hv = have[t.id], b = byTile[t.id];
+    tbl.append(h("tr", {}, h("td", {text: i + 1}), h("td", {}, h("code", {text: t.id})), h("td", {text: ll(t.lon, t.lat)}),
+      h("td", {}, hv ? h("a", {href: "#", onclick: ev => { ev.preventDefault(); openRetrieval(hv.retrieval); }}, `${hv.stored} granules`) : "–"),
+      state.batch ? h("td", {}, b ? chip(b.status) : "–") : null));
+  });
+}
+
+// ------------------------------------------------------------------ start / poll the batch
+async function startBatch(mode, {skipConfirm = false} = {}) {
+  const {req, err} = readForm(), msg = $("#start-msg");
+  msg.replaceChildren();
+  if (err) { msg.append(h("div", {class: "msg bad", text: err})); return; }
+  const key = JSON.stringify({...req, mode: undefined});
+  if (mode === "retrieve" && !skipConfirm && state.cover.tiles.length > 1 && state.lastPlanKey !== key &&
+      !confirm(`Download ${state.cover.tiles.length} tiles? Each can be several hundred MB.\nRun “Plan: measure size” first to see the exact size.`)) return;
+  try {
+    await api("/hub/api/batch", {method: "POST", json: {...req, mode}});
+  } catch (e) { msg.append(h("div", {class: "msg bad", text: e.message})); return; }
+  state.lastReq = req; store("lastReq", req);
+  if (mode === "plan") state.lastPlanKey = key;
+  pollBatch();
+}
+async function pollBatch() {
+  if (state.polling) return; state.polling = true;
+  try {
+    for (;;) {
+      state.batch = await api("/hub/api/batch");
+      renderQueue(); renderCover(); syncButtons();
+      if (state.batch.status !== "running") break;
+      await sleep(1500);
+    }
+  } catch (e) { /* the engine restarted or the tunnel dropped: the next page load picks the queue up again */ }
+  finally { state.polling = false; }
+  await Promise.all([refreshDisk(true), preview()]);
+  if (!tabs.data.hidden) loadData();
+}
+function renderQueue() {
+  const b = state.batch, card = $("#queue-card");
+  if (!b || !b.tiles || !b.tiles.length) { card.hidden = true; return; }
+  card.hidden = false;
+  const term = new Set(["done", "planned", "failed", "error", "cancelled", "interrupted", "skipped"]);
+  const nDone = b.tiles.filter(t => term.has(t.status)).length, running = b.status === "running";
+  put($("#queue-head"),
+    h("strong", {}, running ? h("span", {class: "spin"}) : null,
+      running ? `${b.mode === "plan" ? "Planning" : "Downloading"} ${nDone + 1 > b.tiles.length ? b.tiles.length : nDone + 1} of ${b.tiles.length}` :
+        b.status === "cancelled" ? "Cancelled" : `${b.mode === "plan" ? "Plan" : "Download"} finished`),
+    h("span", {class: "hint", style: "margin:0", text: `${fmtDur((b.finished_at || Date.now() / 1000) - b.started_at)} elapsed`}),
+    running ? h("button", {class: "btn danger", onclick: async () => { await api("/hub/api/batch/cancel", {method: "POST"}); }}, "Cancel") : null);
+  $("#queue-bar").style.width = (100 * nDone / b.tiles.length) + "%";
+  const t = $("#queue-table"); t.replaceChildren(h("tr", {}, h("th", {text: "Tile"}), h("th", {text: "Status"}), h("th", {text: "Step"}),
+    h("th", {class: "num", text: "Granules"}), h("th", {class: "num", text: "Bytes"})));
+  let planned = 0, done = 0, granules = 0, stored = 0;
+  for (const r of b.tiles) {
+    const tt = r.totals || {};
+    planned += tt.bytes_planned || 0; done += tt.bytes_done || 0; granules += tt.granules || 0; stored += tt.stored || 0;
+    t.append(h("tr", {}, h("td", {}, h("code", {text: r.id})), h("td", {}, chip(r.status)),
+      h("td", {text: r.error ? r.error : (r.stage && !term.has(r.status) ? r.stage : "")}),
+      h("td", {class: "num", text: tt.granules != null ? `${tt.stored || 0} / ${tt.granules}` : "–"}),
+      h("td", {class: "num", text: tt.bytes_planned ? `${fmtBytes(tt.bytes_done || 0)} / ${fmtBytes(tt.bytes_planned)}` : "–"})));
+  }
+  const sum = $("#plan-sum"); sum.replaceChildren();
+  if (planned || granules) {
+    sum.append(h("p", {style: "margin:10px 0 0"}, h("strong", {text: b.mode === "plan" && !running ? "Plan: " : "So far: "}),
+      `${granules} granule${granules === 1 ? "" : "s"}, ${fmtBytes(planned)} to download` +
+      (b.mode === "retrieve" ? `, ${fmtBytes(done)} done, ${stored} stored` : "")));
+  }
+  if (!running && b.status === "finished" && !granules && b.tiles.every(t => !t.error)) {
+    sum.append(h("p", {class: "msg"}, "No granules were found for these tiles in this history window. Try more days, or tick another product."));
+  }
+  if (b.mode === "plan" && !running && b.status === "finished" && planned) {
+    sum.append(h("div", {class: "actions"}, h("button", {class: "btn", onclick: async () => { applyReq(state.lastReq); await preview(); startBatch("retrieve", {skipConfirm: true}); }},
+      `Download these ${fmtBytes(planned)}`)));
+  }
+}
+function applyReq(r) {                 // put a remembered request back into the form, exactly as it was
+  if (!r) return;
+  $("#lat").value = r.lat; $("#lon").value = r.lon; $("#size").value = r.size_km; $("#snap").checked = !!r.snap;
+  $("#look").value = r.lookback_days ?? ""; $("#maxe").value = r.max_gcov_epochs ?? ""; $("#maxp").value = r.max_gunw_pairs ?? "";
+  state.products = new Set(r.products || []); store("products", [...state.products]); renderChips(); persistForm();
+}
+
+// ------------------------------------------------------------------ datasets
+async function loadData() {
+  await refreshDisk(true);
+  try { state.rows = (await api("/api/retrievals?limit=2000")).retrievals; } catch (e) { state.rows = []; $("#ret-list").replaceChildren(h("div", {class: "msg bad", text: e.message})); return; }
+  renderDisk(); renderRows();
+  if (!state.sel) { const first = state.rows.find(r => (r.totals || {}).stored); if (first) openRetrieval(first.id); }
+}
+function renderDisk() {
+  const d = state.disk; if (!d) return;
+  $("#disk-sum").textContent = `${fmtBytes(d.used_bytes)} stored in ${d.data_dir} · ${fmtBytes(d.free_bytes)} free of ${fmtBytes(d.total_bytes)}` +
+    (d.partial ? " · (counted partially, the folder is huge)" : "");
+  const bar = $("#disk-bar"), lg = $("#disk-legend"); bar.replaceChildren(); lg.replaceChildren();
+  const total = Math.max(d.used_bytes, 1);
+  d.parts.slice(0, 6).forEach((p, i) => {
+    bar.append(h("i", {style: `width:${(100 * p.bytes / total).toFixed(2)}%`, title: p.name}));
+    lg.append(h("span", {}, h("i", {class: "sw", style: `background:${["#4b8dff", "#4cc38a", "#f0a93c", "#b57bff", "#98a2b3", "#98a2b3"][i]};border-color:transparent`}),
+      `${p.name} ${fmtBytes(p.bytes)}`));
+  });
+  $("#disk-note").textContent = "This disk is wiped when the Colab session ends. Use “Download zip” on a retrieval to keep it.";
+}
+function bestPerTile(rows) {
+  const best = {};
+  for (const r of rows) { const n = (r.totals || {}).stored || 0; if (r.tile && n && (!best[r.tile] || r.created_at > best[r.tile].created_at)) best[r.tile] = r; }
+  return best;
+}
+function renderRows() {
+  const only = $("#only-stored").checked, list = $("#ret-list"); list.replaceChildren();
+  const rows = state.rows.filter(r => !only || ((r.totals || {}).stored || 0) > 0);
+  if (!rows.length) list.append(h("div", {class: "empty", text: only ? "Nothing stored yet. Use the Retrieve tab." : "No retrievals yet."}));
+  for (const r of rows) {
+    const t = r.totals || {}, rq = r.request || {};
+    list.append(h("button", {class: "item", "aria-current": String(r.id === state.sel), onclick: () => openRetrieval(r.id)},
+      h("div", {class: "l1"}, h("span", {text: r.tile || r.id}), chip(r.status)),
+      h("div", {class: "l2", text: `${rq.lon != null ? ll(rq.lon, rq.lat) : ""} · ${(r.window || {}).lookback_days ?? "?"} d · ${r.mode}`}),
+      h("div", {class: "l2", text: `${fmtWhen(r.created_at)} · ${t.stored || 0}/${t.granules ?? "?"} stored · ${fmtBytes(t.bytes_done || t.bytes_planned)}`})));
+  }
+  const best = bestPerTile(state.rows), items = Object.values(best).map(r => ({id: r.tile, label: r.tile,
+    ring: r.bbox ? [[r.bbox[0], r.bbox[1]], [r.bbox[2], r.bbox[1]], [r.bbox[2], r.bbox[3]], [r.bbox[0], r.bbox[3]], [r.bbox[0], r.bbox[1]]] : null,
+    cls: "have" + (r.id === state.sel ? " pick" : ""), title: `${r.tile} · ${(r.totals || {}).stored} granules`, onclick: () => openRetrieval(r.id)})).filter(i => i.ring);
+  drawMap($("#map-data"), items);
+  $("#map-data-hint").textContent = items.length ? "Click a tile to open its data." : "No stored tiles yet.";
+}
+$("#only-stored").onchange = renderRows;
+
+async function openRetrieval(id) {
+  state.sel = id; if (tabs.data.hidden) showTab("data"); else renderRows();
+  const box = $("#detail"); box.hidden = false; box.replaceChildren(h("div", {class: "empty"}, h("span", {class: "spin"}), "Reading the store…"));
+  box.scrollIntoView({block: "nearest", behavior: "smooth"});
+  let m, clips = [], clipErr = null;
+  try { m = await api("/api/retrievals/" + id); } catch (e) { box.replaceChildren(h("div", {class: "msg bad", text: e.message})); return; }
+  const stored = (m.totals || {}).stored || 0;
+  if (stored) { try { clips = (await api(`/api/retrievals/${id}/clips`)).clips; } catch (e) { clipErr = e.message; } }
+  if (state.sel !== id) return;
+  renderDetail(box, m, clips, clipErr);
+}
+function renderDetail(box, m, clips, clipErr) {
+  const t = m.totals || {}, rq = m.request || {}, w = m.window || {};
+  put(box,
+    h("h2", {text: "Retrieval"}),
+    h("div", {style: "display:flex;gap:10px;align-items:center;flex-wrap:wrap"}, h("strong", {style: "font-size:16px", text: m.tile || m.id}), chip(m.status),
+      h("span", {class: "hint", style: "margin:0", text: m.id})),
+    h("dl", {class: "kv", style: "margin:10px 0"},
+      h("dt", {text: "Point"}), h("dd", {text: rq.lon != null ? ll(rq.lon, rq.lat) : "–"}),
+      h("dt", {text: "Window"}), h("dd", {text: w.t0 ? `${fmtDay(w.t0)} → ${fmtDay(w.t1)} (${w.lookback_days} days)` : "–"}),
+      h("dt", {text: "Granules"}), h("dd", {text: `${t.stored || 0} stored · ${t.failed || 0} failed · ${t.granules || 0} found`}),
+      h("dt", {text: "Bytes"}), h("dd", {text: `${fmtBytes(t.bytes_done)} downloaded of ${fmtBytes(t.bytes_planned)} planned`}),
+      h("dt", {text: "Took"}), h("dd", {text: fmtDur(m.seconds)}),
+      m.error ? [h("dt", {text: "Error"}), h("dd", {class: "msg bad", text: m.error})] : null),
+    h("div", {class: "actions", style: "margin-top:0"},
+      t.stored ? h("button", {class: "btn", id: "b-zip", onclick: () => downloadZip(m.id, m.tile)}, "Download zip (all stored granules)") : null,
+      h("button", {class: "btn ghost", onclick: () => { const r = m.request || {}; if (r.lon != null) { $("#lat").value = r.lat; $("#lon").value = r.lon; $("#snap").checked = true; showTab("get"); schedulePreview(); } }},
+        "Fetch this tile again")),
+    h("h3", {text: "Granules"}),
+    granuleTable(m),
+    h("h3", {}, "Layers ", h("span", {class: "hint", text: clips.length ? `(${clips.length} stored arrays; click one to open it)` : ""})),
+    clipErr ? h("div", {class: "msg bad", text: clipErr}) : null,
+    clips.length ? gallery(m.id, clips) : (!clipErr ? h("div", {class: "empty", text: t.stored ? "No layers found in the store." : "Nothing stored for this retrieval, so there is nothing to show."}) : null));
+}
+function granuleTable(m) {
+  const tb = h("table", {}, h("tr", {}, h("th", {text: "Product"}), h("th", {text: "Date"}), h("th", {text: "Track"}), h("th", {text: "State"}),
+    h("th", {class: "num", text: "Bytes"}), h("th", {text: ""})));
+  for (const g of m.granules || []) {
+    tb.append(h("tr", {}, h("td", {text: g.product}), h("td", {text: fmtDay(g.start)}), h("td", {text: `${g.track ?? ""} ${g.direction ?? ""}`}),
+      h("td", {}, chip(g.state), g.error ? h("div", {class: "hint", text: g.error}) : null),
+      h("td", {class: "num", text: fmtBytes(g.bytes_done || g.bytes_planned)}),
+      h("td", {}, g.state === "stored" ? h("a", {href: "#", onclick: ev => { ev.preventDefault(); downloadNpz(m.id, g.granule_id); }}, ".npz") : null)));
+  }
+  return h("div", {class: "scroll", style: "max-height:260px;overflow:auto"}, tb);
+}
+async function downloadZip(id, tile) {
+  const b = $("#b-zip"); b.disabled = true; const old = b.textContent; b.textContent = "Preparing zip…";
+  try { saveBlob(await (await api(`/api/retrievals/${id}/download.zip`, {raw: true})).blob(), `${tile || id}-${id}.zip`); }
+  catch (e) { alert(e.message); } finally { b.disabled = false; b.textContent = old; }
+}
+async function downloadNpz(id, gid) {
+  try { saveBlob(await (await api(`/api/retrievals/${id}/export.npz?granule=${encodeURIComponent(gid)}`, {raw: true})).blob(), gid + ".npz"); }
+  catch (e) { alert(e.message); }
+}
+
+// ---- gallery: thumbnails are fetched lazily, three at a time (each one reads a zarr array on the Colab side)
+const thumbQueue = []; let thumbBusy = 0; const urls = [];
+function pumpThumbs() {
+  while (thumbBusy < 3 && thumbQueue.length) { const job = thumbQueue.shift(); thumbBusy++; job().finally(() => { thumbBusy--; pumpThumbs(); }); }
+}
+const io = new IntersectionObserver(es => { for (const e of es) if (e.isIntersecting) { io.unobserve(e.target); e.target._load(); } }, {rootMargin: "200px"});
+function imgUrl(id, c, px) {
+  return `/api/retrievals/${id}/clips/image?` + new URLSearchParams({granule: c.granule_id, grid: c.grid, layer: c.layer, max_px: px});
+}
+async function fetchImage(id, c, px) {
+  const r = await api(imgUrl(id, c, px), {raw: true});
+  let meta = {}; try { meta = JSON.parse(r.headers.get("X-Img-Meta") || "{}"); } catch (e) { /* none */ }
+  const u = URL.createObjectURL(await r.blob()); urls.push(u); return {url: u, meta};
+}
+const area = c => c.shape.length >= 2 ? c.shape[c.shape.length - 1] * c.shape[c.shape.length - 2] : 0;   // images first, small geometry cubes last
+function gallery(id, clips) {
+  const wrap = h("div", {}), layers = [...new Set(clips.map(c => c.layer))].sort();
+  const sel = h("select", {"aria-label": "Layer filter"}, h("option", {value: "", text: `All layers (${clips.length})`}),
+    layers.map(l => h("option", {value: l, text: `${short(l)} (${clips.filter(c => c.layer === l).length})`, title: l})));
+  const grid = h("div", {class: "gallery", style: "margin-top:10px"}), more = h("button", {class: "btn ghost", style: "margin-top:10px"});
+  let shown = 0, list = [];
+  const draw = () => {
+    for (const c of list.slice(shown, shown + 24)) grid.append(card(id, c));
+    shown = Math.min(list.length, shown + 24); more.hidden = shown >= list.length; more.textContent = `Show more (${list.length - shown} left)`;
+  };
+  const refilter = () => {
+    for (const u of urls.splice(0)) URL.revokeObjectURL(u);
+    list = clips.filter(c => !sel.value || c.layer === sel.value).sort((a, b) => area(b) - area(a) || a.layer.localeCompare(b.layer) || String(a.start).localeCompare(String(b.start)));
+    grid.replaceChildren(); shown = 0; draw();
+  };
+  sel.onchange = refilter; more.onclick = draw; refilter(); wrap.append(sel, grid, more); return wrap;
+}
+function card(id, c) {
+  const ph = h("div", {class: "ph", text: "…"});
+  const fig = h("figure", {tabindex: "0", onclick: () => openViewer(id, c), onkeydown: e => { if (e.key === "Enter") openViewer(id, c); }}, ph,
+    h("figcaption", {title: c.layer}, h("b", {text: short(c.layer)}), h("span", {text: `${c.product} · ${fmtDay(c.start)} · ${c.track ?? ""}${c.direction ? " " + c.direction[0] : ""}`}), h("br"),
+      h("span", {text: `${c.shape.join("×")} ${c.dtype}`})));
+  fig._load = () => thumbQueue.push(async () => {
+    try { const {url} = await fetchImage(id, c, 256); const img = h("img", {src: url, alt: c.layer, loading: "lazy"}); ph.replaceWith(img); }
+    catch (e) { ph.textContent = e.message.slice(0, 90); }
+  }) && pumpThumbs();
+  io.observe(fig); return fig;
+}
+
+// ---- viewer: big image, measured stats, click a pixel to read its stored value
+async function openViewer(id, c) {
+  const dlg = $("#viewer"), info = h("div", {}), imgBox = h("div", {}, h("div", {class: "empty"}, h("span", {class: "spin"}), "Rendering…"));
+  dlg.replaceChildren(h("div", {class: "dlg"}, imgBox, info));
+  if (!dlg.open) dlg.showModal();
+  info.append(h("div", {style: "display:flex;justify-content:space-between;align-items:start;gap:8px"}, h("strong", {text: short(c.layer), title: c.layer}),
+      h("button", {class: "btn ghost", onclick: () => dlg.close()}, "Close")),
+    h("dl", {class: "kv", style: "margin:10px 0"}, h("dt", {text: "Layer"}), h("dd", {text: c.layer}), h("dt", {text: "Granule"}), h("dd", {text: c.granule_id}), h("dt", {text: "Date"}), h("dd", {text: fmtDay(c.start)}),
+      h("dt", {text: "Track"}), h("dd", {text: `${c.track ?? "–"} ${c.direction ?? ""}`}), h("dt", {text: "Grid"}), h("dd", {text: `${c.grid} · EPSG:${c.epsg}`}),
+      h("dt", {text: "Array"}), h("dd", {text: `${c.shape.join(" × ")} ${c.dtype} (${fmtBytes(c.bytes)})`})));
+  const meta = h("div", {}), stats = h("div", {}), probe = h("div", {class: "hint", text: "Click the image to read the stored value of a pixel."});
+  info.append(meta, probe, stats, h("div", {class: "actions"}, h("button", {class: "btn ghost", onclick: () => downloadNpz(id, c.granule_id)}, "Download this granule (.npz)")));
+  try {
+    const {url, meta: m} = await fetchImage(id, c, 1024);
+    const img = h("img", {src: url, alt: c.layer}); imgBox.replaceChildren(img);
+    meta.append(h("div", {class: "cbar"}), h("div", {style: "display:flex;justify-content:space-between;font-size:12px"}, h("span", {text: m.lo != null ? m.lo.toPrecision(4) : ""}),
+      h("span", {text: m.hi != null ? m.hi.toPrecision(4) : ""})), h("p", {class: "hint", text: m.label || ""}));
+    img.onclick = async ev => {
+      const r = img.getBoundingClientRect(), [sh, sw] = m.shown_shape || [0, 0], k = m.decimation_stride || 1, [fh, fw] = m.full_shape || [0, 0];
+      const sc = Math.min(r.width / img.naturalWidth, r.height / img.naturalHeight), cw = img.naturalWidth * sc, ch = img.naturalHeight * sc;
+      const fx = (ev.clientX - r.left - (r.width - cw) / 2) / cw, fy = (ev.clientY - r.top - (r.height - ch) / 2) / ch;
+      if (fx < 0 || fx >= 1 || fy < 0 || fy >= 1) return;                        // a click on the black margin
+      const row = Math.min(fh - 1, Math.floor(fy * sh) * k), col = Math.min(fw - 1, Math.floor(fx * sw) * k);
+      probe.textContent = "Reading…";
+      try {
+        const p = await api(`/api/retrievals/${id}/clips/probe?` + new URLSearchParams({granule: c.granule_id, grid: c.grid, layer: c.layer, row, col}));
+        probe.textContent = `row ${p.row}, col ${p.col}: ` + (p.value == null ? "no data" : p.value.toPrecision(6)) + ` · x ${p.x.toFixed(0)}, y ${p.y.toFixed(0)} (EPSG:${p.epsg})`;
+      } catch (e) { probe.textContent = e.message; }
+    };
+  } catch (e) { imgBox.replaceChildren(h("div", {class: "msg bad", text: e.message})); }
+  try {
+    const st = await api(`/api/retrievals/${id}/clips/stats?` + new URLSearchParams({granule: c.granule_id, grid: c.grid, layer: c.layer}));
+    stats.replaceChildren(h("h3", {text: "Measured on the stored array"}), h("dl", {class: "kv"},
+      h("dt", {text: "Valid pixels"}), h("dd", {text: `${st.valid} of ${st.total}`}),
+      st.min != null ? [h("dt", {text: "min / max"}), h("dd", {text: `${st.min.toPrecision(5)} / ${st.max.toPrecision(5)}`}),
+        h("dt", {text: "mean ± std"}), h("dd", {text: `${st.mean.toPrecision(5)} ± ${st.std.toPrecision(4)}`})] : null));
+    if (st.hist) { const cv = h("canvas", {class: "hist", width: 400, height: 70}); stats.append(cv); drawHist(cv, st.hist.counts); }
+  } catch (e) { stats.replaceChildren(h("p", {class: "hint", text: "Stats unavailable: " + e.message})); }
+}
+function drawHist(cv, counts) {
+  const g = cv.getContext("2d"), mx = Math.max(...counts, 1), w = cv.width / counts.length;
+  g.fillStyle = getComputedStyle(document.documentElement).getPropertyValue("--accent").trim() || "#4b8dff";
+  counts.forEach((n, i) => { const hh = (n / mx) * (cv.height - 2); g.fillRect(i * w + 1, cv.height - hh, w - 2, hh); });
+}
+$("#viewer").addEventListener("close", () => { /* object URLs are released on the next gallery redraw */ });
+
+// ------------------------------------------------------------------ wiring + first paint
+for (const id of ["#lat", "#lon", "#size", "#snap", "#look", "#maxe", "#maxp"]) $(id).addEventListener("input", () => { renderChips(); schedulePreview(); });
+$("#lat").addEventListener("paste", ev => {
+  const m = (ev.clipboardData.getData("text") || "").trim().match(/^(-?\d+(?:\.\d+)?)\s*[,;\s]\s*(-?\d+(?:\.\d+)?)$/);
+  if (m) { ev.preventDefault(); $("#lat").value = m[1]; $("#lon").value = m[2]; schedulePreview(); }
+});
+$("#b-plan").onclick = () => startBatch("plan");
+$("#b-get").onclick = () => startBatch("retrieve");
+
+(async function init() {
+  const f = recall("form", {lat: "23.748", lon: "90.41849", size: "30", snap: false, look: "60", maxe: "", maxp: ""});
+  $("#lat").value = f.lat; $("#lon").value = f.lon; $("#size").value = f.size; $("#snap").checked = !!f.snap;
+  $("#look").value = f.look; $("#maxe").value = f.maxe; $("#maxp").value = f.maxp;
+  state.lastReq = recall("lastReq", null);
+  renderChips(); syncButtons();
+  await Promise.all([refreshHealth(), refreshDisk(), preview()]);
+  try { state.batch = await api("/hub/api/batch"); if (state.batch.status === "running") pollBatch(); else if (state.batch.tiles && state.batch.tiles.length) { renderQueue(); renderCover(); } } catch (e) { /* idle */ }
+  if (recall("tab", "get") === "data") showTab("data");
+  setInterval(refreshHealth, 20000); setInterval(refreshDisk, 30000);
+})();
+</script>
+</body>
+</html>

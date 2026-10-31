@@ -138,14 +138,21 @@ class RetrievalManager:
             return j
         return None
 
-    def list(self) -> list[dict]:
+    _LIST_KEYS = ("id", "status", "mode", "tile", "created_at", "stage", "totals", "seconds", "error",
+                  "request", "window", "bbox")
+
+    def list(self, limit: int | None = 30) -> list[dict]:
+        """Newest first by created_at (ids are random, so name order says nothing). `limit=None` -> everything.
+        Each row carries what a 'what do I have' view needs: request, window and bbox besides status and totals.
+        Reads manifests only: no network, no worker."""
         out = []
         if self.root.is_dir():
-            for d in sorted(self.root.iterdir(), reverse=True):
+            for d in self.root.iterdir():
                 j = self.get(d.name) if _ID_OK.fullmatch(d.name) else None
                 if j:
-                    out.append({k: j.get(k) for k in ("id", "status", "mode", "tile", "created_at", "stage", "totals")})
-        return out[:30]
+                    out.append({k: j.get(k) for k in self._LIST_KEYS})
+        out.sort(key=lambda r: r.get("created_at") or 0, reverse=True)
+        return out if limit is None else out[:max(0, int(limit))]
 
     def busy(self) -> dict | None:
         with self._lock:

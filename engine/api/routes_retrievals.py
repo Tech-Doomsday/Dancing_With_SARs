@@ -1,7 +1,7 @@
 """UI-build-3 — /api/retrievals/*: Resolve -> Plan -> Retrieve -> Inspect -> Preprocess as separate stages.
 
   POST /api/retrievals                    start (mode "plan" = bytes only, "retrieve" = plan + download)  -> 202 {id}
-  GET  /api/retrievals                    recent retrievals
+  GET  /api/retrievals?limit=N            newest first (default 30)
   GET  /api/retrievals/{id}               live state = the manifest (per-granule state, bytes, plan, flags)
   POST /api/retrievals/{id}/cancel        stop asking; in-flight ranges finish; stored clips stay usable
   POST /api/retrievals/{id}/preprocess    P01..P13 from the STORE (zero network) -> {run_id}
@@ -82,8 +82,9 @@ def start_retrieval(body: RetrievalBody):
 
 
 @router.get("")
-def list_retrievals():
-    return {"ok": True, "retrievals": manager().list()}
+def list_retrievals(limit: int = Query(30, ge=1, le=2000)):
+    """Newest first. Each row carries request / window / bbox so a client can show what it covers."""
+    return {"ok": True, "retrievals": manager().list(limit)}
 
 
 @router.get("/{rid}")
