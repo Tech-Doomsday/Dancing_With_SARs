@@ -1,0 +1,5 @@
+# Serving layer (engine/api) — the runs store uses stdlib sqlite3.
+# Everything else the pipeline needs (numpy, scipy, pyproj, pyyaml, h5py, ...)
+# is already pinned by requirements-retrieval.txt.
+fastapi>=0.115
+uvicorn[standard]>=0.30

@@ -1,0 +1,35 @@
+# manifest.yaml — 3.10 river_erosion
+# auto-scaffolded from nisar_hazard_engine.json — fill in / adjust as the pipeline is implemented
+
+code: "3.10"
+name: "river_erosion"
+sensor: "NISAR"
+model_type: "geometry + statistics"
+
+applies: "river corridors (S11 buffer, S3 occurrence 1-99%)"
+
+uses: "M2 water mask time series (G20), baseline"
+uses_codes: 
+  - "M2"
+
+own_prep: "per-epoch water map (adaptive threshold), vectorized bank lines and centerline, epochs aligned to a reference"
+
+own_fetch: "S11 network + widths, S3 historic channel, R9 gauges (compare at similar discharge), R4"
+fetch_codes: 
+  - "S11"
+  - "S3"
+  - "R9"
+  - "R4"
+
+method:
+  - "bank-line displacement per transect, erosion vs accretion sign, significance vs 0.5-pixel location uncertainty, discharge normalization, coherence loss at banks (M1)"
+
+output: "P(significant bank erosion), max retreat m, affected length km, planform change map"
+
+min_epochs: null
+
+status_values:
+  - "SUPPORTED"
+  - "NOT_SUPPORTED"
+  - "INSUFFICIENT_EVIDENCE"
+  - "NOT_MODELLED"

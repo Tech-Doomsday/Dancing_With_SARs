@@ -1,0 +1,37 @@
+# manifest.yaml — 3.07 flood_inundation
+# auto-scaffolded from nisar_hazard_engine.json — fill in / adjust as the pipeline is implemented
+
+code: "3.07"
+name: "flood_inundation"
+sensor: "NISAR"
+model_type: "statistics (+ optional learned slot)"
+
+applies: "land and coast, not permanent ice"
+
+uses: "M2 sigma0 (G20), baseline stats, S3 water occurrence, HAND, slope, M4"
+uses_codes: 
+  - "M2"
+  - "S3"
+  - "M4"
+
+own_prep: "mask shadow and steep terrain, per-tile adaptive thresholds (bimodal histogram) instead of fixed dB constants, log-ratio and z-score vs baseline"
+
+own_fetch: "R4 24-72 h rain, R9 GloFAS + gauges, R9 DFO/EMS labels, M7 DSWx-S1 cross-check"
+fetch_codes: 
+  - "R4"
+  - "R9"
+  - "M7"
+
+method:
+  - "open-water class (co-pol drop) + flooded-vegetation class (co-pol increase, double bounce); region growing from high-confidence seeds, HAND <= 15 m constraint, area filter; confidence = agreement of independent cues (backscatter, HAND, rain/discharge, JRC not permanent)"
+  - "learned slot: gradient boosting on features, weak labels from DFO / EMS masks"
+
+output: "P(flood), flooded area km2, open-water vs flooded-vegetation split, hours since rain peak"
+
+min_epochs: null
+
+status_values:
+  - "SUPPORTED"
+  - "NOT_SUPPORTED"
+  - "INSUFFICIENT_EVIDENCE"
+  - "NOT_MODELLED"

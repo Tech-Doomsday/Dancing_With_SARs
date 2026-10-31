@@ -1,0 +1,35 @@
+# manifest.yaml — 3.13 tropical_cyclone
+# auto-scaffolded from nisar_hazard_engine.json — fill in / adjust as the pipeline is implemented
+
+code: "3.13"
+name: "tropical_cyclone"
+sensor: "Sentinel-1 primary, NISAR where covered"
+model_type: "statistics + pattern detector"
+
+applies: "ocean tiles > 5 km offshore with sensor coverage; active/recent R10 storm or high-wind flag"
+
+uses: "M6 VV/VH (or M2 cross-pol), ocean mask"
+uses_codes: 
+  - "M6"
+  - "M2"
+
+own_prep: "calibration, noise-floor correction (cross-pol), incidence normalization, ~1 km multilook"
+
+own_fetch: "R10 track, R5 10 m wind (prior + check)"
+fetch_codes: 
+  - "R10"
+  - "R5"
+
+method:
+  - "eye/eyewall detector (circular low-backscatter eye inside a high-backscatter ring) and radial structure; absolute wind from a cross-pol model function ONLY for Sentinel-1; L-band gets structure only"
+  - "unlabeled branch: cyclonic structure with no catalog storm -> UNCATALOGUED_CANDIDATE"
+
+output: "P(cyclone present), eye center, max wind (S1 only), distance to best track"
+
+min_epochs: null
+
+status_values:
+  - "SUPPORTED"
+  - "NOT_SUPPORTED"
+  - "INSUFFICIENT_EVIDENCE"
+  - "NOT_MODELLED"

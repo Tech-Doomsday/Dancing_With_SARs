@@ -1,0 +1,29 @@
+data/
+__pycache__/
+.pytest_cache/
+*.pyc
+_backup_before_install_*/
+app-ui/node_modules/
+app-ui/.next/
+node_modules/
+*.zip
+.next/
+
+__pycache__/
+*.py[cod]
+
+node_modules/
+.next/
+dist/
+
+data/
+# playwright / build transients
+app-ui/test-results/
+app-ui/verify-screens/
+app-ui/tsconfig.tsbuildinfo
+app-ui/playwright-report/
+
+# local env (secrets)
+.env.local
+.env.*.local
+app-ui/.env.local

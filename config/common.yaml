@@ -1,0 +1,43 @@
+# Common preprocessing (P01-P13) + registry settings. Every key is optional: defaults live in
+# engine/common/config.py. Any value can also be overridden by an env var / .env entry named
+# NISAR_COMMON_<SECTION>_<KEY> (e.g. NISAR_COMMON_RADAR_WAVELENGTH_M=0.2384).
+#
+# Conventions below are documented in the NISAR specs; the ones that could not be checked end to end say so.
+# while this was written. They are recorded in every bundle's provenance.assumptions.
+
+grids:
+  g80_m: 80            # GUNW / GOFF canonical posting
+  g20_m: 20            # GCOV canonical posting
+  halo_px_g80: 1       # ring around the 10 km tile, in G80 pixels (1 px = 80 m = 4 G20 px)
+
+window:
+  lookback_days: 120   # search window = [as_of - lookback_days, as_of]
+  max_gcov_epochs: 24  # last N backscatter epochs kept per (track, direction) stack
+  max_gunw_pairs: 60
+  epoch_merge_minutes: 10   # adjacent frames of one pass are one epoch
+
+products:
+  frequency: A
+  include_goff: false  # offsets normally come from GUNW pixelOffsets
+
+radar:
+  wavelength_m: 0.2384          # NISAR L-band; centerFrequency is not carried by the retrieved clip
+  phase_sign: -1                # ref*conj(sec), ref earlier -> toward-sensor = -lambda/4pi * phase (consistent with NISAR ATBD JPL D-95677; no ground-truth check)
+  los_vector_points: ground_to_sensor   # NISAR L2 GUNW spec: "from target to sensor"; matched numerically on one real product
+  look_side: null               # "left" | "right" when known (identification/lookDirection): lets P05 catch a flipped LOS convention
+  gunw_effective_looks: 100     # assumption (number of looks is not carried by the clip)
+
+temporal:
+  min_baseline_epochs: 3        # fewer prior epochs -> cold_start
+  seasonal_min_history_days: 365
+
+stable:
+  coherence_min: 0.5
+  slope_max_deg: 10
+  nochange_k: 3.0
+
+registry:
+  task_timeout_s: 900
+  start_method: spawn           # never fork (retrieval client owns threads and an event loop)
+  run_unknown: false            # skip pipelines whose applicability could not be evaluated (reported, never silent)
+  gate_min_epochs: true         # answer INSUFFICIENT_EVIDENCE for min_epochs pipelines without launching a worker

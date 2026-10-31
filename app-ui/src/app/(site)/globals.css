@@ -1,0 +1,422 @@
+/* Design tokens inherited from the reference app for continuity
+   (page #FAF9F6, ink #1C1A17, teal #2C5F58, terracotta #9E3B2C, gold #B08D57). */
+@import "tailwindcss";
+
+:root {
+  --page: #faf9f6;
+  --ink: #1c1a17;
+  --muted: #8a837b;
+  --teal: #2c5f58;
+  --terracotta: #9e3b2c;
+  --gold: #b08d57;
+  --border: #e7e2da;
+}
+
+body {
+  background: var(--page);
+  color: var(--ink);
+  font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+}
+
+.mono {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+}
+
+/* keyboard focus must always be visible */
+:where(a, button, input, select, textarea):focus-visible {
+  outline: 2px solid var(--teal);
+  outline-offset: 2px;
+}
+
+/* loading placeholders */
+.skeleton {
+  background: linear-gradient(90deg, #f0ece4 25%, #f7f4ee 50%, #f0ece4 75%);
+  background-size: 200% 100%;
+  animation: skeleton 1.4s ease-in-out infinite;
+}
+@keyframes skeleton {
+  from { background-position: 200% 0; }
+  to { background-position: -200% 0; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .skeleton { animation: none; }
+}
+
+/* ==================================================================== */
+/* Speckle — the cinematic landing, wired in from CodexUjayer/speckle.  */
+/*                                                                      */
+/* Serves the "/" route (src/app/(landing)). Token values, component    */
+/* classes and section styles are copied from the standalone site's     */
+/* globals.css. The base rules are SCOPE-GUARDED: Speckle's tokens and  */
+/* element styles live on .speckle-page (the landing wrapper) and on    */
+/* html.speckle-root (a class RootClassSync adds to <html> only while    */
+/* the landing route is mounted), so nothing here can restyle the       */
+/* console pages above — including this file's own --border/--muted     */
+/* tokens, which stay the console's everywhere outside the wrapper.      */
+/* ==================================================================== */
+
+@custom-variant dark (&:is(.dark *));
+
+@theme inline {
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --font-sans: var(--font-speckle-sans);
+  --font-mono: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  --font-display: var(--font-speckle-display);
+  --color-sidebar-ring: var(--sidebar-ring);
+  --color-sidebar-border: var(--sidebar-border);
+  --color-sidebar-accent-foreground: var(--sidebar-accent-foreground);
+  --color-sidebar-accent: var(--sidebar-accent);
+  --color-sidebar-primary-foreground: var(--sidebar-primary-foreground);
+  --color-sidebar-primary: var(--sidebar-primary);
+  --color-sidebar-foreground: var(--sidebar-foreground);
+  --color-sidebar: var(--sidebar);
+  --color-chart-5: var(--chart-5);
+  --color-chart-4: var(--chart-4);
+  --color-chart-3: var(--chart-3);
+  --color-chart-2: var(--chart-2);
+  --color-chart-1: var(--chart-1);
+  --color-ring: var(--ring);
+  --color-input: var(--input);
+  --color-border: var(--border);
+  --color-destructive: var(--destructive);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-accent: var(--accent);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-muted: var(--muted);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-secondary: var(--secondary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-primary: var(--primary);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-popover: var(--popover);
+  --color-card-foreground: var(--card-foreground);
+  --color-card: var(--card);
+  --radius-sm: calc(var(--radius) - 4px);
+  --radius-md: calc(var(--radius) - 2px);
+  --radius-lg: var(--radius);
+  --radius-xl: calc(var(--radius) + 4px);
+}
+
+/* base — the standalone site's :root + body rules, scoped to the
+   landing wrapper (the chapter loop re-grades --accent at runtime on
+   the Experience root, an inner element, so it still wins) */
+.speckle-page {
+  --radius: 0.625rem;
+  /* the story accent — re-graded per chapter from the shared loop */
+  --accent: #a9bfd6;
+  --background: oklch(0.145 0 0);
+  --foreground: oklch(0.985 0 0);
+  --card: oklch(0.205 0 0);
+  --card-foreground: oklch(0.985 0 0);
+  --popover: oklch(0.205 0 0);
+  --popover-foreground: oklch(0.985 0 0);
+  --primary: oklch(0.922 0 0);
+  --primary-foreground: oklch(0.205 0 0);
+  --secondary: oklch(0.269 0 0);
+  --secondary-foreground: oklch(0.985 0 0);
+  --muted: oklch(0.269 0 0);
+  --muted-foreground: oklch(0.708 0 0);
+  --accent: oklch(0.269 0 0);
+  --accent-foreground: oklch(0.985 0 0);
+  --destructive: oklch(0.704 0.191 22.216);
+  --border: oklch(1 0 0 / 10%);
+  --input: oklch(1 0 0 / 15%);
+  --ring: oklch(0.556 0 0);
+  --chart-1: oklch(0.488 0.243 264.376);
+  --chart-2: oklch(0.696 0.17 162.48);
+  --chart-3: oklch(0.769 0.188 70.08);
+  --chart-4: oklch(0.627 0.265 303.9);
+  --chart-5: oklch(0.645 0.246 16.439);
+  --sidebar: oklch(0.205 0 0);
+  --sidebar-foreground: oklch(0.985 0 0);
+  --sidebar-primary: oklch(0.488 0.243 264.376);
+  --sidebar-primary-foreground: oklch(0.985 0 0);
+  --sidebar-accent: oklch(0.269 0 0);
+  --sidebar-accent-foreground: oklch(0.985 0 0);
+  --sidebar-border: oklch(1 0 0 / 10%);
+  --sidebar-ring: oklch(0.556 0 0);
+
+  color-scheme: dark;
+  min-height: 100svh;
+  @apply bg-[#04070d] text-foreground antialiased;
+  font-family: var(--font-speckle-sans), ui-sans-serif, system-ui, sans-serif;
+  font-feature-settings: "tnum" 1, "ss01" 1;
+  /* clip (not hidden) — never creates a scroll container, so the pinned
+     terrain sequence can use position: sticky safely */
+  overflow-x: clip;
+}
+.speckle-page * {
+  @apply border-border outline-ring/50;
+}
+
+/* document chrome — applied only while the landing route is mounted
+   (RootClassSync toggles html.speckle-root) */
+html.speckle-root {
+  color-scheme: dark;
+  scroll-behavior: smooth;
+}
+html.speckle-root body {
+  background: #04070d;
+}
+@media (prefers-reduced-motion: reduce) {
+  html.speckle-root {
+    scroll-behavior: auto;
+  }
+}
+html.speckle-root ::selection {
+  background: rgba(143, 199, 242, 0.28);
+  color: #fff;
+}
+html.speckle-root ::-webkit-scrollbar {
+  width: 10px;
+}
+html.speckle-root ::-webkit-scrollbar-track {
+  background: #04070d;
+}
+html.speckle-root ::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.14);
+  border-radius: 999px;
+  border: 2px solid #04070d;
+}
+html.speckle-root ::-webkit-scrollbar-thumb:hover {
+  background: rgba(255, 255, 255, 0.26);
+}
+.speckle-page img {
+  -webkit-user-drag: none;
+}
+
+/* ------------------------------------------------------------------ */
+/* component classes — used only by the Speckle landing components      */
+/* ------------------------------------------------------------------ */
+
+@layer components {
+  /* small uppercase kicker above chapter headings */
+  .chapter-kicker {
+    @apply text-[10px] font-medium uppercase tracking-[0.34em] text-[#7e8ea6];
+  }
+
+  /* evidence stage typography */
+  .stage-number {
+    @apply font-display text-sm italic tracking-[0.2em] text-[var(--accent)];
+  }
+  .stage-title {
+    @apply mt-3 font-display text-3xl font-light text-white sm:text-4xl;
+  }
+  .stage-body {
+    @apply mt-4 text-sm leading-relaxed text-[#93a3ba] sm:text-[15px];
+  }
+
+  /* film grain — a whisper of texture over imagery */
+  .grain {
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='140' height='140'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='2' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='140' height='140' filter='url(%23n)' opacity='0.5'/%3E%3C/svg%3E");
+    opacity: 0.05;
+    mix-blend-mode: overlay;
+    pointer-events: none;
+  }
+
+  /* title-card word masks — each word rises from its own overflow clip.
+     The padding/negative-margin pair keeps descenders (g, y, p) intact. */
+  .w-mask {
+    display: inline-block;
+    overflow: hidden;
+    vertical-align: top;
+    padding-bottom: 0.12em;
+    margin-bottom: -0.12em;
+  }
+  .w-mask-i {
+    display: inline-block;
+    will-change: transform;
+  }
+}
+
+/* scroll cue — a slow falling thread of light */
+.cue-line {
+  animation: cue-fall 2.4s cubic-bezier(0.65, 0, 0.35, 1) infinite;
+}
+@keyframes cue-fall {
+  0% {
+    transform: translateY(-120%);
+  }
+  60%,
+  100% {
+    transform: translateY(320%);
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .cue-line {
+    animation: none;
+  }
+}
+
+/* ------------------------------------------------------------------ */
+/* the architecture stack — an exploded machine (chapter VII)           */
+
+.arch-stage {
+  perspective: 1500px;
+  perspective-origin: 50% 50%;
+}
+.arch-stack {
+  transform-style: preserve-3d;
+  will-change: transform;
+}
+
+/* the slab itself — a solid, quiet panel (never glass) */
+.arch-slab {
+  border-radius: 14px;
+  border: 1px solid rgba(255, 255, 255, 0.09);
+  background: #0a0f18;
+  padding: 1.15rem 1.35rem;
+  box-shadow: 0 24px 60px rgba(0, 0, 0, 0.42);
+  transition: border-color 0.55s ease, box-shadow 0.55s ease;
+}
+
+/* flat mode — narrow screens, or reduced motion: a readable ledger */
+.arch-pin {
+  height: auto;
+}
+.arch-sticky {
+  position: static;
+  height: auto;
+  display: block;
+  padding: 2.5rem 1.25rem 3.5rem;
+}
+.arch-stack {
+  height: auto;
+  display: grid;
+  gap: 14px;
+}
+.arch-slab {
+  position: relative;
+}
+.arch-detail {
+  display: none;
+}
+.arch-caption {
+  display: none;
+}
+.arch-caption-flat {
+  display: block;
+}
+
+/* exploded mode — thin layers, taken apart on scroll */
+@media (min-width: 1024px) and (prefers-reduced-motion: no-preference) {
+  .arch-pin {
+    height: 300svh;
+  }
+  .arch-sticky {
+    position: sticky;
+    top: 0;
+    height: 100svh;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    /* gaps breathe with the viewport height, so the caption, the machine
+       and the story panel always fit inside one screen together */
+    gap: clamp(1.25rem, 3.5svh, 2.5rem);
+    padding: 0;
+  }
+  /* the stage reserves the vertical room the explosion needs — it
+     shrinks on short screens so the layers can never leave the frame */
+  .arch-stage {
+    width: min(660px, 86vw);
+    height: min(430px, 50svh);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
+  .arch-stack {
+    position: relative;
+    /* the slabs are absolutely placed, so they contribute no intrinsic
+       width — without this the flex-item stack collapses to zero and the
+       tiles shrink to slivers that can only fit their numbers */
+    width: 100%;
+    height: 72px;
+    display: block;
+  }
+  .arch-slab {
+    position: absolute;
+    inset: 0;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 1rem;
+    padding: 0 1.35rem;
+    /* a thin layer reads as one quiet line — the tagline lives in the
+       detail panel below, so the card can never overflow its text */
+    flex-wrap: nowrap;
+    /* the z-range is centred on the stack plane, so the explosion
+           spreads up and down from the middle — not just upward */
+    transform: translateZ(
+      calc((var(--i, 2) - 2) * var(--gap, 26) * 1px)
+    );
+  }
+  .arch-slab-tag {
+    display: none;
+  }
+  /* the layer bodies live in the detail panel instead */
+  .arch-slab-body {
+    display: none;
+  }
+  .arch-detail {
+    display: block;
+    position: relative;
+    width: min(660px, 86vw);
+    min-height: 150px;
+  }
+  .arch-caption {
+    display: block;
+  }
+  .arch-caption-flat {
+    display: none;
+  }
+  /* the stage the data has reached — a soft lit edge */
+  .arch-sticky[data-active="0"] .arch-slab:nth-child(1),
+  .arch-sticky[data-active="1"] .arch-slab:nth-child(2),
+  .arch-sticky[data-active="2"] .arch-slab:nth-child(3),
+  .arch-sticky[data-active="3"] .arch-slab:nth-child(4),
+  .arch-sticky[data-active="4"] .arch-slab:nth-child(5) {
+    border-color: color-mix(in srgb, var(--accent) 55%, transparent);
+    box-shadow:
+      0 24px 60px rgba(0, 0, 0, 0.42),
+      0 0 0 1px color-mix(in srgb, var(--accent) 22%, transparent);
+  }
+}
+
+/* the detail items — one body per layer, crossfading with the active slab */
+.arch-detail-item {
+  position: absolute;
+  inset: 0 auto auto 0;
+  right: 0;
+  opacity: 0;
+  transform: translateY(10px);
+  transition: opacity 0.55s ease, transform 0.55s ease;
+  pointer-events: none;
+}
+.arch-sticky[data-active="0"] .arch-detail-item[data-d="0"],
+.arch-sticky[data-active="1"] .arch-detail-item[data-d="1"],
+.arch-sticky[data-active="2"] .arch-detail-item[data-d="2"],
+.arch-sticky[data-active="3"] .arch-detail-item[data-d="3"],
+.arch-sticky[data-active="4"] .arch-detail-item[data-d="4"] {
+  opacity: 1;
+  transform: none;
+}
+
+/* ------------------------------------------------------------------ */
+/* correlation chains — the event → signature → consequence rail        */
+
+.corr-card .corr-media {
+  transition: transform 0.6s cubic-bezier(0.22, 0.61, 0.36, 1);
+}
+@media (hover: hover) and (prefers-reduced-motion: no-preference) {
+  .corr-card:hover .corr-media {
+    transform: perspective(900px) rotateX(1.6deg) rotateY(-1.8deg) scale(1.015);
+  }
+  .corr-card:hover .corr-media img {
+    transform: scale(1.045);
+  }
+}
+.corr-media img {
+  transition: transform 1.4s cubic-bezier(0.22, 0.61, 0.36, 1);
+}

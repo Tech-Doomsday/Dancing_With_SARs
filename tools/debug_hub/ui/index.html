@@ -1,0 +1,567 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="hub-token" content="__HUB_TOKEN__">
+<title>SAR debug hub</title>
+<style>
+:root{--bg:#0f141a;--panel:#161d26;--panel2:#121820;--line:#263040;--soft:#1c2531;--text:#dbe3ec;--mute:#8091a5;--mute2:#5b6d82;
+ --ok:#3fb88b;--warn:#e0a638;--bad:#e26c6c;--info:#5c8dd6;--acc:#7aa7e8;
+ --mono:ui-monospace,"JetBrains Mono","SF Mono",Menlo,Consolas,monospace;--sans:-apple-system,"Segoe UI",Inter,Helvetica,Arial,sans-serif}
+*{box-sizing:border-box}html,body{margin:0;height:100%}
+body{background:var(--bg);color:var(--text);font:13px/1.45 var(--sans);display:flex;flex-direction:column}
+button,input,select{font:inherit;color:inherit}
+header.top{display:flex;flex-wrap:wrap;gap:10px 14px;align-items:flex-end;padding:10px 16px;background:var(--panel2);border-bottom:1px solid var(--line)}
+.brand{font-weight:650;letter-spacing:.3px;margin-right:6px}.brand small{display:block;color:var(--mute);font-weight:400;font-size:11px}
+.fld{display:flex;flex-direction:column;gap:3px}.fld label{font-size:10.5px;color:var(--mute);text-transform:uppercase;letter-spacing:.6px}
+input,select{background:#0c1117;border:1px solid var(--line);border-radius:5px;padding:6px 8px;min-width:0}
+input:focus,select:focus{outline:1px solid var(--acc);border-color:var(--acc)}
+input.num{width:118px;font-family:var(--mono)}input.sm{width:84px}input.dt{width:178px}
+button.run{background:var(--acc);color:#0b1220;border:0;border-radius:5px;padding:8px 18px;font-weight:650;cursor:pointer}
+button.run:disabled{background:var(--mute2);cursor:not-allowed}
+button.btn{background:var(--soft);border:1px solid var(--line);border-radius:5px;padding:5px 11px;cursor:pointer}button.btn:hover{border-color:var(--acc)}
+.tileinfo{font:12px var(--mono);color:var(--mute);padding-bottom:7px;max-width:520px}.tileinfo b{color:var(--text);font-weight:600}.tileinfo .bad{color:var(--bad)}
+.pill{display:inline-flex;align-items:center;gap:6px;padding:3px 10px;border-radius:99px;background:var(--soft);border:1px solid var(--line);font-size:12px}
+.dot{width:8px;height:8px;border-radius:50%;background:var(--mute2)}.dot.running{background:var(--warn);animation:p 1s infinite}.dot.done{background:var(--ok)}.dot.failed{background:var(--bad)}
+@keyframes p{50%{opacity:.35}}
+#banner{display:none;background:#5a1f1f;color:#ffd7d7;text-align:center;padding:5px;font-weight:650;letter-spacing:.4px;border-bottom:1px solid #8b3a3a}
+nav.tabs{display:flex;gap:2px;padding:0 12px;background:var(--panel2);border-bottom:1px solid var(--line)}
+nav.tabs button{background:none;border:0;border-bottom:2px solid transparent;padding:10px 18px;cursor:pointer;color:var(--mute);font-weight:650;letter-spacing:.5px}
+nav.tabs button.on{color:var(--text);border-color:var(--acc)}nav.tabs button .c{margin-left:7px;font:11px var(--mono);color:var(--mute2)}
+main{flex:1;overflow:auto;padding:16px 18px 70px}
+h1{font-size:19px;letter-spacing:1.2px;margin:2px 0 14px;font-weight:700}
+h2{font-size:12px;text-transform:uppercase;letter-spacing:.9px;color:var(--mute);margin:22px 0 8px;font-weight:650}
+.card{background:var(--panel);border:1px solid var(--line);border-radius:7px;padding:12px 14px;margin-bottom:12px}
+.grid2{display:grid;grid-template-columns:repeat(auto-fit,minmax(340px,1fr));gap:12px}
+table{border-collapse:collapse;width:100%}th,td{text-align:left;padding:4px 9px;border-bottom:1px solid var(--soft);vertical-align:top}
+th{font-size:10.5px;text-transform:uppercase;letter-spacing:.5px;color:var(--mute);font-weight:600;white-space:nowrap}
+td.m,.m{font-family:var(--mono);font-size:12px}td.r{text-align:right}
+.kv{display:grid;grid-template-columns:max-content 1fr;gap:3px 14px}.kv dt{color:var(--mute)}.kv dd{margin:0;font-family:var(--mono);font-size:12px;word-break:break-all}
+.b{display:inline-block;padding:1px 8px;border-radius:4px;font-size:11px;font-weight:650;letter-spacing:.3px;border:1px solid transparent;white-space:nowrap}
+.b.ok,.b.READY,.b.implemented,.b.present,.b.done,.b.network{background:#12342a;color:#6fe0b6;border-color:#1f5a47}
+.b.warn,.b.LAUNCHES_WITH_GAPS,.b.declarations,.b.empty,.b.INSUFFICIENT_EVIDENCE,.b.skipped,.b.clip-cache,.b.no_channel{background:#3a2e12;color:#f0c35c;border-color:#6a5420}
+.b.bad,.b.fail,.b.failed,.b.BLOCKED,.b.absent,.b.missing,.b.error,.b.syntax_error,.b.no_producer,.b.stale-clip-cache,.b.broken{background:#3d1a1a;color:#ff9a9a;border-color:#7a3333}
+.b.info,.b.running,.b.memory{background:#162b49;color:#93bbf5;border-color:#2c4f84}
+.b.stub,.b.NOT_APPLICABLE,.b.skip,.b.not{background:#232b36;color:#93a3b6;border-color:#364252}
+.b.SUPPORTED{background:#12342a;color:#6fe0b6;border-color:#1f5a47}
+.b.NOT_SUPPORTED{background:#3d1a1a;color:#ff9a9a;border-color:#7a3333}
+.b.UNCATALOGUED_CANDIDATE,.b.PENDING{background:#162b49;color:#93bbf5;border-color:#2c4f84}
+.b.NOT_MODELLED{background:#232b36;color:#93a3b6;border-color:#364252}
+.ev{margin:2px 0}.ev .claim{display:block;margin:1px 0}.ev .sup{font:11px var(--mono);color:var(--mute)}
+.b.running{animation:p 1s infinite}
+details{margin:0 0 8px}details>summary{cursor:pointer;padding:6px 2px;color:var(--text);font-weight:600;list-style:none}
+details>summary::-webkit-details-marker{display:none}details>summary:before{content:"▸";display:inline-block;width:14px;color:var(--mute)}details[open]>summary:before{content:"▾"}
+.sub{color:var(--mute);font-weight:400;margin-left:8px;font-size:12px}
+.gal{display:grid;grid-template-columns:repeat(auto-fill,minmax(210px,1fr));gap:10px}
+.lc{background:var(--panel2);border:1px solid var(--line);border-radius:6px;overflow:hidden;display:flex;flex-direction:column}
+.lc .im{position:relative;background:repeating-conic-gradient(#1a222c 0 25%,#141b23 0 50%) 0 0/12px 12px;aspect-ratio:1/1;cursor:crosshair;display:flex;align-items:center;justify-content:center}
+.lc img{max-width:100%;max-height:100%;image-rendering:pixelated;display:block}
+.lc .t{padding:6px 8px;font-size:11.5px}.lc .t b{display:block;word-break:break-all;font-weight:600}.lc .t span{color:var(--mute);font-family:var(--mono);font-size:11px;display:block}
+.lc .px{padding:3px 8px;font:11px var(--mono);color:var(--acc);min-height:20px;border-top:1px solid var(--soft)}
+.chips{display:flex;flex-wrap:wrap;gap:5px}.chip{font:11.5px var(--mono);padding:2px 8px;border-radius:4px;background:var(--soft);border:1px solid var(--line)}
+.chip.ok{border-color:#1f5a47;color:#6fe0b6}.chip.bad{border-color:#7a3333;color:#ff9a9a}.chip.warn{border-color:#6a5420;color:#f0c35c}
+.tl{display:flex;gap:5px;flex-wrap:wrap}.tl a{display:block;min-width:84px;padding:6px 8px;border-radius:6px;background:var(--panel2);border:1px solid var(--line);text-decoration:none;color:inherit;cursor:pointer}
+.tl a b{display:block;font-family:var(--mono)}.tl a span{display:block;font-size:11px;color:var(--mute)}.tl a.ok{border-color:#1f5a47}.tl a.error{border-color:#7a3333}.tl a.skipped{opacity:.65}.tl a.wait{opacity:.35}
+pre{background:#0b1016;border:1px solid var(--line);border-radius:6px;padding:9px 11px;overflow:auto;max-height:340px;margin:6px 0;font:11.5px/1.45 var(--mono);white-space:pre-wrap;word-break:break-word}
+.note{color:var(--mute);font-size:12px}div.empty{color:var(--mute2);padding:22px 4px}
+.mx td,.mx th{padding:3px 5px;text-align:center}.mx td.n,.mx th.n{text-align:left;white-space:nowrap}
+.mx .c{width:30px;height:20px;border-radius:3px;display:inline-block;vertical-align:middle}
+.c.ok{background:#1d6b52}.c.empty{background:#8a6a1b}.c.missing{background:#8b3535}.c.no_channel{background:#6b5a1f;background-image:repeating-linear-gradient(45deg,transparent 0 4px,#0004 4px 8px)}.c.absent{background:#8b3535}.c.none{background:transparent;border:1px dashed var(--line)}
+.c.no_producer{background:#8b3535}.c.present{background:#1d6b52}
+.legend{display:flex;gap:14px;flex-wrap:wrap;margin:6px 0 10px;color:var(--mute);font-size:12px}.legend i{display:inline-block;width:12px;height:12px;border-radius:2px;vertical-align:-2px;margin-right:5px}
+footer.live{position:fixed;left:0;right:0;bottom:0;background:#0b1016;border-top:1px solid var(--line);z-index:20}
+footer.live .bar{display:flex;gap:18px;align-items:center;padding:6px 16px;font:12px var(--mono);color:var(--mute);overflow:hidden;white-space:nowrap}
+footer.live .bar b{color:var(--text);font-weight:600}footer.live .grow{flex:1;overflow:hidden;text-overflow:ellipsis}
+#log{display:none;max-height:36vh;overflow:auto;border-top:1px solid var(--line);padding:6px 16px;font:11.5px var(--mono)}#log div{padding:1px 0;color:var(--mute)}#log .k-error{color:var(--bad)}#log .k-warn{color:var(--warn)}#log .k-step,#log .k-retrieval,#log .k-done{color:var(--ok)}#log .k-call,#log .k-call_end{color:var(--acc)}
+#modal{display:none;position:fixed;inset:0;background:#000b;z-index:50;align-items:center;justify-content:center}#modal .box{background:var(--panel);border:1px solid var(--line);border-radius:8px;max-width:94vw;max-height:94vh;overflow:auto;padding:12px 14px}
+#modal img{max-width:88vw;max-height:70vh;image-rendering:pixelated;display:block;cursor:crosshair;background:#0b1016}
+.spark{display:block;width:100%;height:46px}
+.err{color:var(--bad)}
+</style>
+</head>
+<body>
+<header class="top">
+  <div class="brand">SAR DEBUG HUB<small>real engine path · observe only</small></div>
+  <div class="fld"><label for="lat">latitude</label><input id="lat" class="num" inputmode="decimal" value="34.0500" autocomplete="off"></div>
+  <div class="fld"><label for="lon">longitude</label><input id="lon" class="num" inputmode="decimal" value="-118.2500" autocomplete="off"></div>
+  <div class="tileinfo" id="tileinfo">…</div>
+  <div class="fld"><label for="asof">as of (UTC, blank = now)</label><input id="asof" class="dt" placeholder="2026-10-25T00:00:00Z"></div>
+  <div class="fld"><label for="lookback">lookback days</label><input id="lookback" class="sm" inputmode="numeric"></div>
+  <div class="fld" id="srcbox" style="display:none"><label for="src">source</label><select id="src"></select></div>
+  <div class="fld" id="ancbox" style="display:none"><label for="anc">synthetic ancillary</label><select id="anc"><option value="0">no</option><option value="1">yes</option></select></div>
+  <button class="run" id="run">RUN</button>
+  <span class="pill" id="jobpill"><span class="dot" id="jobdot"></span><span id="jobtxt">no job yet</span></span>
+</header>
+<div id="banner"></div>
+<nav class="tabs" id="tabs">
+  <button data-t="retrieval" class="on">DATA RETRIEVAL<span class="c" id="c-retrieval"></span></button>
+  <button data-t="health">HEALTH<span class="c" id="c-health"></span></button>
+  <button data-t="processing">DATA PROCESSING<span class="c" id="c-processing"></span></button>
+  <button data-t="pipelines">PIPELINES<span class="c" id="c-pipelines"></span></button>
+</nav>
+<main id="main"></main>
+<footer class="live">
+  <div class="bar"><span><span class="dot" id="fdot"></span> <b id="fstate">idle</b></span><span id="fstage">–</span><span id="felapsed">0.0 s</span>
+    <span id="fnet">net: –</span><span class="grow" id="flast">–</span><button class="btn" id="logbtn">log ▴</button></div>
+  <div id="log"></div>
+</footer>
+<div id="modal"><div class="box" id="modalbox"></div></div>
+
+<script>
+"use strict";
+const TOKEN = document.querySelector('meta[name=hub-token]').content;
+const S = {tab:"retrieval", cfg:null, job:null, jobId:null, events:[], net:[], health:null, healthErr:null, open:new Set(), es:null,
+           tile:null, netcheck:null, tests:null, showAll:new Set(), t0:null, timer:null};
+const $ = id => document.getElementById(id);
+const esc = s => String(s ?? "").replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
+const fB = n => n == null ? "–" : n < 1024 ? n + " B" : n < 1048576 ? (n/1024).toFixed(1) + " KB" : n < 1073741824 ? (n/1048576).toFixed(1) + " MB" : (n/1073741824).toFixed(2) + " GB";
+const fN = (v, d=4) => v == null ? "–" : (typeof v !== "number" ? esc(v) : (Number.isInteger(v) ? v.toLocaleString() : (Math.abs(v) >= 1e5 || (v !== 0 && Math.abs(v) < 1e-3)) ? v.toExponential(3) : +v.toPrecision(d) + ""));
+const badge = (s, txt) => `<span class="b ${esc(String(s).replace(/[^\w-]/g,""))}">${esc(txt ?? s)}</span>`;
+async function api(path, opt={}) {
+  const r = await fetch(path, {...opt, headers:{...(opt.headers||{}), "X-Hub-Token": TOKEN, "Content-Type":"application/json"}});
+  const j = await r.json().catch(() => ({error: "non-JSON response (" + r.status + ")"}));
+  if (!r.ok) throw new Error(j.error || r.statusText);
+  return j;
+}
+const J = () => S.job || {};
+
+/* ------------------------------------------------------------------ coordinates (live) */
+function parsePair(t) { const m = String(t).match(/^\s*(-?\d+(?:\.\d+)?)\s*[,;\s]\s*(-?\d+(?:\.\d+)?)\s*$/); return m ? [parseFloat(m[1]), parseFloat(m[2])] : null; }
+["lat","lon"].forEach(id => $(id).addEventListener("input", e => {
+  const p = parsePair(e.target.value);
+  if (p) { $("lat").value = p[0]; $("lon").value = p[1]; }          // "lat, lon" pasted into either box
+  clearTimeout(S.tt); S.tt = setTimeout(updateTile, 180);
+}));
+async function updateTile() {
+  const lat = parseFloat($("lat").value), lon = parseFloat($("lon").value);
+  if (!isFinite(lat) || !isFinite(lon)) { $("tileinfo").innerHTML = '<span class="bad">enter numeric lat / lon</span>'; S.tile = null; return; }
+  try {
+    const t = await api(`/api/tile?lon=${lon}&lat=${lat}`);
+    S.tile = t;
+    $("tileinfo").innerHTML = `tile <b>${esc(t.id)}</b> · EPSG:${t.epsg} · ${t.size_m / 1000} km · lon ${t.bbox[0].toFixed(4)}…${t.bbox[2].toFixed(4)} · lat ${t.bbox[1].toFixed(4)}…${t.bbox[3].toFixed(4)} · fetch margin ${t.margin_m} m`;
+  } catch (e) { S.tile = null; $("tileinfo").innerHTML = `<span class="bad">${esc(e.message)}</span>`; }
+}
+
+/* ------------------------------------------------------------------ run / live events */
+$("run").onclick = async () => {
+  const body = {lat: parseFloat($("lat").value), lon: parseFloat($("lon").value), as_of: $("asof").value.trim() || null,
+                lookback_days: parseFloat($("lookback").value) || null, source: $("src").value, synthetic_ancillary: $("anc").value === "1"};
+  if (!isFinite(body.lat) || !isFinite(body.lon)) { alert("latitude and longitude must be numbers"); return; }
+  try { const j = await api("/api/run", {method:"POST", body: JSON.stringify(body)}); attach(j.id); }
+  catch (e) { alert("could not start: " + e.message); }
+};
+function attach(id) {
+  if (S.es) S.es.close();
+  S.jobId = id; S.events = []; S.net = []; S.job = {id, state:"running", steps:[], retrieval:null, final:null, handoff:null};
+  S.t0 = Date.now(); $("log").innerHTML = ""; render();
+  const es = S.es = new EventSource(`/api/events?id=${id}&after=0`);
+  es.onmessage = m => onEvent(JSON.parse(m.data));
+  es.addEventListener("end", () => { es.close(); refresh(); });
+  es.onerror = () => { /* the server closes the stream when the job ends; refresh settles the final state */ };
+  clearInterval(S.timer); S.timer = setInterval(tick, 200);
+}
+function onEvent(e) {
+  S.events.push(e);
+  const d = document.createElement("div"); d.className = "k-" + e.kind;
+  d.textContent = `${e.t.toFixed(2).padStart(7)}s  ${e.kind.padEnd(9)} ${e.stage || ""}  ${e.msg}`;
+  const L = $("log"), stick = L.scrollTop + L.clientHeight >= L.scrollHeight - 8; L.appendChild(d); if (stick) L.scrollTop = L.scrollHeight;
+  if (e.kind === "net") S.net.push([e.t, e.data.bytes_fetched || 0, e.data.requests || 0]);
+  if (e.kind === "job" && e.data.tile) { J().tile = e.data.tile; }
+  if (e.kind === "job" && e.data.source) { J().source = e.data.source; banner(); }
+  $("fstage").textContent = e.stage || "–"; $("flast").textContent = e.msg;
+  if (e.kind === "net") liveNet(e.data);
+  if (["retrieval","step","final","handoff","pipelines","done","error","job"].includes(e.kind)) { clearTimeout(S.rt); S.rt = setTimeout(refresh, 300); }
+  else if (S.tab === "retrieval" && ["call","call_end","warn"].includes(e.kind)) { clearTimeout(S.lt); S.lt = setTimeout(renderLiveBits, 120); }
+}
+async function refresh() {
+  if (!S.jobId) return;
+  try { S.job = await api(`/api/job?id=${S.jobId}&part=all`); } catch (e) { return; }
+  if (S.job.state === "done" || S.job.state === "failed") { clearInterval(S.timer); tick(); }
+  banner(); render();
+}
+function tick() {
+  const j = J(), run = j.state === "running" || j.state === "queued";
+  const el = run ? (Date.now() - S.t0) / 1000 : (j.seconds ?? 0);
+  $("felapsed").textContent = el.toFixed(1) + " s";
+  const st = j.state || "idle"; $("fstate").textContent = st; $("fdot").className = "dot " + st; $("jobdot").className = "dot " + st;
+  $("jobtxt").textContent = j.id ? `${j.id} · ${st}${j.tile && j.tile.id ? " · " + j.tile.id : ""}` : "no job yet";
+  $("run").disabled = run;
+}
+function liveNet(m) {
+  $("fnet").innerHTML = `net: <b>${m.requests ?? 0}</b> req · <b>${fB(m.bytes_fetched)}</b> wire · <b>${fB(m.bytes_useful)}</b> useful · retries <b>${m.retries ?? 0}</b>`;
+  const el = $("livenet"); if (el) el.innerHTML = netPanelInner(m);
+}
+function banner() {
+  const b = $("banner"), s = J().source;
+  if (s && s.kind === "selftest") { b.style.display = "block"; b.textContent = "SELF-TEST SOURCE: synthetic fixture arrays, NOT NISAR data. Used only to test this hub."; }
+  else b.style.display = "none";
+}
+$("logbtn").onclick = () => { const L = $("log"); const on = L.style.display !== "block"; L.style.display = on ? "block" : "none"; $("logbtn").textContent = on ? "log ▾" : "log ▴"; if (on) L.scrollTop = L.scrollHeight; };
+
+/* ------------------------------------------------------------------ tabs */
+$("tabs").onclick = e => { const t = e.target.closest("button"); if (!t) return; S.tab = t.dataset.t;
+  [...$("tabs").children].forEach(b => b.classList.toggle("on", b === t)); if (S.tab === "health" && !S.health) loadHealth(); render(); };
+document.addEventListener("toggle", e => { const k = e.target.dataset && e.target.dataset.k; if (!k) return; e.target.open ? S.open.add(k) : S.open.delete(k); }, true);
+const det = (k, summary, body, dflt=false) => `<details data-k="${esc(k)}" ${(S.open.has(k) || (dflt && !S.open.has("!" + k))) ? "open" : ""}><summary>${summary}</summary>${body}</details>`;
+document.addEventListener("click", e => { const t = e.target.closest("[data-showall]"); if (t) { S.showAll.add(t.dataset.showall); render(); } });
+
+function render() {
+  const m = $("main"), top = m.scrollTop;
+  m.innerHTML = S.tab === "retrieval" ? viewRetrieval() : S.tab === "health" ? viewHealth() : S.tab === "pipelines" ? viewPipelines() : viewProcessing();
+  m.scrollTop = top; badges(); tick();
+}
+function badges() {
+  const j = J(), r = j.retrieval;
+  $("c-retrieval").textContent = r ? `${r.clips.length} clips · ${r.n_layers} layers` : (S.jobId ? "…" : "");
+  $("c-processing").textContent = (j.steps && j.steps.length) ? `${j.steps.length}/13` : "";
+  const P = j.pipelines;
+  if (P && P.pipelines) { const st = Object.values(P.pipelines).map(p => p.status); $("c-pipelines").textContent = st.length ? st.join(" · ") : ""; }
+  else $("c-pipelines").textContent = P && P.error ? "error" : (S.jobId ? "…" : "");
+  const h = S.health; if (h) { const bad = h.imports.filter(i => i.kind === "broken").length + h.independence.violations.length + h.dependencies.filter(d => !d.installed && !d.optional_lazy).length; $("c-health").textContent = bad ? bad + " issue" + (bad > 1 ? "s" : "") : "ok"; }
+}
+
+/* ------------------------------------------------------------------ shared widgets */
+function imgUrl(aid, v, o={}) { return `/api/img?id=${S.jobId}&aid=${aid}&v=${encodeURIComponent(v || "")}${o.cmap ? "&cmap=" + o.cmap : ""}${o.lo != null && o.lo !== "" ? "&lo=" + o.lo : ""}${o.hi != null && o.hi !== "" ? "&hi=" + o.hi : ""}${o.max ? "&max=" + o.max : ""}`; }
+function statLine(s) {
+  if (!s) return "";
+  const p = [];
+  if (s.finite_frac != null) p.push(`valid ${(s.finite_frac * 100).toFixed(1)}%`);
+  if (s.min != null) p.push(`min ${fN(s.min)}`, `max ${fN(s.max)}`);
+  if (s.mean != null) p.push(`mean ${fN(s.mean)}`);
+  if (s.n_unique != null) p.push(`${s.n_unique} distinct`);
+  if (s.zero_frac != null) p.push(`zero ${(s.zero_frac * 100).toFixed(1)}%`);
+  return p.join(" · ");
+}
+function layerCard(a, ver) {
+  const st = a.stats || {}, title = a.name || a.label || a.path || "";
+  const sub = a.role ? `role ${esc(a.role)}${a.pol ? " · " + esc(a.pol) : ""}` : (a.group ? `${esc(a.group)} · ${esc(a.step || "")}` : "");
+  return `<div class="lc"><div class="im" data-aid="${esc(a.aid)}" data-ver="${esc(ver)}" title="click to enlarge · hover for pixel values">
+      <img loading="lazy" src="${imgUrl(a.aid, ver, {cmap: a.cmap, max: 360})}" alt=""></div>
+    <div class="t"><b title="${esc(a.key || a.path || "")}">${esc(title)}</b><span>${sub}</span>
+      <span>${esc(JSON.stringify(a.shape || st.shape))} ${esc(a.dtype || st.dtype)}${a.stride > 1 ? " · decimated ×" + a.stride : ""}</span>
+      <span>${esc(statLine(st))}</span>${a.note ? `<span>${esc(a.note)}</span>` : ""}${a.georef === false ? `<span class="err">no georeference for this array</span>` : ""}</div>
+    <div class="px" data-px></div></div>`;
+}
+let pxBusy = false;
+document.addEventListener("mousemove", async e => {
+  const im = e.target.closest && e.target.closest(".im, #modal img"); if (!im || pxBusy) return;
+  const img = im.tagName === "IMG" ? im : im.querySelector("img"); if (!img) return;
+  const r = img.getBoundingClientRect(); if (e.clientX < r.left || e.clientX > r.right || e.clientY < r.top || e.clientY > r.bottom) return;
+  const aid = im.dataset.aid || img.dataset.aid; if (!aid) return;
+  pxBusy = true;
+  try {
+    const p = await api(`/api/px?id=${S.jobId}&aid=${aid}&fx=${(e.clientX - r.left) / r.width}&fy=${(e.clientY - r.top) / r.height}`);
+    const txt = `r${p.row} c${p.col}  ${p.finite ? fN(p.value, 6) : "no data"}${p.lon != null ? `  ${p.lat.toFixed(5)}, ${p.lon.toFixed(5)}` : ""}${p.stride > 1 ? "  (decimated)" : ""}`;
+    const tgt = im.closest(".lc") ? im.closest(".lc").querySelector("[data-px]") : $("modalpx"); if (tgt) tgt.textContent = txt;
+  } catch (_) {} finally { setTimeout(() => pxBusy = false, 60); }
+});
+document.addEventListener("click", e => { const im = e.target.closest(".lc .im"); if (im) openModal(im.dataset.aid, im.dataset.ver); });
+function openModal(aid, ver) {
+  const box = $("modalbox");
+  box.innerHTML = `<div style="display:flex;gap:10px;align-items:center;margin-bottom:8px;flex-wrap:wrap">
+    <b class="m">${esc(aid)}</b>
+    <select id="mcmap"><option value="">auto</option><option>viridis</option><option>magma</option><option>diverging</option><option>gray</option><option>categorical</option></select>
+    <input id="mlo" class="sm" placeholder="min (auto)"><input id="mhi" class="sm" placeholder="max (auto)"><button class="btn" id="mapply">apply</button>
+    <span id="modalpx" class="m" style="color:var(--acc);flex:1"></span><button class="btn" id="mclose">close ✕</button></div>
+    <img id="mimg" data-aid="${esc(aid)}" src="${imgUrl(aid, ver, {max: 1400})}" alt="">`;
+  $("modal").style.display = "flex";
+  $("mclose").onclick = closeModal;
+  $("mapply").onclick = () => { $("mimg").src = imgUrl(aid, ver + Date.now(), {cmap: $("mcmap").value, lo: $("mlo").value, hi: $("mhi").value, max: 1400}); };
+}
+function closeModal() { $("modal").style.display = "none"; $("modalbox").innerHTML = ""; }
+$("modal").addEventListener("click", e => { if (e.target === $("modal")) closeModal(); });
+document.addEventListener("keydown", e => { if (e.key === "Escape") closeModal(); });
+const kv = rows => `<dl class="kv">${rows.map(([k, v]) => `<dt>${esc(k)}</dt><dd>${v}</dd>`).join("")}</dl>`;
+function spark(series, key=1) {
+  if (!series || series.length < 2) return `<div class="note">waiting for network activity…</div>`;
+  const w = 600, h = 46, t1 = series[series.length - 1][0] || 1, mx = Math.max(1, ...series.map(s => s[key]));
+  const pts = series.map(s => `${(s[0] / t1 * w).toFixed(1)},${(h - 3 - s[key] / mx * (h - 8)).toFixed(1)}`).join(" ");
+  return `<svg class="spark" viewBox="0 0 ${w} ${h}" preserveAspectRatio="none"><polyline fill="none" stroke="#7aa7e8" stroke-width="1.6" points="${pts}"/></svg>`;
+}
+function netPanelInner(m) {
+  m = m || {};
+  return `<div class="chips"><span class="chip">requests <b>${m.requests ?? 0}</b></span><span class="chip">on the wire <b>${fB(m.bytes_fetched)}</b></span>
+    <span class="chip">useful <b>${fB(m.bytes_useful)}</b></span><span class="chip">retries <b>${m.retries ?? 0}</b></span><span class="chip">URL resolves <b>${m.resolves ?? 0}</b></span>
+    <span class="chip">chunks net/disk/ram <b>${m.chunks_net ?? 0}/${m.chunks_disk ?? 0}/${m.chunks_ram ?? 0}</b></span><span class="chip">clip-cache hits <b>${m.clip_hit ?? 0}</b></span>
+    <span class="chip">index built/disk <b>${m.index_built ?? 0}/${m.index_disk ?? 0}</b></span></div>${spark(S.net)}`;
+}
+
+/* ------------------------------------------------------------------ DATA RETRIEVAL */
+function footprintSvg(r, tile) {
+  const rings = r.granules.filter(g => g.footprint && g.footprint.length > 2);
+  const bb = tile ? tile.bbox : null; if (!bb && !rings.length) return "";
+  let xs = [], ys = []; rings.forEach(g => g.footprint.forEach(p => { xs.push(p[0]); ys.push(p[1]); })); if (bb) { xs.push(bb[0], bb[2]); ys.push(bb[1], bb[3]); }
+  const x0 = Math.min(...xs), x1 = Math.max(...xs), y0 = Math.min(...ys), y1 = Math.max(...ys), lat = (y0 + y1) / 2, k = Math.cos(lat * Math.PI / 180);
+  const W = 520, pad = 14, sx = (W - 2 * pad) / Math.max(1e-6, (x1 - x0) * k), H = Math.min(380, Math.max(160, (y1 - y0) * sx + 2 * pad)), s = Math.min(sx, (H - 2 * pad) / Math.max(1e-6, y1 - y0));
+  const X = x => pad + (x - x0) * k * s, Y = y => H - pad - (y - y0) * s, col = {GUNW: "#7aa7e8", GCOV: "#e0a638"};
+  const polys = rings.map(g => `<polygon points="${g.footprint.map(p => X(p[0]).toFixed(1) + "," + Y(p[1]).toFixed(1)).join(" ")}" fill="${col[g.product] || "#8091a5"}" fill-opacity=".10" stroke="${col[g.product] || "#8091a5"}" stroke-opacity=".6"><title>${esc(g.id)}</title></polygon>`).join("");
+  const tb = bb ? `<rect x="${X(bb[0])}" y="${Y(bb[3])}" width="${Math.max(2, X(bb[2]) - X(bb[0]))}" height="${Math.max(2, Y(bb[1]) - Y(bb[3]))}" fill="#e26c6c" fill-opacity=".35" stroke="#ff9a9a"/>` : "";
+  return `<svg viewBox="0 0 ${W} ${H}" style="width:100%;max-width:${W}px;background:#0b1016;border:1px solid var(--line);border-radius:6px">${polys}${tb}</svg>
+    <div class="note">footprints as returned by the search (blue = GUNW, amber = GCOV); red = the requested tile. ${rings.length}/${r.granules.length} granules carry a footprint.</div>`;
+}
+function callsTable(calls) {
+  if (!calls.length) return `<div class="empty">no retriever call yet</div>`;
+  return `<table><tr><th>#</th><th>call</th><th>product</th><th>detail</th><th class="r">seconds</th><th>result</th><th>network Δ</th></tr>${calls.map(c => {
+    const a = c.args || {}, rs = c.result || {}, nd = c.net_delta || {};
+    const det = c.method === "search" ? `bbox ${(a.bbox || []).map(v => (+v).toFixed(3)).join(", ")} · ${esc((a.t0 || "").slice(0, 10))} → ${esc((a.t1 || "").slice(0, 10))}`
+      : `${(a.granules || []).length} granule(s) · layers <span title="${esc(a.layers)}">${esc((a.layers || "").slice(0, 60))}${(a.layers || "").length > 60 ? "…" : ""}</span>`;
+    const res = c.ok === false ? `${badge("failed", "FAILED")} ${esc(c.error)}` : c.ok == null ? badge("running", "running…")
+      : c.method === "search" ? `${rs.n_granules ?? "?"} granules${rs.degraded ? " " + badge("warn", "stale cache") : ""}` : `${rs.n_clips ?? 0} clips · ${rs.n_errors ?? 0} err · ${rs.n_skipped ?? 0} skipped${rs.degraded ? " " + badge("warn", "degraded") : ""}`;
+    return `<tr><td class="m">${c.n}</td><td class="m">${esc(c.method)}</td><td class="m">${esc(a.product)}</td><td>${det}</td><td class="m r">${c.seconds ?? "…"}</td><td>${res}</td>
+      <td class="m">${nd.requests != null ? `${nd.requests} req · ${fB(nd.bytes_fetched)}` : "–"}</td></tr>`; }).join("")}</table>`;
+}
+function liveCalls() {   // before the retrieval payload exists, rebuild the call table from the event stream
+  const calls = [];
+  S.events.filter(e => e.kind === "call").forEach(e => calls.push({n: e.data.n, method: e.data.method, args: e.data.args, ok: null}));
+  S.events.filter(e => e.kind === "call_end").forEach(e => { const c = calls.find(x => x.n === e.data.n); if (c) Object.assign(c, {ok: e.data.ok, seconds: e.data.seconds, error: e.data.error, net_delta: e.data.net_delta}); });
+  return calls;
+}
+function renderLiveBits() { if (S.tab !== "retrieval" || J().retrieval) return; const el = $("livecalls"); if (el) el.innerHTML = callsTable(liveCalls()); }
+function viewRetrieval() {
+  const j = J(), r = j.retrieval;
+  let h = `<h1>DATA RETRIEVAL</h1>`;
+  if (!S.jobId) return h + `<div class="card empty">Enter coordinates above and press <b>RUN</b>. Nothing is fetched until you do; everything shown here is what the engine's retriever actually returned.</div>`;
+  if (j.state === "failed") h += `<div class="card"><span class="b failed">JOB FAILED</span> <span class="m err">${esc(j.error)}</span><div class="note">This is the engine's own error text. See HEALTH for missing dependencies or credentials.</div></div>`;
+  const rq = j.request || {}, tile = j.tile || {}, src = j.source || {};
+  h += `<h2>Request</h2><div class="card grid2"><div>${kv([
+    ["tile", `${esc(tile.id)} · EPSG:${esc(tile.epsg)}`], ["tile bbox lon/lat", esc((tile.bbox || []).map(v => v.toFixed(5)).join(", "))],
+    ["as of", esc(rq.as_of ?? "–")], ["lookback", rq.lookback_days != null ? esc(rq.lookback_days) + " days" : "–"], ["margin", rq.margin_m != null ? esc(rq.margin_m) + " m" : "–"]])}</div>
+    <div>${kv([["source", esc(src.label)], ["credentials", src.auth ? badge(src.auth === "present" ? "ok" : "bad", src.auth) : "–"], ["ancillary", esc(src.ancillary)], ["job", esc(j.id)]])}</div></div>`;
+  h += `<h2>Transfer (live)</h2><div class="card" id="livenet">${netPanelInner((r && r.net && Object.keys(r.net).length) ? r.net : (j.net || {}))}</div>`;
+  h += `<h2>Retriever calls</h2><div class="card" id="livecalls">${callsTable(r ? r.calls : liveCalls())}</div>`;
+  if (!r) return h + `<div class="card empty">${j.state === "running" ? "waiting for the retriever…" : "no retrieval result"}</div>`;
+  h += `<h2>Granules found (${r.granules.length})</h2><div class="card grid2"><div style="overflow:auto;max-height:420px"><table><tr><th>id</th><th>product</th><th>trk/frm/dir</th><th>start</th><th class="r">size</th><th>status</th></tr>${r.granules.map(g =>
+    `<tr><td class="m" title="${esc(g.id)}">${esc(g.id.length > 52 ? g.id.slice(0, 20) + "…" + g.id.slice(-28) : g.id)}</td><td>${esc(g.product)}</td><td class="m">${esc(g.track)}/${esc(g.frame)}/${esc(g.direction)}</td>
+      <td class="m">${esc((g.start || "").slice(0, 16))}</td><td class="m r">${fB(g.size_bytes)}</td><td>${badge(g.status === "clip" ? "ok" : g.status === "error" ? "bad" : g.status === "skipped" ? "warn" : "not", g.status)}${g.source ? " " + badge(g.source) : ""}${g.detail ? `<div class="m err">${esc(g.detail)}</div>` : ""}</td></tr>`).join("")}</table></div>
+    <div>${footprintSvg(r, tile)}</div></div>`;
+  h += `<h2>Clips retrieved (${r.clips.length}) · ${r.n_layers} layers · raw HDF5 values, nothing decoded yet</h2>`;
+  if (!r.clips.length) h += `<div class="card empty">no clip came back. See errors below.</div>`;
+  r.clips.forEach((c, ci) => {
+    const nl = c.grids.reduce((n, g) => n + g.layers.length, 0);
+    h += det("clip:" + c.granule_id, `${esc(c.product)} <span class="m">${esc(c.granule_id.length > 70 ? c.granule_id.slice(0, 26) + "…" + c.granule_id.slice(-36) : c.granule_id)}</span> ${badge(c.source)}<span class="sub">${c.grids.length} grid(s) · ${nl} layer(s)</span>`,
+      `<div class="card">${kv([["granule", esc(c.granule_id)], ["requested bbox", esc(c.bbox.map(v => v.toFixed(5)).join(", "))], ["client stats", esc(JSON.stringify(c.stats))]])}
+      ${c.grids.map((g, gi) => det("grid:" + c.granule_id + g.key, `<span class="m">${esc(g.key.split("__").slice(2).join("/") || g.key)}</span><span class="sub">${g.nx}×${g.ny} px · dx ${fN(g.dx)} m · EPSG:${g.epsg} · ${g.layers.length} layers</span>`,
+        `${kv([["grid key", esc(g.key)], ["x/y extent (m)", esc(g.extent ? g.extent.map(v => v.toFixed(1)).join(", ") : "–")], ["lon/lat box", esc(g.lonlat ? g.lonlat.map(v => v.toFixed(5)).join(", ") : "–")],
+        ["coordinate arrays", esc(g.extras.map(x => `${x.name} ${JSON.stringify(x.shape)} ${x.dtype}`).join(" · ") || "none")]])}
+        <div class="gal" style="margin-top:10px">${g.layers.map(l => layerCard(l, "c")).join("")}</div>`, ci === 0 && gi === 0)).join("")}</div>`, ci === 0);
+  });
+  const errs = Object.entries(r.errors || {}), skp = Object.entries(r.skipped || {});
+  if (errs.length || skp.length) h += `<h2>Errors &amp; skipped (verbatim from the retriever)</h2><div class="card">${errs.map(([g, w]) => `<div>${badge("error")} <span class="m">${esc(g)}</span><pre>${esc(w)}</pre></div>`).join("")}${skp.map(([g, w]) => `<div>${badge("skipped")} <span class="m">${esc(g)}</span> ${esc(w)}</div>`).join("")}</div>`;
+  return h;
+}
+
+/* ------------------------------------------------------------------ HEALTH */
+async function loadHealth(force) {
+  try { S.health = await api("/api/health" + (force ? "?force=1" : "")); S.healthErr = null; } catch (e) { S.healthErr = e.message; }
+  render();
+}
+const stateBadge = s => badge(s);
+function viewHealth() {
+  let h = `<h1>HEALTH</h1><div style="margin-bottom:10px"><button class="btn" onclick="loadHealth(true)">re-check</button> <span class="note">Everything below is read from this machine and this checkout right now. Nothing is assumed.</span></div>`;
+  if (S.healthErr) return h + `<div class="card err">${esc(S.healthErr)}</div>`;
+  const H = S.health; if (!H) return h + `<div class="empty">checking…</div>`;
+  const e = H.environment;
+  h += `<h2>Environment</h2><div class="card grid2"><div>${kv([["python", esc(e.python)], ["platform", esc(e.platform)], ["interpreter", esc(e.executable)], ["repo", esc(e.repo)]])}</div>
+    <div>${kv([["Earthdata auth", badge(e.auth_mode === "none" ? "bad" : "ok", e.auth_mode)], [".env", e.dotenv_present ? badge(e.dotenv_gitignored ? "ok" : "bad", e.dotenv_gitignored ? "present, git-ignored" : "present, NOT git-ignored") : badge("info", "absent")],
+      ["env vars set", esc(Object.entries(e.creds).map(([k, v]) => k + (v ? " ✓" : " ✗")).join(" · "))], ["data dir", esc(e.data_dir) + (e.data_dir_exists ? "" : " " + badge("warn", "does not exist yet"))],
+      ["disk", e.disk.error ? esc(e.disk.error) : `${e.disk.free_gb} GB free of ${e.disk.total_gb} GB`]])}</div></div>`;
+  h += `<h2>Python dependencies (found by scanning every engine/*.py import)</h2><div class="card"><table><tr><th>module</th><th>installed</th><th>version</th><th>declared in requirements / pyproject</th><th>import style</th><th>used in</th></tr>${H.dependencies.map(d =>
+    `<tr><td class="m">${esc(d.module)}</td><td>${badge(d.installed ? "ok" : (d.optional_lazy ? "warn" : "bad"), d.installed ? "yes" : "NO")}</td><td class="m">${esc(d.version || "–")}</td>
+     <td>${badge(d.declared ? "ok" : "bad", d.declared ? "yes" : "NOT DECLARED")}</td><td>${d.optional_lazy ? "lazy (inside functions)" : "top-level"}</td><td class="m" title="${esc(d.files.join("\n"))}">${d.n_files} file(s)</td></tr>`).join("")}</table></div>`;
+  const broken = H.imports.filter(i => i.kind === "broken"), miss = H.imports.filter(i => i.kind === "missing_dependency");
+  h += `<h2>Module import test (every engine module imported)</h2><div class="card">${!H.imports.length ? badge("ok", "all engine modules import") :
+    (broken.length ? `<div>${badge("bad", broken.length + " broken internal import(s)")}<table>${broken.map(i => `<tr><td class="m">${esc(i.module)}</td><td class="m err">${esc(i.error)}</td></tr>`).join("")}</table></div>` : "") +
+    (miss.length ? `<div style="margin-top:8px">${badge("warn", miss.length + " module(s) blocked by a missing package")}<table>${miss.map(i => `<tr><td class="m">${esc(i.module)}</td><td class="m">${esc(i.error)}</td></tr>`).join("")}</table></div>` : "")}</div>`;
+  h += `<h2>Storage &amp; ancillary data</h2><div class="card grid2"><div><table><tr><th>location</th><th>exists</th><th class="r">size</th><th class="r">files</th></tr>${Object.entries(e.storage).map(([k, v]) => `<tr><td>${esc(k)}</td><td>${badge(v.exists ? "ok" : "not", v.exists ? "yes" : "no")}</td><td class="m r">${fB(v.bytes)}</td><td class="m r">${v.files ?? "–"}${v.truncated ? "+" : ""}</td></tr>`).join("")}</table></div>
+    <div><div class="note" style="margin-bottom:6px">Files under data/ancillary/&lt;name&gt;/ that DirectoryAncillary can read. Nothing in the repo writes them.</div><table>${Object.entries(e.ancillary).map(([k, v]) => `<tr><td class="m">${esc(k)}</td><td>${badge(v.files ? "ok" : "empty", v.files ? v.files + " file(s)" : "none")}</td></tr>`).join("")}</table></div></div>`;
+  h += `<h2>Code readiness (what exists vs. comment-only stubs)</h2><div class="card">${H.code.map(g => det("code:" + g.group, `${esc(g.group)} ${badge(g.implemented === g.total ? "ok" : g.implemented ? "warn" : "stub", g.implemented + " / " + g.total + " implemented")}`,
+    `<table>${g.files.map(f => `<tr><td class="m">${esc(f.path)}</td><td>${stateBadge(f.state)}</td><td class="m r">${f.lines} ln</td><td class="note">${esc(f.detail || f.note || "")}</td></tr>`).join("")}</table>`)).join("")}</div>`;
+  h += `<h2>Pipelines: file state and entry point (registry calls verdict.run(bundle))</h2><div class="card"><table><tr><th>pipeline</th><th>fetch</th><th>prep</th><th>model</th><th>verdict</th><th>lib_local</th><th>run() defined</th></tr>${H.pipelines.map(p => p.error ? `<tr><td class="m">${esc(p.name)}</td><td colspan="6" class="err">${esc(p.error)}</td></tr>` :
+    `<tr><td class="m">${esc(p.code)} ${esc(p.name)}</td>${["fetch","prep","model","verdict","lib_local"].map(f => `<td>${p.files[f] ? stateBadge(p.files[f]) : "–"}</td>`).join("")}<td>${badge(p.has_run ? "ok" : "bad", p.has_run ? "yes" : "no")}</td></tr>`).join("")}</table></div>`;
+  const ind = H.independence;
+  h += `<h2>Pipeline independence (static import scan)</h2><div class="card">${ind.violations.length ? badge("bad", ind.violations.length + " violation(s)") + `<table>${ind.violations.map(v => `<tr><td class="m">${esc(v.file)}</td><td>${esc(v.problem)}</td></tr>`).join("")}</table>` : badge("ok", "no violations") + ` <span class="note">${ind.scanned_files} files in ${ind.pipelines} pipeline folders scanned; none imports another pipeline or the preprocessing chain (relative imports resolved).</span>`}</div>`;
+  const ct = H.contract || {};
+  h += `<div class="card"><b>Registry contract</b> <span class="note">(read from ${esc(ct.source || "engine/registry.py")}, not imported)</span><div class="note">Registry contract (read from engine/registry.py): entry <span class="m">${esc(ct.entry_module)}.${esc(ct.entry_func)}(bundle)</span>; refers to fetch module: ${esc(ct.registry_refers_to_fetch_module)}; docstring says bundle only: ${esc(ct.registry_docstring_says_bundle_only)}.</div><div>${ct.registry_refers_to_fetch_module === false && ct.entry_module ? badge("warn", "registry does not refer to fetch.py") : ""} ${esc(ct.meaning)}${ct.error ? ` <span class="err">${esc(ct.error)}</span>` : ""}</div></div>`;
+  const N = H.needs;
+  h += `<h2>Data-needs matrix: can each declared input actually be supplied?</h2><div class="card"><div class="legend"><span><i class="c ok"></i>supplied</span><span><i class="c empty"></i>channel exists, nothing fills it</span><span><i class="c missing"></i>no producer / no channel</span><span><i class="c none"></i>not declared by this pipeline</span></div>
+    <div style="overflow:auto"><table class="mx"><tr><th class="n">pipeline</th>${N.columns.map(c => `<th title="${esc(N.names[c] || c)}">${esc(c)}</th>`).join("")}</tr>${N.rows.map(r => `<tr><td class="n m">${esc(r.code)} ${esc(r.name)}</td>${N.columns.map(c => { const x = r.cells[c]; return x ? `<td><span class="c ${x.state}" title="${esc(c + " (" + x.role + "): " + x.why)}"></span></td>` : `<td><span class="c none"></span></td>`; }).join("")}</tr>`).join("")}</table></div>
+    <div class="note" style="margin-top:6px">hover a cell for the reason. Columns: M = measurements, P07 = correction audit, S = static ancillary, R = reference/event data (the pipeline's own_fetch).</div></div>`;
+  h += `<h2>On demand</h2><div class="card"><button class="btn" onclick="doNet()">check network reachability</button> <button class="btn" onclick="doTests()">run test suite (pytest)</button>
+    <div id="ondemand">${S.netcheck ? netHtml() : ""}${S.tests ? testsHtml() : ""}</div></div>`;
+  return h;
+}
+function netHtml() { return `<table style="margin-top:8px"><tr><th>host</th><th>what</th><th>result</th><th class="r">dns</th><th class="r">tcp</th><th class="r">tls</th></tr>${S.netcheck.map(r => `<tr><td class="m">${esc(r.host)}</td><td>${esc(r.what)}</td><td>${r.ok ? badge("ok", r.http) : badge("bad", "unreachable") + ` <span class="m err">${esc(r.error)}</span>`}</td><td class="m r">${r.dns_ms ?? "–"} ms</td><td class="m r">${r.tcp_ms ?? "–"} ms</td><td class="m r">${r.tls_ms ?? "–"} ms</td></tr>`).join("")}</table>`; }
+function testsHtml() { const t = S.tests; return t.ran === false ? `<div style="margin-top:8px">${badge("warn", "not run")} ${esc(t.reason)}</div>` : `<div style="margin-top:8px">${badge(t.returncode === 0 ? "ok" : "bad", t.returncode === 0 ? "passed" : t.timeout ? "timed out" : "failed (exit " + t.returncode + ")")} <span class="note">${t.seconds ?? ""} s</span><pre>${esc(t.output)}</pre></div>`; }
+async function doNet() { $("ondemand").innerHTML = '<div class="note" style="margin-top:8px">checking…</div>'; try { S.netcheck = await api("/api/health/network", {method: "POST", body: "{}"}); } catch (e) { S.netcheck = [{host: "(request)", what: "", ok: false, error: e.message}]; } render(); }
+async function doTests() { $("ondemand").innerHTML = '<div class="note" style="margin-top:8px">running pytest, this can take a while…</div>'; try { S.tests = await api("/api/health/tests", {method: "POST", body: "{}"}); } catch (e) { S.tests = {ran: false, reason: e.message}; } render(); }
+
+/* ------------------------------------------------------------------ DATA PROCESSING */
+const READS_NOTE = {resolved: "P01 result (granule graph)", clips: "retrieved clips", decoded: "decoded layers", harm_geometry: "harmonised geometry", harm_pairs: "harmonised interferograms", harm_epochs: "harmonised backscatter epochs", ifg: "interferometric stacks", cov: "backscatter stacks"};
+function stepPanel(s) {
+  const reads = s.reads.length ? s.reads.map(r => `<span class="chip" title="${esc(READS_NOTE[r.attr] || "")}">${esc(r.attr)}${r.arrays_before != null ? ` · ${r.arrays_before} arrays` : ""}${r.size != null ? ` · size ${r.size}` : ""}</span>`).join("") : `<span class="note">no declared input (runs every time)</span>`;
+  const wrote = Object.entries(s.wrote).map(([g, n]) => `<span class="chip ok">${esc(g)} +${n}</span>`).join("") || `<span class="note">no array output (records / decisions only)</span>`;
+  const k = "step:" + s.code, all = S.showAll.has(k), arr = all ? s.arrays : s.arrays.slice(0, 8);
+  return det(k, `<span class="m">${esc(s.code)}</span> ${esc(s.name)} ${badge(s.status)} <span class="sub">${s.seconds.toFixed(2)} s · ${s.n_new} array(s) new or changed</span>`,
+    `<div class="card" id="${esc(s.code)}">${s.message ? `<div class="m err" style="margin-bottom:6px">${esc(s.message)}</div>` : ""}
+     <div class="grid2"><div><div class="note">reads</div><div class="chips">${reads}</div></div><div><div class="note">writes</div><div class="chips">${wrote}</div></div></div>
+     ${s.flags.length ? `<div class="note" style="margin-top:8px">flags raised</div><table>${s.flags.map(f => `<tr><td>${badge(f.severity === "error" ? "bad" : f.severity === "warn" ? "warn" : "info", f.severity)}</td><td class="m">${esc(f.code)}</td><td>${esc(f.message)}</td></tr>`).join("")}</table>` : ""}
+     ${s.assumptions.length ? `<div class="note" style="margin-top:8px">assumptions recorded</div><ul style="margin:4px 0 0 18px;padding:0">${s.assumptions.map(a => `<li>${esc(a)}</li>`).join("")}</ul>` : ""}
+     ${arr.length ? `<div class="gal" style="margin-top:10px">${arr.map(a => layerCard(a, a.step)).join("")}</div>${!all && s.arrays.length > 8 ? `<div style="margin-top:8px"><button class="btn" data-showall="${esc(k)}">show all ${s.arrays.length} arrays</button></div>` : ""}` : ""}</div>`, s.status === "error");
+}
+function handoffTable(H) {
+  const order = ["READY", "LAUNCHES_WITH_GAPS", "INSUFFICIENT_EVIDENCE", "BLOCKED", "NOT_APPLICABLE"];
+  const tally = Object.entries(H.tally).sort((a, b) => order.indexOf(a[0]) - order.indexOf(b[0])).map(([k, n]) => `<span class="chip">${badge(k)} ${n}</span>`).join("");
+  return `<div class="chips" style="margin-bottom:8px">${tally}<span class="chip">pipelines with run(): <b>${H.n_implemented}</b> / ${H.rows.length}</span><span class="chip">registry.run_unknown: <b>${H.run_unknown}</b></span></div>
+   <div style="overflow:auto"><table><tr><th>pipeline</th><th>fed?</th><th>routing (P12)</th><th>inputs it declares (uses)</th><th>own fetch (pipeline pulls these itself)</th><th>run()</th></tr>${H.rows.map(r => {
+    const rt = r.routing; const why = (r.reasons && r.reasons.length ? r.reasons : (rt ? rt.reasons : [])).join(" · ");
+    return `<tr><td class="m">${esc(r.code)} ${esc(r.name)}<div class="note">${esc(r.sensor)}${r.min_epochs ? " · min_epochs " + r.min_epochs : ""}</div></td><td>${badge(r.feed)}<div class="note">${esc(r.registry_status)}</div></td>
+      <td>${rt ? badge(rt.applies === "yes" ? "ok" : rt.applies === "no" ? "skip" : "warn", rt.applies + (rt.proxy ? " (proxy)" : "")) : "–"}<div class="note">${esc(why)}</div>${rt && rt.needs.length ? `<div class="note err">needs: ${esc(rt.needs.join("; "))}</div>` : ""}</td>
+      <td><div class="chips">${r.uses.map(u => `<span class="chip ${u.state === "present" ? "ok" : "bad"}" title="${esc(u.name + ": " + u.why)}">${esc(u.code)}</span>`).join("") || "–"}</div></td>
+      <td><div class="chips">${r.own_fetch.map(u => `<span class="chip ${u.state === "present" ? "ok" : "bad"}" title="${esc(u.name + ": " + u.why)}">${esc(u.code)}</span>`).join("") || "–"}</div></td>
+      <td>${badge(r.implemented ? "ok" : "bad", r.implemented ? "yes" : "no")}</td></tr>`; }).join("")}</table></div>
+   <div class="note" style="margin-top:6px">uses: green = present in this bundle, red = absent or no producer. own fetch: green = an adapter/source exists, red = nothing in the repo can supply it yet. Hover a chip for the reason.</div>`;
+}
+function viewProcessing() {
+  const j = J(); let h = `<h1>DATA PROCESSING</h1>`;
+  if (!S.jobId) return h + `<div class="card empty">Run a tile first. Processing starts from exactly what DATA RETRIEVAL received.</div>`;
+  const r = j.retrieval, steps = j.steps || [];
+  h += `<h2>Input: the output of data retrieval</h2><div class="card">${r ? `<div class="chips"><span class="chip">granules found <b>${r.granules.length}</b></span><span class="chip">selected for fetch <b>${r.granules.filter(g => g.selected).length}</b></span><span class="chip">clips <b>${r.clips.length}</b></span><span class="chip">layers <b>${r.n_layers}</b></span><span class="chip">errors <b>${Object.keys(r.errors).length}</b></span><span class="chip">skipped <b>${Object.keys(r.skipped).length}</b></span></div>` : `<span class="note">waiting for retrieval…</span>`}
+    ${j.p01 && j.p01.stacks ? `<div class="note" style="margin-top:10px">P01 grouped the granules into stacks (direction + relative orbit):</div><table><tr><th>stack</th><th class="r">GUNW pairs</th><th>pair dates</th><th class="r">GCOV epochs</th><th>epoch dates</th></tr>${Object.entries(j.p01.stacks).map(([k, s]) => `<tr><td class="m">${esc(k)}</td><td class="m r">${s.gunw_pairs.length}</td><td class="m">${esc(s.gunw_pairs.length ? (s.gunw_pairs[0].ref || "").slice(0, 10) + " → " + (s.gunw_pairs[s.gunw_pairs.length - 1].sec || "").slice(0, 10) : "–")}</td><td class="m r">${s.gcov_epochs.length}</td><td class="m">${esc(s.gcov_epochs.length ? s.gcov_epochs[0].time.slice(0, 10) + " → " + s.gcov_epochs[s.gcov_epochs.length - 1].time.slice(0, 10) : "–")}</td></tr>`).join("")}</table>
+      <div class="chips" style="margin-top:6px"><span class="chip">older versions dropped <b>${j.p01.dropped_older}</b></span><span class="chip">search degraded <b>${j.p01.search_degraded}</b></span>${Object.keys(j.p01.search_errors || {}).length ? `<span class="chip bad">search errors: ${esc(JSON.stringify(j.p01.search_errors))}</span>` : ""}</div>` : ""}</div>`;
+  const known = ["P01","P02","P03","P04","P05","P06","P07","P08","P09","P10","P11","P12","P13"], by = Object.fromEntries(steps.map(s => [s.code, s]));
+  h += `<h2>Chain P01 → P13 (the engine's own steps, in order)</h2><div class="tl">${known.map(c => { const s = by[c]; return `<a class="${s ? s.status : "wait"}" onclick="document.getElementById('${c}')?.scrollIntoView({behavior:'smooth'})"><b>${c}</b><span>${s ? esc(s.name) : "waiting"}</span><span>${s ? s.seconds.toFixed(2) + " s · " + s.status : ""}</span></a>`; }).join("")}</div>`;
+  h += `<h2>What each step did</h2>${steps.map(stepPanel).join("") || '<div class="empty">no step has finished yet</div>'}`;
+  const F = j.final;
+  if (F) {
+    h += `<h2>Output: the SceneBundle (this is what pipelines receive)</h2><div class="card grid2"><div>${kv([["bundle id", esc(F.bundle_id)], ["status", badge(F.status === "ok" ? "ok" : F.status === "partial" ? "warn" : "bad", F.status)], ["contract", esc(F.contract_version) + " · " + (F.contract_issues.length ? badge("bad", F.contract_issues.length + " issue(s)") : badge("ok", "check_bundle(deep) clean"))],
+        ["newest acquisition", esc(F.epoch)], ["G80 grid", esc(F.grids.g80.shape.join("×") + " @ " + F.grids.g80.dx + " m")], ["G20 grid", esc(F.grids.g20.shape.join("×") + " @ " + F.grids.g20.dx + " m")], ["code version", esc(F.provenance.code_version)], ["inputs hash", esc(F.provenance.inputs_hash)]])}</div>
+      <div>${kv([["capabilities", `<div class="chips">${F.capabilities.map(c => `<span class="chip ok">${esc(c)}</span>`).join("")}</div>`], ["data depth", esc(`${F.depth.n_gunw_pairs} GUNW pairs (${F.depth.n_gunw_pairs_connected} connected) · ${F.depth.n_gcov_epochs} GCOV epochs · ${F.depth.history_days} days`) + (F.depth.cold_start ? " " + badge("warn", "cold start") : "")],
+        ["ancillary", `<div class="chips">${Object.entries(F.ancillary).map(([k, v]) => `<span class="chip ${v ? "ok" : "bad"}">${esc(k)}</span>`).join("")}</div>`]])}</div></div>`;
+    h += `<div class="card"><table><tr><th>stack</th><th class="r">GUNW pairs</th><th class="r">GCOV epochs</th><th>pols</th><th>cold start</th><th>geometry</th><th>stable mask</th><th>offsets</th><th>valid cover G80 / G20</th></tr>${Object.entries(F.stacks).map(([k, s]) => `<tr><td class="m">${esc(k)}</td><td class="m r">${s.gunw_pairs}</td><td class="m r">${s.gcov_epochs}</td><td class="m">${esc(s.pols.join(","))}</td><td>${badge(s.cold_start ? "warn" : "ok", String(s.cold_start))}</td><td>${badge(s.geometry ? "ok" : "bad", String(s.geometry))}</td><td>${badge(s.stable_mask ? "ok" : "warn", String(s.stable_mask))}</td><td>${badge(s.offsets ? "ok" : "not", String(s.offsets))}</td><td class="m">${fN(s.quality.valid_fraction_g80)} / ${fN(s.quality.valid_fraction_g20)}</td></tr>`).join("")}</table></div>`;
+    h += det("flags", `Bundle flags <span class="sub">${F.flags.length}</span>`, `<div class="card"><table>${F.flags.map(f => `<tr><td>${badge(f.severity === "error" ? "bad" : f.severity === "warn" ? "warn" : "info", f.severity)}</td><td class="m">${esc(f.step)}</td><td class="m">${esc(f.code)}</td><td>${esc(f.message)}</td></tr>`).join("") || "<tr><td>none</td></tr>"}</table></div>`, true);
+    if (F.contract_issues.length) h += `<div class="card"><pre>${esc(F.contract_issues.join("\n"))}</pre></div>`;
+    if (F.tracer_errors.length) h += `<div class="card">${badge("warn", "tracer errors")}<pre>${esc(F.tracer_errors.join("\n"))}</pre></div>`;
+    h += det("prov", `Provenance &amp; assumptions <span class="sub">${F.provenance.assumptions.length} assumption(s) · ${F.provenance.n_inputs} input(s)</span>`, `<div class="card"><ul style="margin:0 0 0 18px;padding:0">${F.provenance.assumptions.map(a => `<li>${esc(a)}</li>`).join("")}</ul></div>`);
+    Object.entries(F.final_arrays || {}).forEach(([g, arr]) => { const k = "final:" + g, all = S.showAll.has(k);
+      h += det(k, `Final layers · ${esc(g)} <span class="sub">${arr.length}</span>`, `<div class="gal">${(all ? arr : arr.slice(0, 12)).map(a => layerCard(a, a.step)).join("")}</div>${!all && arr.length > 12 ? `<div style="margin-top:8px"><button class="btn" data-showall="${esc(k)}">show all ${arr.length}</button></div>` : ""}`); });
+  }
+  if (j.handoff) h += `<h2>Hand-off: is each pipeline fed what its manifest declares?</h2><div class="card">${handoffTable(j.handoff)}</div>`;
+  else if (j.state === "running") h += `<div class="empty">output and hand-off appear when the chain finishes…</div>`;
+  return h;
+}
+
+/* ------------------------------------------------------------------ PIPELINES */
+function plStatus(P) { return badge(String(P.status || "UNKNOWN"), P.status || "UNKNOWN"); }
+function plEvidenceList(evs) {
+  if (!evs || !evs.length) return `<div class="note">no evidence items</div>`;
+  const lv = {decision: "ok", corroboration: "info", caveat: "warn", info: "stub"};
+  return evs.map(e => `<div class="ev">${badge(lv[e.level] || "stub", e.level || "info")}
+    <span class="chip">${esc(e.kind || "")}</span> <span class="m">${esc(e.id || "")}</span>
+    <span class="claim">${esc(e.claim || "")}</span>${e.source_ref ? `<span class="sup">source: ${esc(e.source_ref)}</span>` : ""}
+    ${e.support && Object.keys(e.support).length ? det("ev:" + (e.id || evs.indexOf(e)), "<span class=sup>support numbers</span>", `<pre>${esc(JSON.stringify(e.support, null, 1))}</pre>`) : ""}</div>`).join("");
+}
+function plPairs(pairs) {
+  const rows = pairs || [];
+  if (!rows.length) return "";
+  return `<table><tr><th></th><th>ref → sec</th><th>granules</th><th class="r">valid px</th><th class="r">ref offset</th><th class="r">ref σ</th><th class="r">detected px</th><th class="r">area km²</th><th>clusters</th><th>flags</th></tr>${rows.map(p =>
+    `<tr${p.selected ? ' style="outline:1px solid var(--acc)"' : ' style="opacity:.72"'}><td>${p.selected ? badge("ok", "SELECTED") : p.skipped ? badge("warn", "skipped") : ""}</td>
+      <td class="m">${esc((p.ref_time || "").slice(0, 10))} → ${esc((p.sec_time || "").slice(0, 10))}${p.reason ? `<div class="note">${esc(p.reason)}</div>` : ""}</td>
+      <td class="m" title="${esc((p.granule_ids || []).join("\n"))}">${(p.granule_ids || []).length}</td>
+      <td class="m r">${fN(p.valid_pixels, 0)}</td><td class="m r">${p.ref_offset_m != null ? (p.ref_offset_m * 1000).toFixed(2) + " mm" : "–"}</td>
+      <td class="m r">${p.ref_sigma_m != null ? (p.ref_sigma_m * 1000).toFixed(2) + " mm" : "–"}</td>
+      <td class="m r">${fN(p.detected_pixels, 0)}</td><td class="m r">${fN(p.affected_area_km2, 2)}</td>
+      <td class="m">${p.clusters ? p.clusters.count : "–"}</td><td class="m">${esc((p.flags || []).join("; ") || "–")}</td></tr>`).join("")}</table>`;
+}
+function plScreens(screens) {
+  if (!screens || !screens.length) return `<div class="note">no forward screen ran (no rankable event, or nothing detected)</div>`;
+  return `<table><tr><th>event</th><th class="r">plane</th><th class="r">predicted</th><th class="r">measured</th><th class="r">ratio</th><th class="r">r</th><th>note</th></tr>${screens.map(s =>
+    `<tr><td class="m">${esc(s.event_id || "")}</td><td class="m r">${esc(s.nodal_plane)}</td>
+      <td class="m r">${s.predicted_peak_m != null ? (s.predicted_peak_m * 1000).toFixed(1) + " mm" : "–"}</td>
+      <td class="m r">${s.measured_peak_m != null ? (s.measured_peak_m * 1000).toFixed(1) + " mm" : "–"}</td>
+      <td class="m r">${s.amplitude_ratio != null ? fN(s.amplitude_ratio, 3) : "–"}</td>
+      <td class="m r">${s.pattern_correlation != null ? fN(s.pattern_correlation, 3) : "–"}</td>
+      <td class="note">${esc(s.note || (s.skipped ? "skipped" : ""))}</td></tr>`).join("")}</table>`;
+}
+function plEvents(evs) {
+  if (!evs || !evs.length) return `<div class="note">no catalog event passed the ranking window</div>`;
+  return `<table><tr><th>id</th><th class="r">Mw</th><th class="r">dist km</th><th>time</th><th>place</th></tr>${evs.map(e =>
+    `<tr><td class="m">${esc(e.id || "")}</td><td class="m r">${fN(e.magnitude, 2)}</td><td class="m r">${fN(e.distance_km, 1)}</td>
+      <td class="m">${esc((e.time || "").slice(0, 19))}</td><td>${esc(e.place || "")}</td></tr>`).join("")}</table>`;
+}
+function plOutput(name, P) {
+  const d = P.detail || {}, narr = d.narrative || {};
+  let h = `<h2>Output — the pipeline's own PipelineResult</h2><div class="card">`;
+  h += `<div style="margin-bottom:6px">${plStatus(P)} <b>${esc(P.summary || "")}</b></div>`;
+  if (P.lane_note) h += `<div class="note">${esc(P.lane_note)}</div>`;
+  if (narr.headline) h += `<div class="kv" style="margin-top:6px"><dt>narrative</dt><dd>${esc(narr.headline)}</dd><dt>reliability</dt><dd>${esc(narr.reliability || "")}</dd>${narr.note ? `<dt>note</dt><dd>${esc(narr.note)}</dd>` : ""}</div>`;
+  h += `<div class="grid2" style="margin-top:8px"><div>${kv([
+    ["status", plStatus(P)], ["raw_p", P.raw_p != null ? fN(P.raw_p, 3) + ' <span class="note">(within-tier rank score — not a probability)</span>' : "–"],
+    ["confidence", P.confidence != null ? fN(P.confidence, 3) : "– <span class=note>(never invented)</span>"], ["runtime", P.runtime_s != null ? fN(P.runtime_s, 2) + " s" : "–"]])}</div>
+    <div>${kv([["versions", Object.entries(P.versions || {}).map(([k, v]) => `${k}=${esc(v)}`).join(" · ") || "–"], ["min_epochs_met", P.min_epochs_met == null ? "–" : String(P.min_epochs_met)], ["bundle", esc(P.bundle_id || "")], ["epoch", esc(P.epoch || "")]])}</div></div>`;
+  if ((P.layers_store || []).length) h += `<div class="note" style="margin-top:10px">Evidence layers (decoded from the pipeline's own layer payloads — hover to probe, click to enlarge)</div><div class="gal">${P.layers_store.map(l => layerCard({...l, name: l.name + (l.units ? ` [${l.units}]` : "")}, "p")).join("")}</div>`;
+  h += `<div class="note" style="margin-top:12px">Evidence (${(P.evidence || []).length})</div>${plEvidenceList(P.evidence)}`;
+  h += `<div style="margin-top:10px">${det("pld:pairs:" + name, `Pairs analysed <span class="sub">${(d.pairs_analysed || []).length}</span>`, plPairs(d.pairs_analysed))}
+    ${det("pld:events:" + name, `Events considered (ranking window) <span class="sub">${(d.events_considered || []).length}</span>`, plEvents(d.events_considered) + ((d.events_excluded || []).length ? det("pld:excl:" + name, `excluded events <span class="sub">${d.events_excluded.length}</span>`, `<pre>${esc(JSON.stringify(d.events_excluded, null, 1))}</pre>`) : ""))}
+    ${det("pld:screens:" + name, `Okada forward screens <span class="sub">${(d.forward_screens || []).length}</span>`, plScreens(d.forward_screens))}
+    ${d.decision ? det("pld:dec:" + name, `Decision <span class="sub">${esc(d.decision.rule || "")}</span>`, `<pre>${esc(JSON.stringify(d.decision, null, 1))}</pre>`)}
+    ${d.uncatalogued ? det("pld:unc:" + name, "Uncatalogued-source fit", `<pre>${esc(JSON.stringify(d.uncatalogued, null, 1))}</pre>`)}
+    ${d.params ? det("pld:par:" + name, "Pipeline params", `<pre>${esc(JSON.stringify(d.params, null, 1))}</pre>`)}</div>`;
+  if ((P.warnings || []).length) h += `<div class="note" style="margin-top:8px">Warnings</div>${P.warnings.map(w => `<div class="ev">${badge("warn", "warning")} <span>${esc(w)}</span></div>`).join("")}`;
+  if ((P.data_used || []).length) h += `<div class="note" style="margin-top:8px">Data used</div><ul style="margin:2px 0 0 18px;padding:0">${P.data_used.map(x => `<li>${esc(x)}</li>`).join("")}</ul>`;
+  if ((P.provenance || []).length) h += det("pld:prov:" + name, `Provenance <span class="sub">${P.provenance.length}</span>`, `<table><tr><th>adapter</th><th>url / id</th><th>retrieved at</th><th>sha256</th></tr>${P.provenance.map(s => `<tr><td class="m">${esc(s.adapter || "")}</td><td class="m" style="word-break:break-all">${esc(s.url_or_id || "")}</td><td class="m">${esc(s.retrieved_at || "")}</td><td class="m">${esc((s.sha256 || "").slice(0, 16) + ((s.sha256 || "").length > 16 ? "…" : ""))}</td></tr>`).join("")}</table>`);
+  if ((P.references_used || []).length) h += det("pld:refs:" + name, "References used", `<ul style="margin:0 0 0 18px;padding:0">${P.references_used.map(x => `<li>${esc(x)}</li>`).join("")}</ul>`);
+  return h + `</div>`;
+}
+function plInput(name, P, row, F) {
+  const groups = P.input_groups || [];
+  let h = `<h2>Input — what the pipeline is and what it sees</h2><div class="card">`;
+  if (row) {
+    h += `<div class="grid2"><div>${kv([["pipeline", `${esc(row.code)} ${esc(row.name)}`], ["sensor", esc(row.sensor || "–")], ["min_epochs", row.min_epochs ?? "–"], ["implemented (run() defined)", badge(row.implemented ? "ok" : "bad", row.implemented ? "yes" : "NO")], ["registry feed", badge(row.feed)]]}</div>
+      <div>${kv([["routing (P12)", row.routing ? badge(row.routing.applies === "yes" ? "ok" : row.routing.applies === "no" ? "skip" : "warn", row.routing.applies + (row.routing.proxy ? " (proxy)" : "")) : "–"], ["routing reasons", esc(((row.reasons && row.reasons.length ? row.reasons : (row.routing ? row.routing.reasons : [])) || []).join(" · ")) || "–"], ["own fetch (adapters)", `<div class="chips">${row.own_fetch.map(u => `<span class="chip ${u.state === "present" ? "ok" : "bad"}" title="${esc(u.name + ": " + u.why)}">${esc(u.code)}</span>`).join("") || "–"}</div>`]])}</div></div>`;
+    h += `<div class="note" style="margin-top:8px">Declared bundle inputs (uses)</div><div class="chips">${row.uses.map(u => `<span class="chip ${u.state === "present" ? "ok" : "bad"}" title="${esc(u.name + ": " + u.why)}">${esc(u.code)} ${esc(u.name || "")}</span>`).join("") || "–"}</div>`;
+  }
+  const d = P.detail || {};
+  const sel = (d.pairs_analysed || []).find(p => p.selected);
+  if (sel) h += `<div class="note" style="margin-top:10px">Measurement pair the pipeline selected</div><div class="chips"><span class="chip">${esc((sel.ref_time || "").slice(0, 10))} → ${esc((sel.sec_time || "").slice(0, 10))}</span><span class="chip">${(sel.granule_ids || []).length} granule(s)</span><span class="chip">valid px ${fN(sel.valid_pixels, 0)}</span><span class="chip">ref offset ${(sel.ref_offset_m * 1000).toFixed(2)} mm</span><span class="chip">ref σ ${(sel.ref_sigma_m * 1000).toFixed(2)} mm</span></div><div class="note m" style="margin-top:3px">${esc((sel.granule_ids || []).join(" · "))}</div>`;
+  if (F && groups.length) h += `<div class="note" style="margin-top:10px">Bundle arrays this pipeline reads (from DATA PROCESSING; the same arrays, unchanged)</div>${groups.filter(g => F[g] && F[g].length).map(g => det("plin:" + name + ":" + g, `${esc(g)} <span class="sub">${F[g].length}</span>`, `<div class="gal">${F[g].slice(0, 8).map(a => layerCard(a, a.step)).join("")}</div>`)).join("")}`;
+  return h + `</div>`;
+}
+function plCard(name, P, H, F) {
+  const row = H && H.rows ? H.rows.find(r => r.name === name) : null;
+  const code = row ? row.code : "";
+  const sub = P.launched ? `ran in ${fN(P.runtime_s, 2)} s` : `registry decision: ${P.status}`;
+  const body = plInput(name, P, row, F) + plOutput(name, P);
+  return det("pl:" + name, `<span class="m">${esc(code)}</span> ${esc(name)} ${plStatus(P)}<span class="sub">${esc(sub)}${(P.layers_store || []).length ? " · " + P.layers_store.length + " layer(s)" : ""}</span>`, body, name === "earthquake_coseismic");
+}
+function viewPipelines() {
+  const j = J();
+  let h = `<h1>PIPELINES</h1>`;
+  h += `<div class="card"><div class="note">The featured pipelines run through the <b>real registry path</b> — plan (P12 routing + gate) → launch → collect — on exactly the bundle DATA PROCESSING produced; the pipeline sees only the bundle, and everything external arrives through its own fetch adapters. Click a pipeline to expand its input and output. A pipeline routing declined is shown with the registry's own answer and reasons — never silently hidden.</div>
+    <div class="chips" style="margin-top:8px"><span class="chip">registry.run_unknown <b>${esc(j.handoff ? j.handoff.run_unknown : "–")}</b></span><span class="chip">pipelines with run(): <b>${j.handoff ? j.handoff.n_implemented : "–"}</b> / ${j.handoff ? j.handoff.rows.length : "–"}</span></div></div>`;
+  if (!S.jobId) return h + `<div class="card empty">Run a tile first (top left). The pipelines consume the SceneBundle that run produces.</div>`;
+  const P = j.pipelines;
+  if (!P) return h + `<div class="card empty">${j.state === "running" ? "the featured pipelines run after the chain finishes…" : "no pipeline result in this job"}</div>`;
+  if (P.error) return h + `<div class="card">${badge("bad", "PIPELINE RUNNER FAILED")}<pre>${esc(P.trace || P.error)}</pre></div>`;
+  const H = j.handoff, F = j.final && j.final.final_arrays;
+  const order = P.names && P.names.length ? P.names : Object.keys(P.pipelines);
+  h += order.map(n => P.pipelines[n] ? plCard(n, P.pipelines[n], H, F) : `<div class="card empty">${esc(n)}: no result</div>`).join("");
+  (P.missing || []).forEach(n => { h += `<div class="card empty">${esc(n)}: not present in this checkout</div>`; });
+  if (P.providers_used && Object.keys(P.providers_used).length) h += `<div class="card">${badge("warn", "SELFTEST INJECTION")}<div class="note" style="margin-top:4px">${esc(Object.entries(P.providers_used).map(([k, v]) => `${k}: ${v}`).join(" | "))}</div></div>`;
+  return h;
+}
+
+/* ------------------------------------------------------------------ boot */
+(async function boot() {
+  try {
+    S.cfg = await api("/api/config");
+    $("lookback").placeholder = S.cfg.lookback_days;
+    if (S.cfg.sources.length > 1) { $("srcbox").style.display = ""; $("src").innerHTML = S.cfg.sources.map(s => `<option>${s}</option>`).join(""); $("src").onchange = () => { $("ancbox").style.display = $("src").value === "selftest" ? "" : "none"; }; }
+    else $("src").innerHTML = `<option>${S.cfg.sources[0]}</option>`;
+    const last = S.cfg.jobs[0]; if (last) { attach(last.id); }
+  } catch (e) { $("tileinfo").innerHTML = `<span class="bad">${esc(e.message)}</span>`; }
+  updateTile(); render(); tick(); loadHealth();
+})();
+</script>
+</body>
+</html>

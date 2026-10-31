@@ -1,0 +1,29 @@
+# manifest.yaml — 3.00 _template
+# auto-scaffolded from nisar_hazard_engine.json — fill in / adjust as the pipeline is implemented
+
+code: "3.00"
+name: "_template"
+sensor: ""
+model_type: ""
+
+applies: ""
+
+uses: ""
+uses_codes: []
+
+own_prep: ""
+
+own_fetch: ""
+fetch_codes: []
+
+method: []
+
+output: ""
+
+min_epochs: null
+
+status_values:
+  - "SUPPORTED"
+  - "NOT_SUPPORTED"
+  - "INSUFFICIENT_EVIDENCE"
+  - "NOT_MODELLED"

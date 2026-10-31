@@ -1,0 +1,2369 @@
+{
+ "_comment": "FIXTURE \u2014 synthetic GranuleRefs run through the REAL engine enrichment (engine/api/granules_bbox.py) by tools/gen_explorer_fixture.py; served by Playwright page.route. Not live data.",
+ "bbox": [
+  -118.45,
+  33.7,
+  -118.05,
+  34.3
+ ],
+ "window": {
+  "t0": "2026-06-01T00:00:00Z",
+  "t1": "2026-10-30T00:00:00Z"
+ },
+ "n_total": 20,
+ "truncated": false,
+ "degraded": false,
+ "search_budget": 250,
+ "generated_at": "2026-10-30T01:28:00Z",
+ "granules": [
+  {
+   "id": "NISAR_L2_PR_GCOV_027_034_A_019_4005_SHNA_A_20260620T130823_20260620T130853_P05023_N_F_J_001",
+   "product": "GCOV",
+   "stack": "A034",
+   "direction": "A",
+   "track": 34,
+   "frame": 19,
+   "start": "2026-06-20T13:08:23Z",
+   "id_start": "2026-06-20T13:08:23Z",
+   "stop": "2026-06-20T13:08:53Z",
+   "ref_time": null,
+   "sec_time": null,
+   "baseline_days": null,
+   "cycle_ref": 27,
+   "cycle_sec": null,
+   "polarization": "HH",
+   "range_bandwidth_mhz": 40.0,
+   "collection": "NISAR_L2_GCOV_PROVISIONAL_V1",
+   "crid": "P05023",
+   "version": "001",
+   "orbit_accuracy": {
+    "asf": "MOE",
+    "filename": "N"
+   },
+   "size_bytes": 118000000,
+   "footprint": [
+    [
+     -118.60042858705447,
+     33.704684684684686
+    ],
+    [
+     -117.83957141294553,
+     33.704684684684686
+    ],
+    [
+     -117.83957141294553,
+     34.33531531531532
+    ],
+    [
+     -118.60042858705447,
+     34.33531531531532
+    ]
+   ],
+   "flags": [
+    "4005 (range bandwidth: multi-frequency or unparsable token kept raw)",
+    "N (orbit token)"
+   ]
+  },
+  {
+   "id": "NISAR_L2_PR_GUNW_027_034_A_019_029_4000_SH_20260620T130823_20260620T130857_20260714T130823_20260714T130857_P05023_N_F_J_001",
+   "product": "GUNW",
+   "stack": "A034",
+   "direction": "A",
+   "track": 34,
+   "frame": 19,
+   "start": "2026-06-20T13:08:23Z",
+   "id_start": null,
+   "stop": "2026-06-20T13:08:57Z",
+   "ref_time": "2026-06-20T13:08:23Z",
+   "sec_time": "2026-07-14T13:08:23Z",
+   "baseline_days": 24.0,
+   "cycle_ref": 27,
+   "cycle_sec": 29,
+   "polarization": "HH",
+   "range_bandwidth_mhz": 40.0,
+   "collection": "NISAR_L2_GUNW_PROVISIONAL_V1",
+   "crid": "P05023",
+   "version": "001",
+   "orbit_accuracy": {
+    "asf": "MOE",
+    "filename": "N"
+   },
+   "size_bytes": 231000000,
+   "footprint": [
+    [
+     -118.63056314462338,
+     33.73468468468468
+    ],
+    [
+     -117.86943685537662,
+     33.73468468468468
+    ],
+    [
+     -117.86943685537662,
+     34.365315315315314
+    ],
+    [
+     -118.63056314462338,
+     34.365315315315314
+    ]
+   ],
+   "flags": [
+    "N (orbit token)"
+   ]
+  },
+  {
+   "id": "NISAR_L2_PR_GCOV_029_034_A_019_4005_SHNA_A_20260702T130823_20260702T130853_P05023_N_F_J_001",
+   "product": "GCOV",
+   "stack": "A034",
+   "direction": "A",
+   "track": 34,
+   "frame": 19,
+   "start": "2026-07-02T13:08:23Z",
+   "id_start": "2026-07-02T13:08:23Z",
+   "stop": "2026-07-02T13:08:53Z",
+   "ref_time": null,
+   "sec_time": null,
+   "baseline_days": null,
+   "cycle_ref": 29,
+   "cycle_sec": null,
+   "polarization": "HH",
+   "range_bandwidth_mhz": 40.0,
+   "collection": "NISAR_L2_GCOV_PROVISIONAL_V1",
+   "crid": "P05023",
+   "version": "001",
+   "orbit_accuracy": {
+    "asf": "MOE",
+    "filename": "N"
+   },
+   "size_bytes": 118000000,
+   "footprint": [
+    [
+     -118.60042858705447,
+     33.704684684684686
+    ],
+    [
+     -117.83957141294553,
+     33.704684684684686
+    ],
+    [
+     -117.83957141294553,
+     34.33531531531532
+    ],
+    [
+     -118.60042858705447,
+     34.33531531531532
+    ]
+   ],
+   "flags": [
+    "4005 (range bandwidth: multi-frequency or unparsable token kept raw)",
+    "N (orbit token)"
+   ]
+  },
+  {
+   "id": "NISAR_L2_PR_GCOV_031_034_A_019_4005_SHNA_A_20260714T130823_20260714T130853_P05023_N_F_J_001",
+   "product": "GCOV",
+   "stack": "A034",
+   "direction": "A",
+   "track": 34,
+   "frame": 19,
+   "start": "2026-07-14T13:08:23Z",
+   "id_start": "2026-07-14T13:08:23Z",
+   "stop": "2026-07-14T13:08:53Z",
+   "ref_time": null,
+   "sec_time": null,
+   "baseline_days": null,
+   "cycle_ref": 31,
+   "cycle_sec": null,
+   "polarization": "HH",
+   "range_bandwidth_mhz": 40.0,
+   "collection": "NISAR_L2_GCOV_PROVISIONAL_V1",
+   "crid": "P05023",
+   "version": "001",
+   "orbit_accuracy": {
+    "asf": "MOE",
+    "filename": "N"
+   },
+   "size_bytes": 118000000,
+   "footprint": [
+    [
+     -118.60042858705447,
+     33.704684684684686
+    ],
+    [
+     -117.83957141294553,
+     33.704684684684686
+    ],
+    [
+     -117.83957141294553,
+     34.33531531531532
+    ],
+    [
+     -118.60042858705447,
+     34.33531531531532
+    ]
+   ],
+   "flags": [
+    "4005 (range bandwidth: multi-frequency or unparsable token kept raw)",
+    "N (orbit token)"
+   ]
+  },
+  {
+   "id": "NISAR_L2_PR_GCOV_031_034_A_019_7700_SHNA_A_20260714T130823_20260714T130853_P05023_N_F_J_001",
+   "product": "GCOV",
+   "stack": "A034",
+   "direction": "A",
+   "track": 34,
+   "frame": 19,
+   "start": "2026-07-14T13:08:23Z",
+   "id_start": "2026-07-14T13:08:23Z",
+   "stop": "2026-07-14T13:08:53Z",
+   "ref_time": null,
+   "sec_time": null,
+   "baseline_days": null,
+   "cycle_ref": 31,
+   "cycle_sec": null,
+   "polarization": "HH",
+   "range_bandwidth_mhz": 77.0,
+   "collection": "NISAR_L2_GCOV_PROVISIONAL_V1",
+   "crid": "P05023",
+   "version": "001",
+   "orbit_accuracy": {
+    "asf": "MOE",
+    "filename": "N"
+   },
+   "size_bytes": 124000000,
+   "footprint": [
+    [
+     -118.60042858705447,
+     33.704684684684686
+    ],
+    [
+     -117.83957141294553,
+     33.704684684684686
+    ],
+    [
+     -117.83957141294553,
+     34.33531531531532
+    ],
+    [
+     -118.60042858705447,
+     34.33531531531532
+    ]
+   ],
+   "flags": [
+    "N (orbit token)"
+   ]
+  },
+  {
+   "id": "NISAR_L2_PR_GUNW_029_034_A_019_031_4000_SH_20260714T130823_20260714T130857_20260807T130823_20260807T130857_P05023_N_F_J_001",
+   "product": "GUNW",
+   "stack": "A034",
+   "direction": "A",
+   "track": 34,
+   "frame": 19,
+   "start": "2026-07-14T13:08:23Z",
+   "id_start": null,
+   "stop": "2026-07-14T13:08:57Z",
+   "ref_time": "2026-07-14T13:08:23Z",
+   "sec_time": "2026-08-07T13:08:23Z",
+   "baseline_days": 24.0,
+   "cycle_ref": 29,
+   "cycle_sec": 31,
+   "polarization": "HH",
+   "range_bandwidth_mhz": 40.0,
+   "collection": "NISAR_L2_GUNW_PROVISIONAL_V1",
+   "crid": "P05023",
+   "version": "001",
+   "orbit_accuracy": {
+    "asf": "MOE",
+    "filename": "N"
+   },
+   "size_bytes": 231000000,
+   "footprint": [
+    [
+     -118.63056314462338,
+     33.73468468468468
+    ],
+    [
+     -117.86943685537662,
+     33.73468468468468
+    ],
+    [
+     -117.86943685537662,
+     34.365315315315314
+    ],
+    [
+     -118.63056314462338,
+     34.365315315315314
+    ]
+   ],
+   "flags": [
+    "N (orbit token)"
+   ]
+  },
+  {
+   "id": "NISAR_L2_PR_SYNTH_UNKNOWN-LAYOUT_001",
+   "product": "GCOV",
+   "stack": "A034",
+   "direction": "A",
+   "track": 34,
+   "frame": 19,
+   "start": "2026-07-20T13:09:00Z",
+   "id_start": null,
+   "stop": "2026-07-20T13:09:30Z",
+   "ref_time": null,
+   "sec_time": null,
+   "baseline_days": null,
+   "cycle_ref": null,
+   "cycle_sec": null,
+   "polarization": null,
+   "range_bandwidth_mhz": null,
+   "collection": null,
+   "crid": null,
+   "version": null,
+   "orbit_accuracy": {
+    "asf": null,
+    "filename": null
+   },
+   "size_bytes": 90000000,
+   "footprint": [
+    [
+     -118.60042858705447,
+     33.704684684684686
+    ],
+    [
+     -117.83957141294553,
+     33.704684684684686
+    ],
+    [
+     -117.83957141294553,
+     34.33531531531532
+    ],
+    [
+     -118.60042858705447,
+     34.33531531531532
+    ]
+   ],
+   "flags": [
+    "NISAR_L2_PR_SYNTH_UNKNOWN-LAYOUT_001 (whole id: no verified layout matched)"
+   ]
+  },
+  {
+   "id": "NISAR_L2_PR_GCOV_033_034_A_019_4005_SHNA_A_20260726T130823_20260726T130853_P05023_N_F_J_001",
+   "product": "GCOV",
+   "stack": "A034",
+   "direction": "A",
+   "track": 34,
+   "frame": 19,
+   "start": "2026-07-26T13:08:23Z",
+   "id_start": "2026-07-26T13:08:23Z",
+   "stop": "2026-07-26T13:08:53Z",
+   "ref_time": null,
+   "sec_time": null,
+   "baseline_days": null,
+   "cycle_ref": 33,
+   "cycle_sec": null,
+   "polarization": "HH",
+   "range_bandwidth_mhz": 40.0,
+   "collection": "NISAR_L2_GCOV_PROVISIONAL_V1",
+   "crid": "P05023",
+   "version": "001",
+   "orbit_accuracy": {
+    "asf": "MOE",
+    "filename": "N"
+   },
+   "size_bytes": 118000000,
+   "footprint": [
+    [
+     -118.60042858705447,
+     33.704684684684686
+    ],
+    [
+     -117.83957141294553,
+     33.704684684684686
+    ],
+    [
+     -117.83957141294553,
+     34.33531531531532
+    ],
+    [
+     -118.60042858705447,
+     34.33531531531532
+    ]
+   ],
+   "flags": [
+    "4005 (range bandwidth: multi-frequency or unparsable token kept raw)",
+    "N (orbit token)"
+   ]
+  },
+  {
+   "id": "NISAR_L2_PR_GCOV_035_034_A_019_4005_SHNA_A_20260807T130823_20260807T130853_P05023_N_F_J_001",
+   "product": "GCOV",
+   "stack": "A034",
+   "direction": "A",
+   "track": 34,
+   "frame": 19,
+   "start": "2026-08-07T13:08:23Z",
+   "id_start": "2026-08-07T13:08:23Z",
+   "stop": "2026-08-07T13:08:53Z",
+   "ref_time": null,
+   "sec_time": null,
+   "baseline_days": null,
+   "cycle_ref": 35,
+   "cycle_sec": null,
+   "polarization": "HH",
+   "range_bandwidth_mhz": 40.0,
+   "collection": "NISAR_L2_GCOV_PROVISIONAL_V1",
+   "crid": "P05023",
+   "version": "001",
+   "orbit_accuracy": {
+    "asf": "MOE",
+    "filename": "N"
+   },
+   "size_bytes": 118000000,
+   "footprint": [
+    [
+     -118.60042858705447,
+     33.704684684684686
+    ],
+    [
+     -117.83957141294553,
+     33.704684684684686
+    ],
+    [
+     -117.83957141294553,
+     34.33531531531532
+    ],
+    [
+     -118.60042858705447,
+     34.33531531531532
+    ]
+   ],
+   "flags": [
+    "4005 (range bandwidth: multi-frequency or unparsable token kept raw)",
+    "N (orbit token)"
+   ]
+  },
+  {
+   "id": "NISAR_L2_PR_GCOV_037_034_A_019_4005_SHNA_A_20260819T130823_20260819T130853_P05023_N_F_J_001",
+   "product": "GCOV",
+   "stack": "A034",
+   "direction": "A",
+   "track": 34,
+   "frame": 19,
+   "start": "2026-08-19T13:08:23Z",
+   "id_start": "2026-08-19T13:08:23Z",
+   "stop": "2026-08-19T13:08:53Z",
+   "ref_time": null,
+   "sec_time": null,
+   "baseline_days": null,
+   "cycle_ref": 37,
+   "cycle_sec": null,
+   "polarization": "HH",
+   "range_bandwidth_mhz": 40.0,
+   "collection": "NISAR_L2_GCOV_PROVISIONAL_V1",
+   "crid": "P05023",
+   "version": "001",
+   "orbit_accuracy": {
+    "asf": "MOE",
+    "filename": "N"
+   },
+   "size_bytes": 118000000,
+   "footprint": [
+    [
+     -118.60042858705447,
+     33.704684684684686
+    ],
+    [
+     -117.83957141294553,
+     33.704684684684686
+    ],
+    [
+     -117.83957141294553,
+     34.33531531531532
+    ],
+    [
+     -118.60042858705447,
+     34.33531531531532
+    ]
+   ],
+   "flags": [
+    "4005 (range bandwidth: multi-frequency or unparsable token kept raw)",
+    "N (orbit token)"
+   ]
+  },
+  {
+   "id": "NISAR_L2_PR_GCOV_039_034_A_019_4005_SHNA_A_20260831T130823_20260831T130853_P05023_N_F_J_001",
+   "product": "GCOV",
+   "stack": "A034",
+   "direction": "A",
+   "track": 34,
+   "frame": 19,
+   "start": "2026-08-31T13:08:23Z",
+   "id_start": "2026-08-31T13:08:23Z",
+   "stop": "2026-08-31T13:08:53Z",
+   "ref_time": null,
+   "sec_time": null,
+   "baseline_days": null,
+   "cycle_ref": 39,
+   "cycle_sec": null,
+   "polarization": "HH",
+   "range_bandwidth_mhz": 40.0,
+   "collection": "NISAR_L2_GCOV_PROVISIONAL_V1",
+   "crid": "P05023",
+   "version": "001",
+   "orbit_accuracy": {
+    "asf": "MOE",
+    "filename": "N"
+   },
+   "size_bytes": 118000000,
+   "footprint": [
+    [
+     -118.60042858705447,
+     33.704684684684686
+    ],
+    [
+     -117.83957141294553,
+     33.704684684684686
+    ],
+    [
+     -117.83957141294553,
+     34.33531531531532
+    ],
+    [
+     -118.60042858705447,
+     34.33531531531532
+    ]
+   ],
+   "flags": [
+    "4005 (range bandwidth: multi-frequency or unparsable token kept raw)",
+    "N (orbit token)"
+   ]
+  },
+  {
+   "id": "NISAR_L2_PR_GUNW_033_034_A_019_031_4000_SH_20260831T130823_20260831T130857_20260807T130823_20260807T130857_P05023_N_F_J_001",
+   "product": "GUNW",
+   "stack": "A034",
+   "direction": "A",
+   "track": 34,
+   "frame": 19,
+   "start": "2026-08-31T13:08:23Z",
+   "id_start": null,
+   "stop": "2026-08-31T13:08:57Z",
+   "ref_time": "2026-08-31T13:08:23Z",
+   "sec_time": "2026-08-07T13:08:23Z",
+   "baseline_days": 24.0,
+   "cycle_ref": 33,
+   "cycle_sec": 31,
+   "polarization": "HH",
+   "range_bandwidth_mhz": 40.0,
+   "collection": "NISAR_L2_GUNW_PROVISIONAL_V1",
+   "crid": "P05023",
+   "version": "001",
+   "orbit_accuracy": {
+    "asf": "MOE",
+    "filename": "N"
+   },
+   "size_bytes": 231000000,
+   "footprint": [
+    [
+     -118.63056314462338,
+     33.73468468468468
+    ],
+    [
+     -117.86943685537662,
+     33.73468468468468
+    ],
+    [
+     -117.86943685537662,
+     34.365315315315314
+    ],
+    [
+     -118.63056314462338,
+     34.365315315315314
+    ]
+   ],
+   "flags": [
+    "pair stored secondary-first (flipped); baseline normalised",
+    "N (orbit token)"
+   ]
+  },
+  {
+   "id": "NISAR_L2_PR_GCOV_041_034_A_019_4005_SHNA_A_20260912T130823_20260912T130853_P05023_N_F_J_001",
+   "product": "GCOV",
+   "stack": "A034",
+   "direction": "A",
+   "track": 34,
+   "frame": 19,
+   "start": "2026-09-12T13:08:23Z",
+   "id_start": "2026-09-12T13:08:23Z",
+   "stop": "2026-09-12T13:08:53Z",
+   "ref_time": null,
+   "sec_time": null,
+   "baseline_days": null,
+   "cycle_ref": 41,
+   "cycle_sec": null,
+   "polarization": "HH",
+   "range_bandwidth_mhz": 40.0,
+   "collection": "NISAR_L2_GCOV_PROVISIONAL_V1",
+   "crid": "P05023",
+   "version": "001",
+   "orbit_accuracy": {
+    "asf": "MOE",
+    "filename": "N"
+   },
+   "size_bytes": 118000000,
+   "footprint": [
+    [
+     -118.60042858705447,
+     33.704684684684686
+    ],
+    [
+     -117.83957141294553,
+     33.704684684684686
+    ],
+    [
+     -117.83957141294553,
+     34.33531531531532
+    ],
+    [
+     -118.60042858705447,
+     34.33531531531532
+    ]
+   ],
+   "flags": [
+    "4005 (range bandwidth: multi-frequency or unparsable token kept raw)",
+    "N (orbit token)"
+   ]
+  },
+  {
+   "id": "NISAR_L2_PR_GUNW_031_034_A_019_033_4000_SH_20260920T130823_20260920T130857_20261014T130823_20261014T130857_P05023_N_F_J_001",
+   "product": "GUNW",
+   "stack": "A034",
+   "direction": "A",
+   "track": 34,
+   "frame": 19,
+   "start": "2026-08-07T13:08:23Z",
+   "id_start": null,
+   "stop": "2026-08-07T13:08:57Z",
+   "ref_time": "2026-09-20T13:08:23Z",
+   "sec_time": "2026-10-14T13:08:23Z",
+   "baseline_days": 24.0,
+   "cycle_ref": 31,
+   "cycle_sec": 33,
+   "polarization": "HH",
+   "range_bandwidth_mhz": 40.0,
+   "collection": "NISAR_L2_GUNW_PROVISIONAL_V1",
+   "crid": "P05023",
+   "version": "001",
+   "orbit_accuracy": {
+    "asf": "MOE",
+    "filename": "N"
+   },
+   "size_bytes": 231000000,
+   "footprint": [
+    [
+     -118.63056314462338,
+     33.73468468468468
+    ],
+    [
+     -117.86943685537662,
+     33.73468468468468
+    ],
+    [
+     -117.86943685537662,
+     34.365315315315314
+    ],
+    [
+     -118.63056314462338,
+     34.365315315315314
+    ]
+   ],
+   "flags": [
+    "N (orbit token)"
+   ]
+  },
+  {
+   "id": "NISAR_L2_PR_GCOV_027_071_D_045_4005_SHNA_D_20260626T011000_20260626T011030_P05023_N_F_J_001",
+   "product": "GCOV",
+   "stack": "D071",
+   "direction": "D",
+   "track": 71,
+   "frame": 45,
+   "start": "2026-06-26T01:10:00Z",
+   "id_start": "2026-06-26T01:10:00Z",
+   "stop": "2026-06-26T01:10:30Z",
+   "ref_time": null,
+   "sec_time": null,
+   "baseline_days": null,
+   "cycle_ref": 27,
+   "cycle_sec": null,
+   "polarization": "HH",
+   "range_bandwidth_mhz": null,
+   "collection": "NISAR_L2_GCOV_PROVISIONAL_V1",
+   "crid": "P05023",
+   "version": "001",
+   "orbit_accuracy": {
+    "asf": "MOE",
+    "filename": "N"
+   },
+   "size_bytes": 121000000,
+   "footprint": [
+    [
+     -118.69083285892859,
+     33.79468468468468
+    ],
+    [
+     -117.92916714107142,
+     33.79468468468468
+    ],
+    [
+     -117.92916714107142,
+     34.425315315315316
+    ],
+    [
+     -118.69083285892859,
+     34.425315315315316
+    ]
+   ],
+   "flags": [
+    "4005 (range bandwidth: multi-frequency or unparsable token kept raw)",
+    "N (orbit token)"
+   ]
+  },
+  {
+   "id": "NISAR_L2_PR_GCOV_029_071_D_045_4005_SHNA_D_20260708T011000_20260708T011030_P05023_N_F_J_001",
+   "product": "GCOV",
+   "stack": "D071",
+   "direction": "D",
+   "track": 71,
+   "frame": 45,
+   "start": "2026-07-08T01:10:00Z",
+   "id_start": "2026-07-08T01:10:00Z",
+   "stop": "2026-07-08T01:10:30Z",
+   "ref_time": null,
+   "sec_time": null,
+   "baseline_days": null,
+   "cycle_ref": 29,
+   "cycle_sec": null,
+   "polarization": "HH",
+   "range_bandwidth_mhz": null,
+   "collection": "NISAR_L2_GCOV_PROVISIONAL_V1",
+   "crid": "P05023",
+   "version": "001",
+   "orbit_accuracy": {
+    "asf": "MOE",
+    "filename": "N"
+   },
+   "size_bytes": 121000000,
+   "footprint": [
+    [
+     -118.69083285892859,
+     33.79468468468468
+    ],
+    [
+     -117.92916714107142,
+     33.79468468468468
+    ],
+    [
+     -117.92916714107142,
+     34.425315315315316
+    ],
+    [
+     -118.69083285892859,
+     34.425315315315316
+    ]
+   ],
+   "flags": [
+    "4005 (range bandwidth: multi-frequency or unparsable token kept raw)",
+    "N (orbit token)"
+   ]
+  },
+  {
+   "id": "NISAR_L2_PR_GCOV_031_071_D_045_4005_SHNA_D_20260720T011000_20260720T011030_P05023_N_F_J_001",
+   "product": "GCOV",
+   "stack": "D071",
+   "direction": "D",
+   "track": 71,
+   "frame": 45,
+   "start": "2026-07-20T01:10:00Z",
+   "id_start": "2026-07-20T01:10:00Z",
+   "stop": "2026-07-20T01:10:30Z",
+   "ref_time": null,
+   "sec_time": null,
+   "baseline_days": null,
+   "cycle_ref": 31,
+   "cycle_sec": null,
+   "polarization": "HH",
+   "range_bandwidth_mhz": null,
+   "collection": "NISAR_L2_GCOV_PROVISIONAL_V1",
+   "crid": "P05023",
+   "version": "001",
+   "orbit_accuracy": {
+    "asf": "MOE",
+    "filename": "N"
+   },
+   "size_bytes": 121000000,
+   "footprint": [
+    [
+     -118.69083285892859,
+     33.79468468468468
+    ],
+    [
+     -117.92916714107142,
+     33.79468468468468
+    ],
+    [
+     -117.92916714107142,
+     34.425315315315316
+    ],
+    [
+     -118.69083285892859,
+     34.425315315315316
+    ]
+   ],
+   "flags": [
+    "4005 (range bandwidth: multi-frequency or unparsable token kept raw)",
+    "N (orbit token)"
+   ]
+  },
+  {
+   "id": "NISAR_L2_PR_GCOV_033_071_D_045_4005_SHNA_D_20260801T011000_20260801T011030_P05023_N_F_J_001",
+   "product": "GCOV",
+   "stack": "D071",
+   "direction": "D",
+   "track": 71,
+   "frame": 45,
+   "start": "2026-08-01T01:10:00Z",
+   "id_start": "2026-08-01T01:10:00Z",
+   "stop": "2026-08-01T01:10:30Z",
+   "ref_time": null,
+   "sec_time": null,
+   "baseline_days": null,
+   "cycle_ref": 33,
+   "cycle_sec": null,
+   "polarization": "HH",
+   "range_bandwidth_mhz": null,
+   "collection": "NISAR_L2_GCOV_PROVISIONAL_V1",
+   "crid": "P05023",
+   "version": "001",
+   "orbit_accuracy": {
+    "asf": "MOE",
+    "filename": "N"
+   },
+   "size_bytes": 121000000,
+   "footprint": [
+    [
+     -118.69083285892859,
+     33.79468468468468
+    ],
+    [
+     -117.92916714107142,
+     33.79468468468468
+    ],
+    [
+     -117.92916714107142,
+     34.425315315315316
+    ],
+    [
+     -118.69083285892859,
+     34.425315315315316
+    ]
+   ],
+   "flags": [
+    "4005 (range bandwidth: multi-frequency or unparsable token kept raw)",
+    "N (orbit token)"
+   ]
+  },
+  {
+   "id": "NISAR_L2_PR_GCOV_035_071_D_045_4005_SHNA_D_20260813T011000_20260813T011030_P05023_N_F_J_001",
+   "product": "GCOV",
+   "stack": "D071",
+   "direction": "D",
+   "track": 71,
+   "frame": 45,
+   "start": "2026-08-13T01:10:00Z",
+   "id_start": "2026-08-13T01:10:00Z",
+   "stop": "2026-08-13T01:10:30Z",
+   "ref_time": null,
+   "sec_time": null,
+   "baseline_days": null,
+   "cycle_ref": 35,
+   "cycle_sec": null,
+   "polarization": "HH",
+   "range_bandwidth_mhz": null,
+   "collection": "NISAR_L2_GCOV_PROVISIONAL_V1",
+   "crid": "P05023",
+   "version": "001",
+   "orbit_accuracy": {
+    "asf": "MOE",
+    "filename": "N"
+   },
+   "size_bytes": 121000000,
+   "footprint": [
+    [
+     -118.69083285892859,
+     33.79468468468468
+    ],
+    [
+     -117.92916714107142,
+     33.79468468468468
+    ],
+    [
+     -117.92916714107142,
+     34.425315315315316
+    ],
+    [
+     -118.69083285892859,
+     34.425315315315316
+    ]
+   ],
+   "flags": [
+    "4005 (range bandwidth: multi-frequency or unparsable token kept raw)",
+    "N (orbit token)"
+   ]
+  },
+  {
+   "id": "NISAR_L2_PR_GCOV_037_071_D_045_4005_SHNA_D_20260825T011000_20260825T011030_P05023_N_F_J_001",
+   "product": "GCOV",
+   "stack": "D071",
+   "direction": "D",
+   "track": 71,
+   "frame": 45,
+   "start": "2026-08-25T01:10:00Z",
+   "id_start": "2026-08-25T01:10:00Z",
+   "stop": "2026-08-25T01:10:30Z",
+   "ref_time": null,
+   "sec_time": null,
+   "baseline_days": null,
+   "cycle_ref": 37,
+   "cycle_sec": null,
+   "polarization": "HH",
+   "range_bandwidth_mhz": null,
+   "collection": "NISAR_L2_GCOV_PROVISIONAL_V1",
+   "crid": "P05023",
+   "version": "001",
+   "orbit_accuracy": {
+    "asf": "MOE",
+    "filename": "N"
+   },
+   "size_bytes": 121000000,
+   "footprint": [
+    [
+     -118.69083285892859,
+     33.79468468468468
+    ],
+    [
+     -117.92916714107142,
+     33.79468468468468
+    ],
+    [
+     -117.92916714107142,
+     34.425315315315316
+    ],
+    [
+     -118.69083285892859,
+     34.425315315315316
+    ]
+   ],
+   "flags": [
+    "4005 (range bandwidth: multi-frequency or unparsable token kept raw)",
+    "N (orbit token)"
+   ]
+  }
+ ],
+ "stacks": [
+  {
+   "key": "A034",
+   "direction": "A",
+   "track": 34,
+   "n_granules": 14,
+   "n_epochs": 11,
+   "epochs": [
+    "2026-06-20T13:08:23Z",
+    "2026-07-02T13:08:23Z",
+    "2026-07-14T13:08:23Z",
+    "2026-07-20T13:09:00Z",
+    "2026-07-26T13:08:23Z",
+    "2026-08-07T13:08:23Z",
+    "2026-08-19T13:08:23Z",
+    "2026-08-31T13:08:23Z",
+    "2026-09-12T13:08:23Z",
+    "2026-09-20T13:08:23Z",
+    "2026-10-14T13:08:23Z"
+   ],
+   "gaps_days": [
+    12.0,
+    12.0,
+    6.0,
+    6.0,
+    12.0,
+    12.0,
+    12.0,
+    12.0,
+    8.0,
+    24.0
+   ],
+   "min_gap_days": 6.0,
+   "median_gap_days": 12.0,
+   "max_gap_days": 24.0,
+   "nominal_repeat_days": null,
+   "first": "2026-06-20T13:08:23Z",
+   "last": "2026-10-14T13:08:23Z"
+  },
+  {
+   "key": "D071",
+   "direction": "D",
+   "track": 71,
+   "n_granules": 6,
+   "n_epochs": 6,
+   "epochs": [
+    "2026-06-26T01:10:00Z",
+    "2026-07-08T01:10:00Z",
+    "2026-07-20T01:10:00Z",
+    "2026-08-01T01:10:00Z",
+    "2026-08-13T01:10:00Z",
+    "2026-08-25T01:10:00Z"
+   ],
+   "gaps_days": [
+    12.0,
+    12.0,
+    12.0,
+    12.0,
+    12.0
+   ],
+   "min_gap_days": 12.0,
+   "median_gap_days": 12.0,
+   "max_gap_days": 12.0,
+   "nominal_repeat_days": null,
+   "first": "2026-06-26T01:10:00Z",
+   "last": "2026-08-25T01:10:00Z"
+  }
+ ],
+ "groups": [
+  {
+   "key": "ungrouped|NISAR_L2_PR_SYNTH_UNKNOWN-LAYOUT_001",
+   "stack": "A034",
+   "product": "GCOV",
+   "kind": "single",
+   "ref_time": null,
+   "sec_time": null,
+   "start": null,
+   "baseline_days": null,
+   "n_variants": 1,
+   "grouped": false,
+   "variant_facts": [],
+   "granule_ids": [
+    "NISAR_L2_PR_SYNTH_UNKNOWN-LAYOUT_001"
+   ],
+   "flags": [
+    "not grouped: no verified acquisition time (id matches no known layout or timestamps absent)"
+   ],
+   "variants": [
+    {
+     "id": "NISAR_L2_PR_SYNTH_UNKNOWN-LAYOUT_001",
+     "product": "GCOV",
+     "stack": "A034",
+     "direction": "A",
+     "track": 34,
+     "frame": 19,
+     "start": "2026-07-20T13:09:00Z",
+     "id_start": null,
+     "stop": "2026-07-20T13:09:30Z",
+     "ref_time": null,
+     "sec_time": null,
+     "baseline_days": null,
+     "cycle_ref": null,
+     "cycle_sec": null,
+     "polarization": null,
+     "range_bandwidth_mhz": null,
+     "collection": null,
+     "crid": null,
+     "version": null,
+     "orbit_accuracy": {
+      "asf": null,
+      "filename": null
+     },
+     "size_bytes": 90000000,
+     "footprint": [
+      [
+       -118.60042858705447,
+       33.704684684684686
+      ],
+      [
+       -117.83957141294553,
+       33.704684684684686
+      ],
+      [
+       -117.83957141294553,
+       34.33531531531532
+      ],
+      [
+       -118.60042858705447,
+       34.33531531531532
+      ]
+     ],
+     "flags": [
+      "NISAR_L2_PR_SYNTH_UNKNOWN-LAYOUT_001 (whole id: no verified layout matched)"
+     ]
+    }
+   ]
+  },
+  {
+   "key": "A034|2026-06-20T13:08:23Z",
+   "stack": "A034",
+   "product": "GCOV",
+   "kind": "single",
+   "ref_time": null,
+   "sec_time": null,
+   "start": "2026-06-20T13:08:23Z",
+   "baseline_days": null,
+   "n_variants": 1,
+   "grouped": true,
+   "variant_facts": [],
+   "granule_ids": [
+    "NISAR_L2_PR_GCOV_027_034_A_019_4005_SHNA_A_20260620T130823_20260620T130853_P05023_N_F_J_001"
+   ],
+   "flags": [],
+   "variants": [
+    {
+     "id": "NISAR_L2_PR_GCOV_027_034_A_019_4005_SHNA_A_20260620T130823_20260620T130853_P05023_N_F_J_001",
+     "product": "GCOV",
+     "stack": "A034",
+     "direction": "A",
+     "track": 34,
+     "frame": 19,
+     "start": "2026-06-20T13:08:23Z",
+     "id_start": "2026-06-20T13:08:23Z",
+     "stop": "2026-06-20T13:08:53Z",
+     "ref_time": null,
+     "sec_time": null,
+     "baseline_days": null,
+     "cycle_ref": 27,
+     "cycle_sec": null,
+     "polarization": "HH",
+     "range_bandwidth_mhz": 40.0,
+     "collection": "NISAR_L2_GCOV_PROVISIONAL_V1",
+     "crid": "P05023",
+     "version": "001",
+     "orbit_accuracy": {
+      "asf": "MOE",
+      "filename": "N"
+     },
+     "size_bytes": 118000000,
+     "footprint": [
+      [
+       -118.60042858705447,
+       33.704684684684686
+      ],
+      [
+       -117.83957141294553,
+       33.704684684684686
+      ],
+      [
+       -117.83957141294553,
+       34.33531531531532
+      ],
+      [
+       -118.60042858705447,
+       34.33531531531532
+      ]
+     ],
+     "flags": [
+      "4005 (range bandwidth: multi-frequency or unparsable token kept raw)",
+      "N (orbit token)"
+     ]
+    }
+   ]
+  },
+  {
+   "key": "A034|2026-06-20T13:08:23Z|2026-07-14T13:08:23Z",
+   "stack": "A034",
+   "product": "GUNW",
+   "kind": "pair",
+   "ref_time": "2026-06-20T13:08:23Z",
+   "sec_time": "2026-07-14T13:08:23Z",
+   "start": null,
+   "baseline_days": 24.0,
+   "n_variants": 1,
+   "grouped": true,
+   "variant_facts": [],
+   "granule_ids": [
+    "NISAR_L2_PR_GUNW_027_034_A_019_029_4000_SH_20260620T130823_20260620T130857_20260714T130823_20260714T130857_P05023_N_F_J_001"
+   ],
+   "flags": [],
+   "variants": [
+    {
+     "id": "NISAR_L2_PR_GUNW_027_034_A_019_029_4000_SH_20260620T130823_20260620T130857_20260714T130823_20260714T130857_P05023_N_F_J_001",
+     "product": "GUNW",
+     "stack": "A034",
+     "direction": "A",
+     "track": 34,
+     "frame": 19,
+     "start": "2026-06-20T13:08:23Z",
+     "id_start": null,
+     "stop": "2026-06-20T13:08:57Z",
+     "ref_time": "2026-06-20T13:08:23Z",
+     "sec_time": "2026-07-14T13:08:23Z",
+     "baseline_days": 24.0,
+     "cycle_ref": 27,
+     "cycle_sec": 29,
+     "polarization": "HH",
+     "range_bandwidth_mhz": 40.0,
+     "collection": "NISAR_L2_GUNW_PROVISIONAL_V1",
+     "crid": "P05023",
+     "version": "001",
+     "orbit_accuracy": {
+      "asf": "MOE",
+      "filename": "N"
+     },
+     "size_bytes": 231000000,
+     "footprint": [
+      [
+       -118.63056314462338,
+       33.73468468468468
+      ],
+      [
+       -117.86943685537662,
+       33.73468468468468
+      ],
+      [
+       -117.86943685537662,
+       34.365315315315314
+      ],
+      [
+       -118.63056314462338,
+       34.365315315315314
+      ]
+     ],
+     "flags": [
+      "N (orbit token)"
+     ]
+    }
+   ]
+  },
+  {
+   "key": "A034|2026-07-02T13:08:23Z",
+   "stack": "A034",
+   "product": "GCOV",
+   "kind": "single",
+   "ref_time": null,
+   "sec_time": null,
+   "start": "2026-07-02T13:08:23Z",
+   "baseline_days": null,
+   "n_variants": 1,
+   "grouped": true,
+   "variant_facts": [],
+   "granule_ids": [
+    "NISAR_L2_PR_GCOV_029_034_A_019_4005_SHNA_A_20260702T130823_20260702T130853_P05023_N_F_J_001"
+   ],
+   "flags": [],
+   "variants": [
+    {
+     "id": "NISAR_L2_PR_GCOV_029_034_A_019_4005_SHNA_A_20260702T130823_20260702T130853_P05023_N_F_J_001",
+     "product": "GCOV",
+     "stack": "A034",
+     "direction": "A",
+     "track": 34,
+     "frame": 19,
+     "start": "2026-07-02T13:08:23Z",
+     "id_start": "2026-07-02T13:08:23Z",
+     "stop": "2026-07-02T13:08:53Z",
+     "ref_time": null,
+     "sec_time": null,
+     "baseline_days": null,
+     "cycle_ref": 29,
+     "cycle_sec": null,
+     "polarization": "HH",
+     "range_bandwidth_mhz": 40.0,
+     "collection": "NISAR_L2_GCOV_PROVISIONAL_V1",
+     "crid": "P05023",
+     "version": "001",
+     "orbit_accuracy": {
+      "asf": "MOE",
+      "filename": "N"
+     },
+     "size_bytes": 118000000,
+     "footprint": [
+      [
+       -118.60042858705447,
+       33.704684684684686
+      ],
+      [
+       -117.83957141294553,
+       33.704684684684686
+      ],
+      [
+       -117.83957141294553,
+       34.33531531531532
+      ],
+      [
+       -118.60042858705447,
+       34.33531531531532
+      ]
+     ],
+     "flags": [
+      "4005 (range bandwidth: multi-frequency or unparsable token kept raw)",
+      "N (orbit token)"
+     ]
+    }
+   ]
+  },
+  {
+   "key": "A034|2026-07-14T13:08:23Z",
+   "stack": "A034",
+   "product": "GCOV",
+   "kind": "single",
+   "ref_time": null,
+   "sec_time": null,
+   "start": "2026-07-14T13:08:23Z",
+   "baseline_days": null,
+   "n_variants": 2,
+   "grouped": true,
+   "variant_facts": [
+    "range_bandwidth_mhz"
+   ],
+   "granule_ids": [
+    "NISAR_L2_PR_GCOV_031_034_A_019_4005_SHNA_A_20260714T130823_20260714T130853_P05023_N_F_J_001",
+    "NISAR_L2_PR_GCOV_031_034_A_019_7700_SHNA_A_20260714T130823_20260714T130853_P05023_N_F_J_001"
+   ],
+   "flags": [],
+   "variants": [
+    {
+     "id": "NISAR_L2_PR_GCOV_031_034_A_019_4005_SHNA_A_20260714T130823_20260714T130853_P05023_N_F_J_001",
+     "product": "GCOV",
+     "stack": "A034",
+     "direction": "A",
+     "track": 34,
+     "frame": 19,
+     "start": "2026-07-14T13:08:23Z",
+     "id_start": "2026-07-14T13:08:23Z",
+     "stop": "2026-07-14T13:08:53Z",
+     "ref_time": null,
+     "sec_time": null,
+     "baseline_days": null,
+     "cycle_ref": 31,
+     "cycle_sec": null,
+     "polarization": "HH",
+     "range_bandwidth_mhz": 40.0,
+     "collection": "NISAR_L2_GCOV_PROVISIONAL_V1",
+     "crid": "P05023",
+     "version": "001",
+     "orbit_accuracy": {
+      "asf": "MOE",
+      "filename": "N"
+     },
+     "size_bytes": 118000000,
+     "footprint": [
+      [
+       -118.60042858705447,
+       33.704684684684686
+      ],
+      [
+       -117.83957141294553,
+       33.704684684684686
+      ],
+      [
+       -117.83957141294553,
+       34.33531531531532
+      ],
+      [
+       -118.60042858705447,
+       34.33531531531532
+      ]
+     ],
+     "flags": [
+      "4005 (range bandwidth: multi-frequency or unparsable token kept raw)",
+      "N (orbit token)"
+     ]
+    },
+    {
+     "id": "NISAR_L2_PR_GCOV_031_034_A_019_7700_SHNA_A_20260714T130823_20260714T130853_P05023_N_F_J_001",
+     "product": "GCOV",
+     "stack": "A034",
+     "direction": "A",
+     "track": 34,
+     "frame": 19,
+     "start": "2026-07-14T13:08:23Z",
+     "id_start": "2026-07-14T13:08:23Z",
+     "stop": "2026-07-14T13:08:53Z",
+     "ref_time": null,
+     "sec_time": null,
+     "baseline_days": null,
+     "cycle_ref": 31,
+     "cycle_sec": null,
+     "polarization": "HH",
+     "range_bandwidth_mhz": 77.0,
+     "collection": "NISAR_L2_GCOV_PROVISIONAL_V1",
+     "crid": "P05023",
+     "version": "001",
+     "orbit_accuracy": {
+      "asf": "MOE",
+      "filename": "N"
+     },
+     "size_bytes": 124000000,
+     "footprint": [
+      [
+       -118.60042858705447,
+       33.704684684684686
+      ],
+      [
+       -117.83957141294553,
+       33.704684684684686
+      ],
+      [
+       -117.83957141294553,
+       34.33531531531532
+      ],
+      [
+       -118.60042858705447,
+       34.33531531531532
+      ]
+     ],
+     "flags": [
+      "N (orbit token)"
+     ]
+    }
+   ]
+  },
+  {
+   "key": "A034|2026-07-14T13:08:23Z|2026-08-07T13:08:23Z",
+   "stack": "A034",
+   "product": "GUNW",
+   "kind": "pair",
+   "ref_time": "2026-07-14T13:08:23Z",
+   "sec_time": "2026-08-07T13:08:23Z",
+   "start": null,
+   "baseline_days": 24.0,
+   "n_variants": 1,
+   "grouped": true,
+   "variant_facts": [],
+   "granule_ids": [
+    "NISAR_L2_PR_GUNW_029_034_A_019_031_4000_SH_20260714T130823_20260714T130857_20260807T130823_20260807T130857_P05023_N_F_J_001"
+   ],
+   "flags": [],
+   "variants": [
+    {
+     "id": "NISAR_L2_PR_GUNW_029_034_A_019_031_4000_SH_20260714T130823_20260714T130857_20260807T130823_20260807T130857_P05023_N_F_J_001",
+     "product": "GUNW",
+     "stack": "A034",
+     "direction": "A",
+     "track": 34,
+     "frame": 19,
+     "start": "2026-07-14T13:08:23Z",
+     "id_start": null,
+     "stop": "2026-07-14T13:08:57Z",
+     "ref_time": "2026-07-14T13:08:23Z",
+     "sec_time": "2026-08-07T13:08:23Z",
+     "baseline_days": 24.0,
+     "cycle_ref": 29,
+     "cycle_sec": 31,
+     "polarization": "HH",
+     "range_bandwidth_mhz": 40.0,
+     "collection": "NISAR_L2_GUNW_PROVISIONAL_V1",
+     "crid": "P05023",
+     "version": "001",
+     "orbit_accuracy": {
+      "asf": "MOE",
+      "filename": "N"
+     },
+     "size_bytes": 231000000,
+     "footprint": [
+      [
+       -118.63056314462338,
+       33.73468468468468
+      ],
+      [
+       -117.86943685537662,
+       33.73468468468468
+      ],
+      [
+       -117.86943685537662,
+       34.365315315315314
+      ],
+      [
+       -118.63056314462338,
+       34.365315315315314
+      ]
+     ],
+     "flags": [
+      "N (orbit token)"
+     ]
+    }
+   ]
+  },
+  {
+   "key": "A034|2026-07-26T13:08:23Z",
+   "stack": "A034",
+   "product": "GCOV",
+   "kind": "single",
+   "ref_time": null,
+   "sec_time": null,
+   "start": "2026-07-26T13:08:23Z",
+   "baseline_days": null,
+   "n_variants": 1,
+   "grouped": true,
+   "variant_facts": [],
+   "granule_ids": [
+    "NISAR_L2_PR_GCOV_033_034_A_019_4005_SHNA_A_20260726T130823_20260726T130853_P05023_N_F_J_001"
+   ],
+   "flags": [],
+   "variants": [
+    {
+     "id": "NISAR_L2_PR_GCOV_033_034_A_019_4005_SHNA_A_20260726T130823_20260726T130853_P05023_N_F_J_001",
+     "product": "GCOV",
+     "stack": "A034",
+     "direction": "A",
+     "track": 34,
+     "frame": 19,
+     "start": "2026-07-26T13:08:23Z",
+     "id_start": "2026-07-26T13:08:23Z",
+     "stop": "2026-07-26T13:08:53Z",
+     "ref_time": null,
+     "sec_time": null,
+     "baseline_days": null,
+     "cycle_ref": 33,
+     "cycle_sec": null,
+     "polarization": "HH",
+     "range_bandwidth_mhz": 40.0,
+     "collection": "NISAR_L2_GCOV_PROVISIONAL_V1",
+     "crid": "P05023",
+     "version": "001",
+     "orbit_accuracy": {
+      "asf": "MOE",
+      "filename": "N"
+     },
+     "size_bytes": 118000000,
+     "footprint": [
+      [
+       -118.60042858705447,
+       33.704684684684686
+      ],
+      [
+       -117.83957141294553,
+       33.704684684684686
+      ],
+      [
+       -117.83957141294553,
+       34.33531531531532
+      ],
+      [
+       -118.60042858705447,
+       34.33531531531532
+      ]
+     ],
+     "flags": [
+      "4005 (range bandwidth: multi-frequency or unparsable token kept raw)",
+      "N (orbit token)"
+     ]
+    }
+   ]
+  },
+  {
+   "key": "A034|2026-08-07T13:08:23Z",
+   "stack": "A034",
+   "product": "GCOV",
+   "kind": "single",
+   "ref_time": null,
+   "sec_time": null,
+   "start": "2026-08-07T13:08:23Z",
+   "baseline_days": null,
+   "n_variants": 1,
+   "grouped": true,
+   "variant_facts": [],
+   "granule_ids": [
+    "NISAR_L2_PR_GCOV_035_034_A_019_4005_SHNA_A_20260807T130823_20260807T130853_P05023_N_F_J_001"
+   ],
+   "flags": [],
+   "variants": [
+    {
+     "id": "NISAR_L2_PR_GCOV_035_034_A_019_4005_SHNA_A_20260807T130823_20260807T130853_P05023_N_F_J_001",
+     "product": "GCOV",
+     "stack": "A034",
+     "direction": "A",
+     "track": 34,
+     "frame": 19,
+     "start": "2026-08-07T13:08:23Z",
+     "id_start": "2026-08-07T13:08:23Z",
+     "stop": "2026-08-07T13:08:53Z",
+     "ref_time": null,
+     "sec_time": null,
+     "baseline_days": null,
+     "cycle_ref": 35,
+     "cycle_sec": null,
+     "polarization": "HH",
+     "range_bandwidth_mhz": 40.0,
+     "collection": "NISAR_L2_GCOV_PROVISIONAL_V1",
+     "crid": "P05023",
+     "version": "001",
+     "orbit_accuracy": {
+      "asf": "MOE",
+      "filename": "N"
+     },
+     "size_bytes": 118000000,
+     "footprint": [
+      [
+       -118.60042858705447,
+       33.704684684684686
+      ],
+      [
+       -117.83957141294553,
+       33.704684684684686
+      ],
+      [
+       -117.83957141294553,
+       34.33531531531532
+      ],
+      [
+       -118.60042858705447,
+       34.33531531531532
+      ]
+     ],
+     "flags": [
+      "4005 (range bandwidth: multi-frequency or unparsable token kept raw)",
+      "N (orbit token)"
+     ]
+    }
+   ]
+  },
+  {
+   "key": "A034|2026-08-07T13:08:23Z|2026-08-31T13:08:23Z",
+   "stack": "A034",
+   "product": "GUNW",
+   "kind": "pair",
+   "ref_time": "2026-08-07T13:08:23Z",
+   "sec_time": "2026-08-31T13:08:23Z",
+   "start": null,
+   "baseline_days": 24.0,
+   "n_variants": 1,
+   "grouped": true,
+   "variant_facts": [],
+   "granule_ids": [
+    "NISAR_L2_PR_GUNW_033_034_A_019_031_4000_SH_20260831T130823_20260831T130857_20260807T130823_20260807T130857_P05023_N_F_J_001"
+   ],
+   "flags": [
+    "pair stored secondary-first (flipped); ends labelled by true time order"
+   ],
+   "variants": [
+    {
+     "id": "NISAR_L2_PR_GUNW_033_034_A_019_031_4000_SH_20260831T130823_20260831T130857_20260807T130823_20260807T130857_P05023_N_F_J_001",
+     "product": "GUNW",
+     "stack": "A034",
+     "direction": "A",
+     "track": 34,
+     "frame": 19,
+     "start": "2026-08-31T13:08:23Z",
+     "id_start": null,
+     "stop": "2026-08-31T13:08:57Z",
+     "ref_time": "2026-08-31T13:08:23Z",
+     "sec_time": "2026-08-07T13:08:23Z",
+     "baseline_days": 24.0,
+     "cycle_ref": 33,
+     "cycle_sec": 31,
+     "polarization": "HH",
+     "range_bandwidth_mhz": 40.0,
+     "collection": "NISAR_L2_GUNW_PROVISIONAL_V1",
+     "crid": "P05023",
+     "version": "001",
+     "orbit_accuracy": {
+      "asf": "MOE",
+      "filename": "N"
+     },
+     "size_bytes": 231000000,
+     "footprint": [
+      [
+       -118.63056314462338,
+       33.73468468468468
+      ],
+      [
+       -117.86943685537662,
+       33.73468468468468
+      ],
+      [
+       -117.86943685537662,
+       34.365315315315314
+      ],
+      [
+       -118.63056314462338,
+       34.365315315315314
+      ]
+     ],
+     "flags": [
+      "pair stored secondary-first (flipped); baseline normalised",
+      "N (orbit token)"
+     ]
+    }
+   ]
+  },
+  {
+   "key": "A034|2026-08-19T13:08:23Z",
+   "stack": "A034",
+   "product": "GCOV",
+   "kind": "single",
+   "ref_time": null,
+   "sec_time": null,
+   "start": "2026-08-19T13:08:23Z",
+   "baseline_days": null,
+   "n_variants": 1,
+   "grouped": true,
+   "variant_facts": [],
+   "granule_ids": [
+    "NISAR_L2_PR_GCOV_037_034_A_019_4005_SHNA_A_20260819T130823_20260819T130853_P05023_N_F_J_001"
+   ],
+   "flags": [],
+   "variants": [
+    {
+     "id": "NISAR_L2_PR_GCOV_037_034_A_019_4005_SHNA_A_20260819T130823_20260819T130853_P05023_N_F_J_001",
+     "product": "GCOV",
+     "stack": "A034",
+     "direction": "A",
+     "track": 34,
+     "frame": 19,
+     "start": "2026-08-19T13:08:23Z",
+     "id_start": "2026-08-19T13:08:23Z",
+     "stop": "2026-08-19T13:08:53Z",
+     "ref_time": null,
+     "sec_time": null,
+     "baseline_days": null,
+     "cycle_ref": 37,
+     "cycle_sec": null,
+     "polarization": "HH",
+     "range_bandwidth_mhz": 40.0,
+     "collection": "NISAR_L2_GCOV_PROVISIONAL_V1",
+     "crid": "P05023",
+     "version": "001",
+     "orbit_accuracy": {
+      "asf": "MOE",
+      "filename": "N"
+     },
+     "size_bytes": 118000000,
+     "footprint": [
+      [
+       -118.60042858705447,
+       33.704684684684686
+      ],
+      [
+       -117.83957141294553,
+       33.704684684684686
+      ],
+      [
+       -117.83957141294553,
+       34.33531531531532
+      ],
+      [
+       -118.60042858705447,
+       34.33531531531532
+      ]
+     ],
+     "flags": [
+      "4005 (range bandwidth: multi-frequency or unparsable token kept raw)",
+      "N (orbit token)"
+     ]
+    }
+   ]
+  },
+  {
+   "key": "A034|2026-08-31T13:08:23Z",
+   "stack": "A034",
+   "product": "GCOV",
+   "kind": "single",
+   "ref_time": null,
+   "sec_time": null,
+   "start": "2026-08-31T13:08:23Z",
+   "baseline_days": null,
+   "n_variants": 1,
+   "grouped": true,
+   "variant_facts": [],
+   "granule_ids": [
+    "NISAR_L2_PR_GCOV_039_034_A_019_4005_SHNA_A_20260831T130823_20260831T130853_P05023_N_F_J_001"
+   ],
+   "flags": [],
+   "variants": [
+    {
+     "id": "NISAR_L2_PR_GCOV_039_034_A_019_4005_SHNA_A_20260831T130823_20260831T130853_P05023_N_F_J_001",
+     "product": "GCOV",
+     "stack": "A034",
+     "direction": "A",
+     "track": 34,
+     "frame": 19,
+     "start": "2026-08-31T13:08:23Z",
+     "id_start": "2026-08-31T13:08:23Z",
+     "stop": "2026-08-31T13:08:53Z",
+     "ref_time": null,
+     "sec_time": null,
+     "baseline_days": null,
+     "cycle_ref": 39,
+     "cycle_sec": null,
+     "polarization": "HH",
+     "range_bandwidth_mhz": 40.0,
+     "collection": "NISAR_L2_GCOV_PROVISIONAL_V1",
+     "crid": "P05023",
+     "version": "001",
+     "orbit_accuracy": {
+      "asf": "MOE",
+      "filename": "N"
+     },
+     "size_bytes": 118000000,
+     "footprint": [
+      [
+       -118.60042858705447,
+       33.704684684684686
+      ],
+      [
+       -117.83957141294553,
+       33.704684684684686
+      ],
+      [
+       -117.83957141294553,
+       34.33531531531532
+      ],
+      [
+       -118.60042858705447,
+       34.33531531531532
+      ]
+     ],
+     "flags": [
+      "4005 (range bandwidth: multi-frequency or unparsable token kept raw)",
+      "N (orbit token)"
+     ]
+    }
+   ]
+  },
+  {
+   "key": "A034|2026-09-12T13:08:23Z",
+   "stack": "A034",
+   "product": "GCOV",
+   "kind": "single",
+   "ref_time": null,
+   "sec_time": null,
+   "start": "2026-09-12T13:08:23Z",
+   "baseline_days": null,
+   "n_variants": 1,
+   "grouped": true,
+   "variant_facts": [],
+   "granule_ids": [
+    "NISAR_L2_PR_GCOV_041_034_A_019_4005_SHNA_A_20260912T130823_20260912T130853_P05023_N_F_J_001"
+   ],
+   "flags": [],
+   "variants": [
+    {
+     "id": "NISAR_L2_PR_GCOV_041_034_A_019_4005_SHNA_A_20260912T130823_20260912T130853_P05023_N_F_J_001",
+     "product": "GCOV",
+     "stack": "A034",
+     "direction": "A",
+     "track": 34,
+     "frame": 19,
+     "start": "2026-09-12T13:08:23Z",
+     "id_start": "2026-09-12T13:08:23Z",
+     "stop": "2026-09-12T13:08:53Z",
+     "ref_time": null,
+     "sec_time": null,
+     "baseline_days": null,
+     "cycle_ref": 41,
+     "cycle_sec": null,
+     "polarization": "HH",
+     "range_bandwidth_mhz": 40.0,
+     "collection": "NISAR_L2_GCOV_PROVISIONAL_V1",
+     "crid": "P05023",
+     "version": "001",
+     "orbit_accuracy": {
+      "asf": "MOE",
+      "filename": "N"
+     },
+     "size_bytes": 118000000,
+     "footprint": [
+      [
+       -118.60042858705447,
+       33.704684684684686
+      ],
+      [
+       -117.83957141294553,
+       33.704684684684686
+      ],
+      [
+       -117.83957141294553,
+       34.33531531531532
+      ],
+      [
+       -118.60042858705447,
+       34.33531531531532
+      ]
+     ],
+     "flags": [
+      "4005 (range bandwidth: multi-frequency or unparsable token kept raw)",
+      "N (orbit token)"
+     ]
+    }
+   ]
+  },
+  {
+   "key": "A034|2026-09-20T13:08:23Z|2026-10-14T13:08:23Z",
+   "stack": "A034",
+   "product": "GUNW",
+   "kind": "pair",
+   "ref_time": "2026-09-20T13:08:23Z",
+   "sec_time": "2026-10-14T13:08:23Z",
+   "start": null,
+   "baseline_days": 24.0,
+   "n_variants": 1,
+   "grouped": true,
+   "variant_facts": [],
+   "granule_ids": [
+    "NISAR_L2_PR_GUNW_031_034_A_019_033_4000_SH_20260920T130823_20260920T130857_20261014T130823_20261014T130857_P05023_N_F_J_001"
+   ],
+   "flags": [],
+   "variants": [
+    {
+     "id": "NISAR_L2_PR_GUNW_031_034_A_019_033_4000_SH_20260920T130823_20260920T130857_20261014T130823_20261014T130857_P05023_N_F_J_001",
+     "product": "GUNW",
+     "stack": "A034",
+     "direction": "A",
+     "track": 34,
+     "frame": 19,
+     "start": "2026-08-07T13:08:23Z",
+     "id_start": null,
+     "stop": "2026-08-07T13:08:57Z",
+     "ref_time": "2026-09-20T13:08:23Z",
+     "sec_time": "2026-10-14T13:08:23Z",
+     "baseline_days": 24.0,
+     "cycle_ref": 31,
+     "cycle_sec": 33,
+     "polarization": "HH",
+     "range_bandwidth_mhz": 40.0,
+     "collection": "NISAR_L2_GUNW_PROVISIONAL_V1",
+     "crid": "P05023",
+     "version": "001",
+     "orbit_accuracy": {
+      "asf": "MOE",
+      "filename": "N"
+     },
+     "size_bytes": 231000000,
+     "footprint": [
+      [
+       -118.63056314462338,
+       33.73468468468468
+      ],
+      [
+       -117.86943685537662,
+       33.73468468468468
+      ],
+      [
+       -117.86943685537662,
+       34.365315315315314
+      ],
+      [
+       -118.63056314462338,
+       34.365315315315314
+      ]
+     ],
+     "flags": [
+      "N (orbit token)"
+     ]
+    }
+   ]
+  },
+  {
+   "key": "D071|2026-06-26T01:10:00Z",
+   "stack": "D071",
+   "product": "GCOV",
+   "kind": "single",
+   "ref_time": null,
+   "sec_time": null,
+   "start": "2026-06-26T01:10:00Z",
+   "baseline_days": null,
+   "n_variants": 1,
+   "grouped": true,
+   "variant_facts": [],
+   "granule_ids": [
+    "NISAR_L2_PR_GCOV_027_071_D_045_4005_SHNA_D_20260626T011000_20260626T011030_P05023_N_F_J_001"
+   ],
+   "flags": [],
+   "variants": [
+    {
+     "id": "NISAR_L2_PR_GCOV_027_071_D_045_4005_SHNA_D_20260626T011000_20260626T011030_P05023_N_F_J_001",
+     "product": "GCOV",
+     "stack": "D071",
+     "direction": "D",
+     "track": 71,
+     "frame": 45,
+     "start": "2026-06-26T01:10:00Z",
+     "id_start": "2026-06-26T01:10:00Z",
+     "stop": "2026-06-26T01:10:30Z",
+     "ref_time": null,
+     "sec_time": null,
+     "baseline_days": null,
+     "cycle_ref": 27,
+     "cycle_sec": null,
+     "polarization": "HH",
+     "range_bandwidth_mhz": null,
+     "collection": "NISAR_L2_GCOV_PROVISIONAL_V1",
+     "crid": "P05023",
+     "version": "001",
+     "orbit_accuracy": {
+      "asf": "MOE",
+      "filename": "N"
+     },
+     "size_bytes": 121000000,
+     "footprint": [
+      [
+       -118.69083285892859,
+       33.79468468468468
+      ],
+      [
+       -117.92916714107142,
+       33.79468468468468
+      ],
+      [
+       -117.92916714107142,
+       34.425315315315316
+      ],
+      [
+       -118.69083285892859,
+       34.425315315315316
+      ]
+     ],
+     "flags": [
+      "4005 (range bandwidth: multi-frequency or unparsable token kept raw)",
+      "N (orbit token)"
+     ]
+    }
+   ]
+  },
+  {
+   "key": "D071|2026-07-08T01:10:00Z",
+   "stack": "D071",
+   "product": "GCOV",
+   "kind": "single",
+   "ref_time": null,
+   "sec_time": null,
+   "start": "2026-07-08T01:10:00Z",
+   "baseline_days": null,
+   "n_variants": 1,
+   "grouped": true,
+   "variant_facts": [],
+   "granule_ids": [
+    "NISAR_L2_PR_GCOV_029_071_D_045_4005_SHNA_D_20260708T011000_20260708T011030_P05023_N_F_J_001"
+   ],
+   "flags": [],
+   "variants": [
+    {
+     "id": "NISAR_L2_PR_GCOV_029_071_D_045_4005_SHNA_D_20260708T011000_20260708T011030_P05023_N_F_J_001",
+     "product": "GCOV",
+     "stack": "D071",
+     "direction": "D",
+     "track": 71,
+     "frame": 45,
+     "start": "2026-07-08T01:10:00Z",
+     "id_start": "2026-07-08T01:10:00Z",
+     "stop": "2026-07-08T01:10:30Z",
+     "ref_time": null,
+     "sec_time": null,
+     "baseline_days": null,
+     "cycle_ref": 29,
+     "cycle_sec": null,
+     "polarization": "HH",
+     "range_bandwidth_mhz": null,
+     "collection": "NISAR_L2_GCOV_PROVISIONAL_V1",
+     "crid": "P05023",
+     "version": "001",
+     "orbit_accuracy": {
+      "asf": "MOE",
+      "filename": "N"
+     },
+     "size_bytes": 121000000,
+     "footprint": [
+      [
+       -118.69083285892859,
+       33.79468468468468
+      ],
+      [
+       -117.92916714107142,
+       33.79468468468468
+      ],
+      [
+       -117.92916714107142,
+       34.425315315315316
+      ],
+      [
+       -118.69083285892859,
+       34.425315315315316
+      ]
+     ],
+     "flags": [
+      "4005 (range bandwidth: multi-frequency or unparsable token kept raw)",
+      "N (orbit token)"
+     ]
+    }
+   ]
+  },
+  {
+   "key": "D071|2026-07-20T01:10:00Z",
+   "stack": "D071",
+   "product": "GCOV",
+   "kind": "single",
+   "ref_time": null,
+   "sec_time": null,
+   "start": "2026-07-20T01:10:00Z",
+   "baseline_days": null,
+   "n_variants": 1,
+   "grouped": true,
+   "variant_facts": [],
+   "granule_ids": [
+    "NISAR_L2_PR_GCOV_031_071_D_045_4005_SHNA_D_20260720T011000_20260720T011030_P05023_N_F_J_001"
+   ],
+   "flags": [],
+   "variants": [
+    {
+     "id": "NISAR_L2_PR_GCOV_031_071_D_045_4005_SHNA_D_20260720T011000_20260720T011030_P05023_N_F_J_001",
+     "product": "GCOV",
+     "stack": "D071",
+     "direction": "D",
+     "track": 71,
+     "frame": 45,
+     "start": "2026-07-20T01:10:00Z",
+     "id_start": "2026-07-20T01:10:00Z",
+     "stop": "2026-07-20T01:10:30Z",
+     "ref_time": null,
+     "sec_time": null,
+     "baseline_days": null,
+     "cycle_ref": 31,
+     "cycle_sec": null,
+     "polarization": "HH",
+     "range_bandwidth_mhz": null,
+     "collection": "NISAR_L2_GCOV_PROVISIONAL_V1",
+     "crid": "P05023",
+     "version": "001",
+     "orbit_accuracy": {
+      "asf": "MOE",
+      "filename": "N"
+     },
+     "size_bytes": 121000000,
+     "footprint": [
+      [
+       -118.69083285892859,
+       33.79468468468468
+      ],
+      [
+       -117.92916714107142,
+       33.79468468468468
+      ],
+      [
+       -117.92916714107142,
+       34.425315315315316
+      ],
+      [
+       -118.69083285892859,
+       34.425315315315316
+      ]
+     ],
+     "flags": [
+      "4005 (range bandwidth: multi-frequency or unparsable token kept raw)",
+      "N (orbit token)"
+     ]
+    }
+   ]
+  },
+  {
+   "key": "D071|2026-08-01T01:10:00Z",
+   "stack": "D071",
+   "product": "GCOV",
+   "kind": "single",
+   "ref_time": null,
+   "sec_time": null,
+   "start": "2026-08-01T01:10:00Z",
+   "baseline_days": null,
+   "n_variants": 1,
+   "grouped": true,
+   "variant_facts": [],
+   "granule_ids": [
+    "NISAR_L2_PR_GCOV_033_071_D_045_4005_SHNA_D_20260801T011000_20260801T011030_P05023_N_F_J_001"
+   ],
+   "flags": [],
+   "variants": [
+    {
+     "id": "NISAR_L2_PR_GCOV_033_071_D_045_4005_SHNA_D_20260801T011000_20260801T011030_P05023_N_F_J_001",
+     "product": "GCOV",
+     "stack": "D071",
+     "direction": "D",
+     "track": 71,
+     "frame": 45,
+     "start": "2026-08-01T01:10:00Z",
+     "id_start": "2026-08-01T01:10:00Z",
+     "stop": "2026-08-01T01:10:30Z",
+     "ref_time": null,
+     "sec_time": null,
+     "baseline_days": null,
+     "cycle_ref": 33,
+     "cycle_sec": null,
+     "polarization": "HH",
+     "range_bandwidth_mhz": null,
+     "collection": "NISAR_L2_GCOV_PROVISIONAL_V1",
+     "crid": "P05023",
+     "version": "001",
+     "orbit_accuracy": {
+      "asf": "MOE",
+      "filename": "N"
+     },
+     "size_bytes": 121000000,
+     "footprint": [
+      [
+       -118.69083285892859,
+       33.79468468468468
+      ],
+      [
+       -117.92916714107142,
+       33.79468468468468
+      ],
+      [
+       -117.92916714107142,
+       34.425315315315316
+      ],
+      [
+       -118.69083285892859,
+       34.425315315315316
+      ]
+     ],
+     "flags": [
+      "4005 (range bandwidth: multi-frequency or unparsable token kept raw)",
+      "N (orbit token)"
+     ]
+    }
+   ]
+  },
+  {
+   "key": "D071|2026-08-13T01:10:00Z",
+   "stack": "D071",
+   "product": "GCOV",
+   "kind": "single",
+   "ref_time": null,
+   "sec_time": null,
+   "start": "2026-08-13T01:10:00Z",
+   "baseline_days": null,
+   "n_variants": 1,
+   "grouped": true,
+   "variant_facts": [],
+   "granule_ids": [
+    "NISAR_L2_PR_GCOV_035_071_D_045_4005_SHNA_D_20260813T011000_20260813T011030_P05023_N_F_J_001"
+   ],
+   "flags": [],
+   "variants": [
+    {
+     "id": "NISAR_L2_PR_GCOV_035_071_D_045_4005_SHNA_D_20260813T011000_20260813T011030_P05023_N_F_J_001",
+     "product": "GCOV",
+     "stack": "D071",
+     "direction": "D",
+     "track": 71,
+     "frame": 45,
+     "start": "2026-08-13T01:10:00Z",
+     "id_start": "2026-08-13T01:10:00Z",
+     "stop": "2026-08-13T01:10:30Z",
+     "ref_time": null,
+     "sec_time": null,
+     "baseline_days": null,
+     "cycle_ref": 35,
+     "cycle_sec": null,
+     "polarization": "HH",
+     "range_bandwidth_mhz": null,
+     "collection": "NISAR_L2_GCOV_PROVISIONAL_V1",
+     "crid": "P05023",
+     "version": "001",
+     "orbit_accuracy": {
+      "asf": "MOE",
+      "filename": "N"
+     },
+     "size_bytes": 121000000,
+     "footprint": [
+      [
+       -118.69083285892859,
+       33.79468468468468
+      ],
+      [
+       -117.92916714107142,
+       33.79468468468468
+      ],
+      [
+       -117.92916714107142,
+       34.425315315315316
+      ],
+      [
+       -118.69083285892859,
+       34.425315315315316
+      ]
+     ],
+     "flags": [
+      "4005 (range bandwidth: multi-frequency or unparsable token kept raw)",
+      "N (orbit token)"
+     ]
+    }
+   ]
+  },
+  {
+   "key": "D071|2026-08-25T01:10:00Z",
+   "stack": "D071",
+   "product": "GCOV",
+   "kind": "single",
+   "ref_time": null,
+   "sec_time": null,
+   "start": "2026-08-25T01:10:00Z",
+   "baseline_days": null,
+   "n_variants": 1,
+   "grouped": true,
+   "variant_facts": [],
+   "granule_ids": [
+    "NISAR_L2_PR_GCOV_037_071_D_045_4005_SHNA_D_20260825T011000_20260825T011030_P05023_N_F_J_001"
+   ],
+   "flags": [],
+   "variants": [
+    {
+     "id": "NISAR_L2_PR_GCOV_037_071_D_045_4005_SHNA_D_20260825T011000_20260825T011030_P05023_N_F_J_001",
+     "product": "GCOV",
+     "stack": "D071",
+     "direction": "D",
+     "track": 71,
+     "frame": 45,
+     "start": "2026-08-25T01:10:00Z",
+     "id_start": "2026-08-25T01:10:00Z",
+     "stop": "2026-08-25T01:10:30Z",
+     "ref_time": null,
+     "sec_time": null,
+     "baseline_days": null,
+     "cycle_ref": 37,
+     "cycle_sec": null,
+     "polarization": "HH",
+     "range_bandwidth_mhz": null,
+     "collection": "NISAR_L2_GCOV_PROVISIONAL_V1",
+     "crid": "P05023",
+     "version": "001",
+     "orbit_accuracy": {
+      "asf": "MOE",
+      "filename": "N"
+     },
+     "size_bytes": 121000000,
+     "footprint": [
+      [
+       -118.69083285892859,
+       33.79468468468468
+      ],
+      [
+       -117.92916714107142,
+       33.79468468468468
+      ],
+      [
+       -117.92916714107142,
+       34.425315315315316
+      ],
+      [
+       -118.69083285892859,
+       34.425315315315316
+      ]
+     ],
+     "flags": [
+      "4005 (range bandwidth: multi-frequency or unparsable token kept raw)",
+      "N (orbit token)"
+     ]
+    }
+   ]
+  }
+ ],
+ "epoch_merge_minutes": 10.0
+}

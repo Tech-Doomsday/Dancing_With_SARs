@@ -1,0 +1,35 @@
+# manifest.yaml — 3.06 permafrost_thaw
+# auto-scaffolded from nisar_hazard_engine.json — fill in / adjust as the pipeline is implemented
+
+code: "3.06"
+name: "permafrost_thaw"
+sensor: "NISAR"
+model_type: "physics-informed regression"
+
+applies: "S12 permafrost zone, land, >= 12 epochs spanning one thaw season"
+
+uses: "M1 stack, M2, M4"
+uses_codes: 
+  - "M1"
+  - "M2"
+  - "M4"
+
+own_prep: "separate thaw-season subsidence from winter heave, bedrock reference, soil-moisture screening of epochs"
+
+own_fetch: "R5 ERA5-Land soil temperature + thaw degree days, S12"
+fetch_codes: 
+  - "R5"
+  - "S12"
+
+method:
+  - "seasonal amplitude + secular trend regression; abnormal thaw needs >= 2 seasons, otherwise amplitude is reported with probability capped; abrupt thaw (thermokarst) = localized rapid subsidence + sigma0 change cluster"
+
+output: "P(abnormal thaw), seasonal amplitude, trend, cold_start flag"
+
+min_epochs: 12
+
+status_values:
+  - "SUPPORTED"
+  - "NOT_SUPPORTED"
+  - "INSUFFICIENT_EVIDENCE"
+  - "NOT_MODELLED"

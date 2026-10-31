@@ -1,0 +1,34 @@
+# manifest.yaml — 3.02 land_subsidence
+# auto-scaffolded from nisar_hazard_engine.json — fill in / adjust as the pipeline is implemented
+
+code: "3.02"
+name: "land_subsidence"
+sensor: "NISAR"
+model_type: "physics (SBAS WLS) + statistics"
+
+applies: "land, coherence above threshold, >= 10 pairs in a connected network"
+
+uses: "M1 stack, P07 residual layer, stable mask, DEM"
+uses_codes: 
+  - "M1"
+  - "P07"
+
+own_prep: "network design (temporal baseline <= 36 days, connectivity check), loop-closure misclosure flag for unwrapping errors, common reference region, temporal coherence"
+
+own_fetch: "R3 GNSS (projected into LOS for validation), S6 basins, USGS NWIS groundwater levels"
+fetch_codes: 
+  - "R3"
+  - "S6"
+
+method:
+  - "Tikhonov-regularized WLS SBAS -> velocity + cumulative displacement; PELT change points; seasonal harmonic fit only if history >= 1 year, else linear; bowl test: connected component of |v| > k*sigma_v, min area, smooth gradient; veto on elevation-correlated pattern and long-wavelength ramp"
+
+output: "P(subsidence), rate mm/yr, area km2, max rate, acceleration flag, GNSS RMSE where available"
+
+min_epochs: 10
+
+status_values:
+  - "SUPPORTED"
+  - "NOT_SUPPORTED"
+  - "INSUFFICIENT_EVIDENCE"
+  - "NOT_MODELLED"

@@ -1,0 +1,35 @@
+# manifest.yaml — 3.11 coastal_erosion
+# auto-scaffolded from nisar_hazard_engine.json — fill in / adjust as the pipeline is implemented
+
+code: "3.11"
+name: "coastal_erosion"
+sensor: "NISAR"
+model_type: "geometry + statistics"
+
+applies: "within ~2 km of the S10 shoreline"
+
+uses: "M2 land/water mask, HH/HV, DEM"
+uses_codes: 
+  - "M2"
+
+own_prep: "waterline extraction per epoch, tide-stage normalization"
+
+own_fetch: "R14 tide height, S10 baseline coastline, R5 wave height, R10 storm context"
+fetch_codes: 
+  - "R14"
+  - "S10"
+  - "R5"
+  - "R10"
+
+method:
+  - "waterline -> shoreline via tide height and coarse beach slope, transects, retreat rate; storm-linked flag; larger uncertainty because the DEM is 30 m (stated in output)"
+
+output: "P(erosion event), max retreat m, affected length km, tide_corrected flag"
+
+min_epochs: null
+
+status_values:
+  - "SUPPORTED"
+  - "NOT_SUPPORTED"
+  - "INSUFFICIENT_EVIDENCE"
+  - "NOT_MODELLED"

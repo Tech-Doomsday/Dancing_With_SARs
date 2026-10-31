@@ -1,0 +1,38 @@
+# manifest.yaml — 3.12 urban_damage
+# auto-scaffolded from nisar_hazard_engine.json — fill in / adjust as the pipeline is implemented
+
+code: "3.12"
+name: "urban_damage"
+sensor: "NISAR"
+model_type: "statistics (coherence change)"
+
+applies: "S9 built-up above threshold"
+
+uses: "M2 sigma0 (double bounce), M1 coherence (coarse fallback)"
+uses_codes: 
+  - "M2"
+  - "M1"
+
+own_prep: "coherence from GSLC pair on a small window, pre-event coherence baseline from earlier pairs so decorrelation is anomalous, vegetation-fraction mask"
+
+own_fetch: "M5 GSLC pre + post epochs (on demand), S9 footprints, M7 ARIA DPM / EMS damage (cross-check), R1 / R10 / R9 trigger context"
+fetch_codes: 
+  - "M5"
+  - "S9"
+  - "M7"
+  - "R1"
+  - "R10"
+  - "R9"
+
+method:
+  - "damage proxy = (gamma_pre - gamma_co-event) / baseline spread; threshold from the built-up distribution; aggregation per building or block"
+
+output: "P(significant structural damage), damaged fraction per block, hotspot map, cause context"
+
+min_epochs: null
+
+status_values:
+  - "SUPPORTED"
+  - "NOT_SUPPORTED"
+  - "INSUFFICIENT_EVIDENCE"
+  - "NOT_MODELLED"

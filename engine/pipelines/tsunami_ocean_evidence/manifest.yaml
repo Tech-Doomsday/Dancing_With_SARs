@@ -1,0 +1,48 @@
+# manifest.yaml — 3.17 tsunami_ocean_evidence (NEW pipeline, port design decision 8)
+# The app's DART + shallow-water work, event-scoped: "did this earthquake move the ocean?"
+# (3.14 tsunami_inundation stays the SAR coastal-strip pipeline that answers a different
+# question at tile scale; shared physics lives in engine/lib/tsunami/ + engine/lib/okada.py.)
+
+code: "3.17"
+name: "tsunami_ocean_evidence"
+sensor: "in-situ ocean sensors (NOAA DART) + model (Okada/Kajiura source on ETOPO1 + NSWE solver)"
+model_type: "observation detection (k·sigma on de-tided bottom pressure) + physics simulation consistency + 5-level evidence classification"
+
+applies: "event-scoped: an earthquake/tsunami trigger or event window in the request; needs no SAR data"
+
+uses: "nothing from the bundle except request context (tile centre, event window, triggers)"
+uses_codes: []
+
+own_prep: "pick the triggering event (trigger quake id, else best R1 event in the window by seismic screening), build the ETOPO1 domain around the epicentre, pick DART stations within radius (nearest first, caps respected)"
+
+own_fetch: "R1 (event + moment tensor, reuse of the shared adapter); R15 DART records (realtime/historical with cache); R16 ETOPO1 bathymetry (OPeNDAP, cached); R11 historical tsunami catalog (corroboration only, degrades to a note); USGS finite-fault FFM.geojson when published — all through providers injectable into run(bundle, providers), failures are explicit evidence states, never silent"
+
+fetch_codes:
+  - "R1"
+  - "R11"
+  - "R15"
+  - "R16"
+
+method:
+  - "seismic screening (heuristic): Mw >= 6.5 and depth <= 50 km and dip-slip fraction |sin rake| >= 0.3 — screening values, not laws"
+  - "per-station detection: robust local-quadratic de-tide (±3 h), MAD noise scale over [origin-6h, origin-10min], trigger |residual| > 5·sigma from origin-15 min; excursions within the seismic-phase mask (8 min, extended by the eikonal ray time when available) are caveats, never the arrival"
+  - "travel times: eikonal fast sweeping on still-water depth (independent cross-check; also extends the seismic mask: a water wave cannot outrun ~85% of the ray time)"
+  - "simulation (the heavy part): Okada DC3D over subfaults (USGS FFM.geojson when published, else MT plane + Wells-Coppersmith scaling), Tanioka-Seno slope correction, Kajiura water-column filter, NSWE solver (HLL + Audusse hydrostatic reconstruction, MUSCL + SSP-RK2, Manning friction, sponge boundaries) on the ETOPO1 grid; gauge series at the DART positions"
+  - "per-station consistency: arrival within ±15 min and amplitude within x3 (documented diagnostics, not validated error bars)"
+  - "evidence classification: insufficient | none-detected | possible | consistent (correlated evidence caveat; official confirmation is a citation, never machine-asserted)"
+
+output: "status (SUPPORTED | POSSIBLE | NOT_SUPPORTED | INSUFFICIENT_EVIDENCE), evidence level, per-station detections (trigger, arrival, amplitude, period), comparisons, sim diagnostics (mass drift, max eta, front speeds); raw_p = uncalibrated rank score — NOT a probability"
+
+# heavy lane (port design decision 9): the wave solver dominates the runtime (the app's Tohoku
+# 2-minute hindcast took 946 s in TypeScript); own deadline, progress file, result cache.
+execution: heavy
+timeout_s: 3600
+needs_sar: false
+
+min_epochs: null
+
+status_values:
+  - "SUPPORTED"                # consistent: sensor trigger(s) AND simulation agree
+  - "POSSIBLE"                 # screening met and/or trigger(s) without a sim to compare
+  - "NOT_SUPPORTED"            # sensors with coverage show no anomalous wave
+  - "INSUFFICIENT_EVIDENCE"    # no usable ocean-sensor record in range / event unknown

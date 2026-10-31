@@ -1,0 +1,35 @@
+# manifest.yaml — 3.14 tsunami_inundation
+# auto-scaffolded from nisar_hazard_engine.json — fill in / adjust as the pipeline is implemented
+
+code: "3.14"
+name: "tsunami_inundation"
+sensor: "NISAR"
+model_type: "physics prior x statistics"
+
+applies: "coastal strip (<= 2 km, elevation <= 30 m) AND a trigger exists; otherwise NOT_APPLICABLE"
+
+uses: "M2 sigma0 + M1 coherence on the strip, DEM, S10"
+uses_codes: 
+  - "M2"
+  - "M1"
+  - "S10"
+
+own_prep: "coastal strip and elevation-band mask"
+
+own_fetch: "R1 trigger (shallow, offshore/near-coast, M>=7.0 or tsunami flag, nodal plane), R11 historical run-up for calibration"
+fetch_codes: 
+  - "R1"
+  - "R11"
+
+method:
+  - "Okada vertical seafloor displacement as a trigger-plausibility prior (library function, not the earthquake pipeline's verdict) x inundation evidence from the flood library restricted to the strip; evidence is wash-zone backscatter and coherence loss because water has receded by the 12-day revisit"
+
+output: "P(tsunami inundation), extent, max inland distance m, trigger event"
+
+min_epochs: null
+
+status_values:
+  - "SUPPORTED"
+  - "NOT_SUPPORTED"
+  - "INSUFFICIENT_EVIDENCE"
+  - "NOT_MODELLED"

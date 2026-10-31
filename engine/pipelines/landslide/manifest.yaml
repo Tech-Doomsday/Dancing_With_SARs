@@ -1,0 +1,39 @@
+# manifest.yaml — 3.04 landslide
+# auto-scaffolded from nisar_hazard_engine.json — fill in / adjust as the pipeline is implemented
+
+code: "3.04"
+name: "landslide"
+sensor: "NISAR"
+model_type: "statistics + logistic prior"
+
+applies: "land, slope >= 10 deg, not water; layover/shadow excluded"
+
+uses: "M1 LOS, M2 sigma0 + coherence change, slope/aspect/curvature/HAND, M4 soil moisture"
+uses_codes: 
+  - "M1"
+  - "M2"
+  - "M4"
+
+own_prep: "downslope direction projected into LOS (expected sensitivity map), asc/desc where available"
+
+own_fetch: "R4 antecedent rain (3/7/30 d), R2 ShakeMap + Ground Failure, R8 COOLR, R1 shaking trigger"
+fetch_codes: 
+  - "R4"
+  - "R2"
+  - "R8"
+  - "R1"
+
+method:
+  - "creep detector: slope-parallel LOS cluster whose direction matches aspect"
+  - "failure detector: abrupt coherence loss + sigma0 change on slope with a deposit zone"
+  - "susceptibility prior: logistic regression (slope, curvature, HAND, cover, rain) fitted on R8 points + random negatives, used as a prior only"
+
+output: "P(landslide), type (creep | failure), area, direction-consistency score, trigger context"
+
+min_epochs: null
+
+status_values:
+  - "SUPPORTED"
+  - "NOT_SUPPORTED"
+  - "INSUFFICIENT_EVIDENCE"
+  - "NOT_MODELLED"

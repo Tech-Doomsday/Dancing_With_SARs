@@ -1,0 +1,103 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>SceneBundle debug</title>
+<style>
+:root{--bg:#eceff3;--panel:#f8f9fb;--ink:#17212b;--mute:#5d6b7a;--line:#cfd6de;--acc:#0b7285;--warn:#e67700;--bad:#c92a2a;--ok:#2b8a3e;--sel:#f08c00;
+--font:"Aptos","Segoe UI",system-ui,sans-serif;--mono:ui-monospace,"Cascadia Mono",Consolas,monospace}
+@media (prefers-color-scheme:dark){:root{--bg:#12181f;--panel:#1a222b;--ink:#e6ebf0;--mute:#93a1b0;--line:#2e3a47;--acc:#3bc9db;--warn:#ffa94d;--bad:#ff8787;--ok:#69db7c;--sel:#ffa94d}}
+*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--ink);font:14px/1.45 var(--font)}
+header{background:var(--panel);border-bottom:1px solid var(--line);padding:10px 16px;display:flex;flex-wrap:wrap;gap:6px 18px;align-items:baseline}
+h1{font-size:16px;margin:0}h2{font-size:14px;margin:0 0 8px}.mute{color:var(--mute)}.mono{font:12px var(--mono)}
+main{max-width:1500px;margin:0 auto;padding:12px 16px 40px}section{background:var(--panel);border:1px solid var(--line);border-radius:6px;padding:12px 14px;margin:0 0 12px}
+.badge{display:inline-block;border-radius:10px;padding:0 8px;font-size:12px;border:1px solid var(--line)}
+.ok{color:var(--ok);border-color:var(--ok)}.skipped{color:var(--mute)}.error,.differs{color:var(--bad);border-color:var(--bad)}.warn{color:var(--warn);border-color:var(--warn)}
+.confirmed{color:var(--ok);border-color:var(--ok)}.consistent{color:var(--acc);border-color:var(--acc)}.info{color:var(--mute)}.missing{color:var(--warn);border-color:var(--warn)}
+#steps{display:flex;flex-wrap:wrap;gap:6px}.step{border:1px solid var(--line);border-radius:6px;padding:5px 9px;cursor:pointer;background:var(--bg);min-width:112px}
+.step b{display:block}.step.sel{outline:2px solid var(--sel)}.step small{color:var(--mute)}
+#detail{margin-top:10px;font-size:13px}#detail ul{margin:4px 0 0 18px;padding:0}
+.bar{display:flex;flex-wrap:wrap;gap:8px 14px;align-items:center;margin-bottom:10px}
+input,select,button{font:inherit;color:var(--ink);background:var(--bg);border:1px solid var(--line);border-radius:4px;padding:3px 6px}input[type=number]{width:78px}
+button{cursor:pointer}.chip{cursor:pointer;user-select:none}.chip.on{background:var(--ink);color:var(--bg)}
+#grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(330px,1fr));gap:10px}
+.card{border:1px solid var(--line);border-radius:6px;background:var(--bg);padding:8px}.card h3{font-size:13px;margin:0 0 2px;word-break:break-all}
+.card canvas{display:block;margin:6px 0;image-rendering:pixelated;border:1px solid var(--line);background:repeating-conic-gradient(#8883 0 25%,#0000 0 50%) 0 0/10px 10px;max-width:100%}
+.ctl{display:flex;flex-wrap:wrap;gap:6px;align-items:center;font-size:12px}.ro{font:11px var(--mono);color:var(--mute);min-height:15px}
+.kv{font:11px/1.5 var(--mono);color:var(--mute)}.kv b{color:var(--ink);font-weight:500}.cats span{margin-right:8px;font:11px var(--mono)}
+.sw{display:inline-block;width:10px;height:10px;border-radius:2px;margin-right:3px;vertical-align:-1px}
+table{border-collapse:collapse;width:100%;font-size:13px}th,td{border-top:1px solid var(--line);padding:4px 8px;text-align:left;vertical-align:top}th{color:var(--mute);font-weight:500}
+td.m{font:12px var(--mono);word-break:break-word}.lin{display:flex;flex-wrap:wrap;gap:4px 10px;align-items:center;margin:6px 0}
+</style></head><body>
+<header id="hd"></header>
+<main>
+<section><h2>Pipeline P01 → P13 <span class="mute" style="font-weight:400">click a step to see what it added</span></h2><div id="steps"></div><div id="detail"></div><div id="lineage"></div></section>
+<section id="scenesec" hidden><h2>Where this tile sits in the real product</h2><div id="scene"></div></section>
+<section><h2>Arrays <span id="count" class="mute" style="font-weight:400"></span></h2>
+<div class="bar"><span id="groups"></span><input id="q" placeholder="filter by name" size="22"><label><input type="checkbox" id="onlystep"> only arrays changed in the selected step</label></div><div id="grid"></div></section>
+<section><h2>Reality check <span class="mute" style="font-weight:400">engine assumptions vs the real product</span></h2><div id="reality"></div></section>
+<section><h2>Flags</h2><div id="flags"></div></section>
+<section><h2>Assumptions recorded in provenance</h2><div id="assume"></div></section>
+<section><h2>Routing</h2><div id="routing"></div></section>
+<section id="limsec"><h2>What this run could not use</h2><div id="lims"></div></section>
+</main>
+<script id="data" type="application/json">__DATA__</script>
+<script>
+const D=JSON.parse(document.getElementById("data").textContent),$=s=>document.querySelector(s),el=(t,c,h)=>{const e=document.createElement(t);if(c)e.className=c;if(h!=null)e.innerHTML=h;return e};
+const esc=s=>String(s??"").replace(/[&<>"]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
+const fmt=v=>v==null?"–":(Math.abs(v)>=1e4||(v!==0&&Math.abs(v)<1e-3))?v.toExponential(3):(+v.toPrecision(5)).toString();
+const LUTS={};
+function lut(n){if(LUTS[n])return LUTS[n];const S={viridis:[[68,1,84],[59,82,139],[33,145,140],[94,201,98],[253,231,37]],diverging:[[5,48,97],[67,147,195],[247,247,247],[214,96,77],[103,0,31]],gray:[[0,0,0],[255,255,255]]},u=new Uint8Array(768);
+for(let i=0;i<256;i++){let r,g,b;if(n==="cyclic"){const h=i/256*6,x=1-Math.abs(h%2-1);[r,g,b]=[[1,x,0],[x,1,0],[0,1,x],[0,x,1],[x,0,1],[1,0,x]][h|0].map(v=>v*255)}
+else{const s=S[n],p=i/255*(s.length-1),j=Math.min(s.length-2,p|0),f=p-j;[r,g,b]=s[j].map((v,c)=>v+(s[j+1][c]-v)*f)}u[i*3]=r;u[i*3+1]=g;u[i*3+2]=b}return LUTS[n]=u}
+function cat(v){if(v===0)return[58,64,72];const h=(v*137.508)%360/60,x=1-Math.abs(h%2-1);return[[1,x,0],[x,1,0],[0,1,x],[0,x,1],[x,0,1],[1,0,x]][h|0].map(t=>60+t*170)}
+function f32(s){const b=atob(s),u=new Uint8Array(b.length);for(let i=0;i<b.length;i++)u[i]=b.charCodeAt(i);return new Float32Array(u.buffer)}
+function defaults(A){const s=A.stats;if(A.kind!=="float")return{cm:"categorical",lo:0,hi:1};
+ if(/coher/i.test(A.label))return{cm:"gray",lo:0,hi:1};
+ if(/phase|los_m|los\b|offset|iono|disp/i.test(A.label)&&s.min!=null&&s.min<0&&s.max>0){const m=Math.max(Math.abs(s.p2),Math.abs(s.p98));return{cm:"diverging",lo:-m,hi:m}}
+ return{cm:"viridis",lo:s.p2??0,hi:s.p98??1}}
+function paint(c){const A=c.A,ctx=c.cv.getContext("2d"),img=ctx.createImageData(A.w,A.h),cm=c.cm.value,lo=+c.lo.value,hi=+c.hi.value,k=hi===lo?1:1/(hi-lo),L=cm==="categorical"?null:lut(cm);
+ for(let i=0;i<A.f.length;i++){const v=A.f[i],o=i*4;if(!isFinite(v)){img.data[o+3]=0;continue}let r,g,b;
+  if(!L)[r,g,b]=cat(Math.round(v));else{const t=Math.max(0,Math.min(1,(v-lo)*k))*255|0;r=L[t*3];g=L[t*3+1];b=L[t*3+2]}
+  img.data[o]=r;img.data[o+1]=g;img.data[o+2]=b;img.data[o+3]=255}
+ ctx.putImageData(img,0,0);if(A.box){ctx.strokeStyle="#ff0";ctx.lineWidth=Math.max(1,A.w/200);ctx.strokeRect(...A.box)}}
+function card(A,big){const c={A},d=defaults(A),w=el("div","card");A.f=f32(A.b64);
+ const k=big?Math.max(1,Math.min(3,Math.floor(900/A.w))):Math.max(1,Math.min(24,Math.ceil(240/Math.max(A.w,A.h))));
+ w.innerHTML=`<h3 title="${esc(A.path)}">${esc(A.label)}</h3><div class="mute" style="font-size:12px"><span class="badge">${esc(A.stage)}</span> ${A.history.length>1?"changed by "+A.history.join(" → "):"made by "+A.first_step}</div>`;
+ c.cv=el("canvas");c.cv.width=A.w;c.cv.height=A.h;c.cv.style.width=A.w*k+"px";c.cv.style.height=A.h*k+"px";w.append(c.cv);
+ const ctl=el("div","ctl");c.cm=el("select");["viridis","diverging","gray","cyclic","categorical"].forEach(n=>c.cm.add(new Option(n,n,0,n===d.cm)));
+ c.lo=el("input");c.hi=el("input");[c.lo,c.hi].forEach(i=>{i.type="number";i.step="any"});c.lo.value=+(+d.lo).toPrecision(4);c.hi.value=+(+d.hi).toPrecision(4);
+ const rs=el("button",null,"p2–p98");rs.onclick=()=>{c.lo.value=+(A.stats.p2??0).toPrecision(4);c.hi.value=+(A.stats.p98??1).toPrecision(4);paint(c)};
+ ctl.append(c.cm,"lo",c.lo,"hi",c.hi,rs);w.append(ctl);[c.cm,c.lo,c.hi].forEach(i=>i.oninput=()=>paint(c));
+ c.ro=el("div","ro","hover the image");w.append(c.ro);
+ c.cv.onmousemove=e=>{const r=c.cv.getBoundingClientRect(),x=Math.floor((e.clientX-r.left)/r.width*A.w),y=Math.floor((e.clientY-r.top)/r.height*A.h);if(x<0||y<0||x>=A.w||y>=A.h)return;
+  const v=A.f[y*A.w+x];let t=`row ${y*A.stride} col ${x*A.stride} · ${isFinite(v)?(A.kind==="float"?fmt(v):v):"no data"}`;
+  if(A.extent){const[a,b,c2,d2]=A.extent;t+=` · E ${Math.round(a+(x+.5)*(b-a)/A.w)} N ${Math.round(d2-(y+.5)*(d2-c2)/A.h)}`+(A.epsg?` (EPSG:${A.epsg})`:"")}c.ro.textContent=t};
+ c.cv.onmouseleave=()=>c.ro.textContent="hover the image";
+ const s=A.stats;w.append(el("div","kv",`<b>${A.shape.join("×")}</b> ${A.dtype}${A.stride>1?` (every ${A.stride}th px shown)`:""} · valid <b>${(100*s.valid).toFixed(1)}%</b><br>min <b>${fmt(s.min)}</b> max <b>${fmt(s.max)}</b> mean <b>${fmt(s.mean)}</b> σ <b>${fmt(s.std)}</b>`+(A.fill!=null?`<br>fill value <b>${A.fill}</b> (shown as no data)`:"")+(A.note?`<br>${esc(A.note)}`:"")));
+ if(A.cats){const t=el("div","cats");t.innerHTML=Object.entries(A.cats).map(([v,n])=>{const[r,g,b]=cat(v==="true"?1:v==="false"?0:+v);return`<span><i class="sw" style="background:rgb(${r},${g},${b})"></i>${v}: ${n}</span>`}).join("");w.append(t)}
+ paint(c);return w}
+// header
+const B=D.bundle;$("#hd").innerHTML=`<h1>${esc(D.title)}</h1><span class="badge ${B.status==="ok"?"ok":"warn"}">${esc(B.status)}</span><span class="mono">tile ${esc(B.tile.id)} · EPSG:${B.tile.epsg}</span><span class="mono">as of ${esc(B.request.as_of)}</span><span class="mono mute">bundle ${esc(B.id.slice(0,16))} · contract ${esc(B.contract)}</span><span class="mono mute">${esc(B.capabilities.join(" "))}</span>`+(D.tracer_errors.length?`<span class="badge error">tracer: ${esc(D.tracer_errors.join("; "))}</span>`:"");
+// steps
+let selStep=null;const sd=$("#detail");
+D.steps.forEach(s=>{const e=el("div","step",`<b>${s.code} <span class="badge ${s.status}">${s.status}</span></b>${esc(s.name)}<br><small>${s.seconds.toFixed(3)} s · ${s.arrays.length} arrays${s.new_flags.length?` · ${s.new_flags.length} flags`:""}</small>`);
+ e.onclick=()=>{selStep=selStep===s.code?null:s.code;document.querySelectorAll(".step").forEach(x=>x.classList.toggle("sel",x===e&&selStep));
+  sd.innerHTML=selStep?`<b>${s.code} ${esc(s.name)}</b> — ${esc(s.message||s.status)}`+(s.new_flags.length?`<ul>${s.new_flags.map(f=>`<li><span class="badge ${f.severity==="error"?"error":f.severity==="warn"?"warn":"info"}">${f.severity}</span> <code>${esc(f.code)}</code> ${esc(f.message)}</li>`).join("")}</ul>`:"")+(s.new_assumptions.length?`<div class="mute">assumed here:</div><ul>${s.new_assumptions.map(a=>`<li>${esc(a)}</li>`).join("")}</ul>`:""):"";render()};
+ $("#steps").append(e)});
+$("#lineage").innerHTML=D.lineage.length?`<div class="lin mute">valid-pixel waterfall (phase → LOS):</div><div class="lin">`+D.lineage.map(l=>`<span class="badge">${esc(l.stage)} <b>${(100*l.valid).toFixed(1)}%</b></span>`).join(" → ")+"</div>":"";
+// scene
+if(D.scene){$("#scenesec").hidden=false;D.scene.f=null;$("#scene").append(card(D.scene,true))}
+// arrays
+const groups=[...new Set(D.arrays.map(a=>a.stage))],on=new Set(groups);
+groups.forEach(g=>{const c=el("span","badge chip on",esc(g));c.onclick=()=>{on.has(g)?on.delete(g):on.add(g);c.classList.toggle("on");render()};$("#groups").append(c," ")});
+$("#q").oninput=render;$("#onlystep").onchange=render;
+function render(){const g=$("#grid"),q=$("#q").value.toLowerCase(),os=$("#onlystep").checked&&selStep,st=selStep&&D.steps.find(s=>s.code===selStep);g.innerHTML="";let n=0;
+ D.arrays.forEach(A=>{if(!on.has(A.stage)||(q&&!(A.label+A.path).toLowerCase().includes(q))||(os&&!st.arrays.includes(A.path)))return;g.append(card(A,false));n++});$("#count").textContent=`(${n} of ${D.arrays.length})`}
+render();
+// tables
+const tb=(h,rows)=>`<table><tr>${h.map(x=>`<th>${x}</th>`).join("")}</tr>${rows.join("")}</table>`;
+$("#reality").innerHTML=D.reality.length?tb(["","topic","engine assumes","real product","source / note"],D.reality.map(r=>`<tr><td><span class="badge ${r.verdict}">${r.verdict}</span></td><td>${esc(r.topic)}</td><td class="m">${esc(r.engine)}</td><td class="m">${esc(r.real)}</td><td>${esc(r.source)}${r.note?`<div class="mute">${esc(r.note)}</div>`:""}</td></tr>`)):'<span class="mute">not run for this source</span>';
+$("#flags").innerHTML=D.flags.length?tb(["severity","step","code","message"],D.flags.map(f=>`<tr><td><span class="badge ${f.severity==="error"?"error":f.severity==="warn"?"warn":"info"}">${f.severity}</span></td><td>${f.step}</td><td class="m">${esc(f.code)}</td><td>${esc(f.message)}</td></tr>`)):"none";
+$("#assume").innerHTML="<ul>"+D.assumptions.map(a=>`<li>${esc(a)}</li>`).join("")+"</ul>";
+$("#routing").innerHTML=D.routing.length?tb(["pipeline","applies","reasons / missing inputs"],D.routing.map(r=>`<tr><td>${esc(r.pipeline)}</td><td><span class="badge ${r.applies==="yes"?"ok":r.applies==="no"?"skipped":"warn"}">${r.applies}</span></td><td>${esc(r.reasons.join("; "))}${r.needs.length?` <span class="mute">needs: ${esc(r.needs.join(", "))}</span>`:""}</td></tr>`)):"not evaluated";
+if(D.limitations.length)$("#lims").innerHTML="<ul>"+D.limitations.map(a=>`<li>${esc(a)}</li>`).join("")+"</ul>";else $("#limsec").hidden=true;
+</script></body></html>
