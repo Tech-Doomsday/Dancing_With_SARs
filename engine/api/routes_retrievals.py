@@ -25,7 +25,7 @@ from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
 
 from .jobs import ScanError
-from .retrievals import (ClipReader, RetrievalError, RetrievalManager, StoredRetriever, array_stats, displayable)
+from .retrievals import (ClipReader, RetrievalError, RetrievalManager, StoredRetriever, array_stats, clip_corners, displayable)
 from .routes_background import require_token
 from .state import get_runner
 
@@ -139,8 +139,9 @@ def clip_image(rid: str, granule: str, grid: str, layer: str, max_px: int = Quer
     from . import background_img as bimg
     rd = _reader(rid, authorization)
     try:
-        a, _ = rd.array(granule, grid, layer)
+        a, grp = rd.array(granule, grid, layer)
         v = displayable(a)
+        corners, corners_note = clip_corners(grp)
     except RetrievalError as ex:
         raise _err(ex) from ex
     view = bimg.finite_view(v)
@@ -151,6 +152,7 @@ def clip_image(rid: str, granule: str, grid: str, layer: str, max_px: int = Quer
     png = bimg.render(shown, "viridis", lo, hi)
     meta = {"lo": lo, "hi": hi, "cmap": "viridis", "full_shape": list(v.shape), "shown_shape": list(shown.shape),
             "decimation_stride": int(stride),
+            "corners_lonlat": corners, "corners_note": corners_note,
             "label": (f"decimated by {int(stride)}x (every {int(stride)}th pixel, values not resampled)"
                       if stride > 1 else "full resolution")}
     return Response(content=png, media_type="image/png",

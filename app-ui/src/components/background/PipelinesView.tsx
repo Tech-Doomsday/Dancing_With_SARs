@@ -15,6 +15,7 @@ import { bg } from "@/lib/bg";
 import { GateError } from "@/lib/bgApi";
 import { useGateFail, useGateRetryNonce } from "./BackgroundGate";
 import type { PipelineInfo, RunSummary } from "@/lib/types";
+import { useExplain } from "./ExplainLine";
 import { VerdictCard } from "@/components/VerdictCard";
 
 export default function PipelinesView({ initialRun }: { initialRun?: string } = {}) {
@@ -22,10 +23,16 @@ export default function PipelinesView({ initialRun }: { initialRun?: string } = 
   const [runs, setRuns] = useState<RunSummary[]>([]);
   const [runId, setRunId] = useState<string>(initialRun ?? "");
   const [error, setError] = useState<string | null>(null);
+  const [counts, setCounts] = useState<{ declared: number; modelled: number } | null>(null);
+  const explain = useExplain().data;
 
   useEffect(() => {
     const ctrl = new AbortController();
-    api.pipelines().then((r) => setPipelines(r.pipelines)).catch((e) => setError(e instanceof Error ? e.message : String(e)));
+    api.pipelines().then((r) => {
+      setPipelines(r.pipelines);
+      setCounts(r.declared_count != null && r.modelled_count != null
+        ? { declared: r.declared_count, modelled: r.modelled_count } : null);
+    }).catch((e) => setError(e instanceof Error ? e.message : String(e)));
     api.runs().then((r) => {
       setRuns(r.runs);
       const firstOk = r.runs.find((x) => x.status === "ok");
@@ -46,12 +53,17 @@ export default function PipelinesView({ initialRun }: { initialRun?: string } = 
         them. Clicking a pipeline opens its input / process / output for a chosen run (gated).
       </p>
       {error && <p role="alert" className="mt-2 text-[11px] text-[#e8a087]">{error}</p>}
+      {counts && (
+        <p className="mt-2 text-[11px] text-[#cfd6dc]" data-testid="pipeline-counts">
+          declared <b>{counts.declared}</b> · modelled <b>{counts.modelled}</b>
+        </p>
+      )}
 
       <ul className="mt-3 grid grid-cols-1 gap-2 sm:grid-cols-2 lg:grid-cols-3">
         {[...implemented, ...notYet].map((p) => (
           <li key={p.name}>
             <a
-              href={`/background/pipelines/${p.name}`}
+              href={`/background/pipelines/${p.name}${runId ? `?run=${encodeURIComponent(runId)}` : ""}`}
               className="block rounded-md border border-[#262c36] bg-[#12161d] p-2.5 hover:border-[#3fb6c9]"
             >
               <p className="flex items-center justify-between gap-2">
@@ -61,6 +73,11 @@ export default function PipelinesView({ initialRun }: { initialRun?: string } = 
                   : <span className="rounded border border-[#333b47] px-1.5 py-px text-[9px] uppercase text-[#8b949e]">not modelled yet</span>}
               </p>
               <p className="mt-1 text-[10.5px] leading-relaxed text-[#8b949e]">{p.applies || "—"}</p>
+              {explain?.pipelines[p.name]?.plain && (
+                <p className="mt-1 text-[10.5px] leading-relaxed text-[#aab3bd]">
+                  {explain.pipelines[p.name].modelled ? "" : "Declared, not modelled yet: "}{explain.pipelines[p.name].plain}
+                </p>
+              )}
               <p className="mt-1 flex flex-wrap gap-1 text-[9.5px] text-[#5a636e]">
                 <span className="rounded border border-[#333b47] px-1">lane {p.execution ?? "normal"}</span>
                 {p.needs_sar !== false && <span className="rounded border border-[#333b47] px-1">SAR</span>}

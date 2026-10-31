@@ -353,7 +353,10 @@ export interface GranuleDetailResponse {
       extras: { name: string; size: number }[];
       layers: { path: string; key: string; shape: number[]; dtype: string;
                 chunks: number[] | null; readable: boolean; why_not: string | null;
-                requested_by_scan?: boolean }[];
+                requested_by_scan?: boolean;
+                /** engine-decided (layers.py roles + preview.yaml); null = unknown -> show a dash */
+                role?: string | null; kind?: string | null; previewable?: boolean;
+                default_cmap?: string | null; what_it_is?: string | null }[];
     }[];
     source: string;
     n_layers: number;
@@ -504,4 +507,41 @@ export interface PipelineDetailResponse {
     warnings: string[];
     versions: Record<string, unknown>;
   };
+}
+
+
+/** GET /api/background/explain — the engine's plain-language copy. null = unknown: render a dash. */
+export interface ExplainPayload {
+  ok: true;
+  nodes: Record<string, { title: string; plain: string; tech: string; page: string }>;
+  steps: { code: string; name: string; needs: string[]; plain: string | null; technical?: string | null }[];
+  layers: Record<string, { what_it_is: string | null; how_to_read: string | null; unit: string | null }>;
+  pipelines: Record<string, { code: string; plain: string | null; applies: string | null; modelled: boolean }>;
+  counts: { declared: number; modelled: number; modelled_names: string[] };
+}
+
+/** GET /api/background/overview */
+export interface OverviewPayload {
+  ok: true;
+  nodes: {
+    key: string; title: string | null; plain: string | null; tech: string | null; page: string | null;
+    chips: { label: string; value: string | number | null }[];
+    run: { retrieval_id: string | null; run_id: string | null };
+  }[];
+  steps: { code: string; name: string; needs: string[]; plain: string | null; technical?: string | null }[];
+  counts: { declared: number; modelled: number; modelled_names: string[] };
+  featured_note: string;
+}
+
+/** GET /api/background/health — a plain JSON tree; the page renders what is there. */
+export interface HealthPayload {
+  ok: true;
+  health: Record<string, unknown>;
+  note: string;
+}
+
+export interface NetworkCheckPayload {
+  ok: true;
+  hosts: { host: string; what: string; ok: boolean; error?: string; http?: string;
+           dns_ms?: number; tcp_ms?: number; tls_ms?: number }[];
 }

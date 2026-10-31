@@ -6,7 +6,11 @@
 import { bgGet } from "./bgApi";
 import type {
   BackgroundGroup,
+  ExplainPayload,
   ExplorerGranule,
+  HealthPayload,
+  NetworkCheckPayload,
+  OverviewPayload,
   GranuleDetailResponse,
   PipelineDetailResponse,
   PreprocessingResponse,
@@ -61,6 +65,12 @@ export const bg = {
     bgGet<StackPairResponse>(`/api/background/stack-pair?id=${encodeURIComponent(id)}`, signal),
 
   runs: () => bgGet<{ ok: true; runs: RunSummary[] }>("/api/runs"),
+
+  explain: (signal?: AbortSignal) => bgGet<ExplainPayload>("/api/background/explain", signal),
+  overview: (signal?: AbortSignal) => bgGet<OverviewPayload>("/api/background/overview", signal),
+  health: (signal?: AbortSignal) => bgGet<HealthPayload>("/api/background/health", signal),
+  /** on demand only (a button): it opens real connections to NASA hosts */
+  healthNetwork: (signal?: AbortSignal) => bgGet<NetworkCheckPayload>("/api/background/health/network", signal),
 
   preprocessing: (runId: string, bundleId?: string, signal?: AbortSignal) =>
     bgGet<PreprocessingResponse>(

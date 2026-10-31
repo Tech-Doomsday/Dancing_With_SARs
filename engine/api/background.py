@@ -227,6 +227,8 @@ def granule_detail(source, gid: str) -> dict:
             inventory["n_layers_requested_by_scan"] = n_req
         except Exception as ex:
             requested_note = f"scan request not computable: {type(ex).__name__}: {ex}"
+    if inventory is not None:
+        _annotate_inventory(inventory)
     groups = group_acquisitions([enriched])
     group = groups[0] if groups and groups[0]["grouped"] else None
     return {
@@ -257,6 +259,35 @@ def _cache_paths(gid: str, layer: str, bbox, max_px: int, cmap: str, scale: str 
                                    str(max_px), cmap, scale, f"v{render_version}"]).encode()).hexdigest()[:32]
     root = Path(data_root()) / "background" / "previews"
     return root / f"{key}.png", root / f"{key}.json"
+
+
+def _annotate_inventory(inventory: dict) -> None:
+    """Add role / kind / previewable / default_cmap / what_it_is to every inventory layer (engine-decided).
+    previewable = the layer is readable, a plain numeric dtype and its role is known to engine/common/layers.
+    A layer with no known role is NOT previewable and gets what_it_is = null (the UI shows a dash).
+    A broken preview.yaml / explain.yaml never breaks the inventory: the fields just stay null."""
+    from engine.common.layers import parse_layer_key
+    try:
+        from .preview_cfg import load_preview_config
+        pcfg = load_preview_config()
+    except Exception:
+        pcfg = None
+    try:
+        from .explain import layer_explanation, load_explain_config
+        ecfg = load_explain_config()
+    except Exception:
+        ecfg, layer_explanation = None, None
+    for grid in inventory.get("grids", []):
+        for layer in grid.get("layers", []):
+            info = parse_layer_key(layer["key"]).info
+            kind = info.kind if info else None
+            dtype = str(layer.get("dtype") or "")
+            numeric = dtype.lstrip("<>=|")[:1] in ("f", "i", "u", "c")      # structured dtypes start with "[" / "("
+            layer["role"] = info.role if info else None
+            layer["kind"] = kind
+            layer["previewable"] = bool(layer.get("readable") and info is not None and numeric)
+            layer["default_cmap"] = pcfg.resolve_cmap("auto", kind) if (pcfg and kind) else None
+            layer["what_it_is"] = (layer_explanation(layer["key"], ecfg)["what_it_is"] if ecfg is not None else None)
 
 
 _CMAP_CHOICES = ("auto", "viridis", "diverging", "magma", "gray", "categorical")
@@ -461,7 +492,10 @@ def register_trace(runner: "JobRunnerLike", run_id: str, payload: dict) -> dict:
     for i, (path, rec) in enumerate(sorted(recs.items()), start=1):
         aid = f"t{i}"
         view = finite_view(rec.thumb)
+        from engine.common.grids import extent_corners_lonlat
+        corners, corners_note = extent_corners_lonlat(rec.extent, rec.epsg)
         m = {
+            "corners_lonlat": corners, "corners_note": corners_note,
             "aid": aid, "path": path, "label": rec.label, "group": rec.group,
             "step": rec.step, "first_step": rec.first_step,
             "shape": list(rec.shape), "dtype": rec.dtype, "kind": rec.kind,
@@ -506,6 +540,8 @@ def trace_array_png(rec, cmap: str, lo: float | None, hi: float | None, max_px: 
             "shown_shape": [int(shown.shape[0]), int(shown.shape[1])],
             "epsg": rec.epsg, "extent": list(rec.extent) if rec.extent else None,
             "label": rec.label, "path": rec.path}
+    from engine.common.grids import extent_corners_lonlat
+    meta["corners_lonlat"], meta["corners_note"] = extent_corners_lonlat(rec.extent, rec.epsg)
     return body, meta
 
 

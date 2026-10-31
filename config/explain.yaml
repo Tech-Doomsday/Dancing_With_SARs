@@ -1,0 +1,118 @@
+# Plain-language copy for the Background pages — the ONE place explanatory text lives (never in app-ui/src).
+# Served by GET /api/background/explain. Rules: describe what a step or layer DOES or how it is DISPLAYED,
+# never a hazard conclusion; unknown units are null (the UI shows a dash); "plain" sentences stay <= 25 words.
+# Step names / order / needs come from engine/common/chain.STEPS; whether a pipeline is modelled is computed live.
+# Override with NISAR_EXPLAIN_CONFIG or NISAR_CONFIG_DIR.
+# `nodes` feed GET /api/background/overview (the chain boxes); steps / layers / pipelines feed /explain.
+
+# Overview nodes. `step` ties a node to engine/common/chain.STEPS (names/order/needs come from there).
+nodes:
+  find:        {title: Find granules,  plain: "Ask NASA's catalogue which radar scenes cover the chosen box and dates.",
+                tech: "engine/retrieval ASF/CMR search: box + dates -> granule list", page: retrieval}
+  plan:        {title: Plan,           plain: "Work out which byte ranges of each file are needed for the box, before downloading anything.",
+                tech: "layout index + chunk table: granule + box -> chunk list", page: retrieval}
+  download:    {title: Download,       plain: "Read only the needed pieces of each remote file using HTTP range requests.",
+                tech: "HTTP range reads: chunk list -> stored clips", page: retrieval}
+  inspect:     {title: Inspect,        plain: "Look at the stored clips and draw their layers as pictures, exactly as they came.",
+                tech: "clip store (zarr) + /api/background/preview: clip -> PNG + meta", page: retrieval}
+  preprocess:  {title: Preprocess,     plain: "Thirteen fixed steps (P01 to P13) turn raw clips into clean, aligned layers on shared grids.",
+                tech: "engine/common/chain.STEPS: clips -> SceneBundle", page: preprocessing}
+  bundle:      {title: SceneBundle,    plain: "One frozen package holding every aligned layer and a record of how it was made.",
+                tech: "engine/common/scene_bundle: frozen dataclasses on disk", page: preprocessing}
+  routing:     {title: Routing,        plain: "Decide which hazard pipelines make sense for this tile, from the bundle's own data.",
+                tech: "P12 tile routing + Registry.plan: bundle + triggers -> pipeline list", page: pipelines}
+  pipelines:   {title: Pipelines,      plain: "Each chosen pipeline reads the bundle and reports what it can say, with its evidence.",
+                tech: "engine/pipelines/<name>/verdict.run(bundle) -> result", page: pipelines}
+  verdict:     {title: Verdict,        plain: "Results are cached per tile so the map can show them instantly later.",
+                tech: "verdict cache (Supabase / local): result -> cached verdict", page: pipelines}
+
+steps:
+  P01:
+    plain: "Finds which satellite scenes cover this tile and how they relate, keeping only the newest processing version of each."
+    technical: "engine/common/p01_granule_resolution.py — search results -> resolved granules, stacks (direction, orbit), ordered pairs."
+  P02:
+    plain: "Downloads only the needed layers of those scenes, clipped to this tile plus a small margin."
+    technical: "engine/common/p02_clip.py — resolved granules + active measurement codes -> byte-range clips."
+  P03:
+    plain: "Turns raw stored values into clean layers: fill values become no-data, and unreliable phase pixels are masked."
+    technical: "engine/common/p03_decode_gate.py — clips -> typed float32/integer layers, connected-component gate on phase."
+  P04:
+    plain: "Puts every layer onto the tile's two common grids so layers line up pixel for pixel."
+    technical: "engine/common/p04_grid_harmonization.py — decoded layers -> G80 / G20 grids (resample, mosaic)."
+  P05:
+    plain: "Works out the viewing direction and incidence angle of the satellite for every pixel."
+    technical: "engine/common/p05_geometry.py — radarGrid cubes (+ DEM) -> line-of-sight unit vector, incidence, layover/shadow."
+  P06:
+    plain: "Converts interferogram phase into line-of-sight distance change, later date minus earlier, with a statistical noise estimate."
+    technical: "engine/common/p06_phase_to_los.py — unwrapped phase + coherence -> los_m, sigma_m per pair."
+  P07:
+    plain: "Records how much apparent change atmosphere, ionosphere and tides could add. It records these effects and never removes them."
+    technical: "engine/common/p07_correction_audit.py — correction layers -> diagnostic layers, residual_los_m, applied_by_engine=False."
+  P08:
+    plain: "Converts radar backscatter power to decibels and builds the cross-polarisation ratio and validity masks."
+    technical: "engine/common/p08_backscatter_prep.py — GCOV power -> gamma0_db, sigma0_db, hv_hh_db, masks on G20."
+  P09:
+    plain: "Brings in terrain, land cover and other reference layers on the same grids, and states which were unavailable."
+    technical: "engine/common/p09_ancillary_align.py — AncillaryProvider layers -> G80 / G20 with per-layer status."
+  P10:
+    plain: "Summarises how the scene history looks over time: a typical level per pixel, its spread, and how many dates exist."
+    technical: "engine/common/p10_temporal_stack.py — epoch stack -> baseline median/MAD, pair network, cold-start flags."
+  P11:
+    plain: "Marks ground that looks unchanged and stable, with each criterion kept as its own layer."
+    technical: "engine/common/p11_stable_mask.py — coherence, slope, water, no-change criteria -> boolean stable mask."
+  P12:
+    plain: "Decides which hazard checks make sense for this tile, saying yes, no or unknown with reasons."
+    technical: "engine/common/p12_tile_routing.py — bundle + triggers + manifests applies -> RoutingDecision per pipeline."
+  P13:
+    plain: "Fingerprints exactly which inputs, settings and code built this bundle, so results can name it."
+    technical: "engine/common/p13_provenance.py — bundle_id = hash(contract, tile, request, inputs, parameters, code)."
+
+# keyed by the layer ROLE in engine/common/layers.py; a layer with no role gets nulls (the UI shows a dash)
+layers:
+  unw_phase:     {what_it_is: "Unwrapped interferometric phase between two dates.", unit: "rad", how_to_read: "Colour steps show phase change between the two dates; compare values only inside one connected region."}
+  unw_coherence: {what_it_is: "How similar the radar signal is between the two dates.", unit: "unitless (0-1)", how_to_read: "Bright means similar signal; dark means the phase there is noisy."}
+  conn_comp:     {what_it_is: "Labels of regions whose phase is unwrapped consistently.", unit: null, how_to_read: "Each colour is one label; 0 is unusable."}
+  iono_phase:    {what_it_is: "Ionosphere phase screen estimate.", unit: "rad", how_to_read: "Smooth colour gradients show the estimated ionospheric phase."}
+  iono_sigma:    {what_it_is: "Uncertainty of the ionosphere phase estimate.", unit: "rad", how_to_read: "Brighter means a larger uncertainty."}
+  unw_mask:      {what_it_is: "Product mask for the unwrapped phase layer.", unit: null, how_to_read: "Codes are product-defined; the colours separate distinct codes only."}
+  off_range:     {what_it_is: "Pixel offset between the two dates in the range direction.", unit: null, how_to_read: "Colour shows the offset value; its unit is not stated by the engine."}
+  off_azimuth:   {what_it_is: "Pixel offset between the two dates in the azimuth direction.", unit: null, how_to_read: "Colour shows the offset value; its unit is not stated by the engine."}
+  off_peak:      {what_it_is: "Quality of the offset correlation peak.", unit: null, how_to_read: "Brighter means a stronger correlation peak."}
+  off_mask:      {what_it_is: "Product mask for the pixel offsets.", unit: null, how_to_read: "Codes are product-defined; the colours separate distinct codes only."}
+  cov:           {what_it_is: "Radar backscatter power (covariance diagonal term).", unit: "dB when shown with the dB scale", how_to_read: "Displayed in decibels: brighter pixels returned more radar power to the satellite."}
+  cov_mask:      {what_it_is: "Product mask for the backscatter layers.", unit: null, how_to_read: "Codes are product-defined; the colours separate distinct codes only."}
+  n_looks:       {what_it_is: "Number of looks averaged into each backscatter pixel.", unit: null, how_to_read: "Brighter means more averaging."}
+  rtc_g2s:       {what_it_is: "Factor converting gamma0 to sigma0 backscatter.", unit: null, how_to_read: "Colour shows the factor value."}
+  noise_floor:   {what_it_is: "Noise-equivalent backscatter of the instrument.", unit: null, how_to_read: "Colour shows the noise level; its unit is not stated by the engine."}
+  incidence:     {what_it_is: "Angle between the radar beam and the vertical at each pixel.", unit: "degrees", how_to_read: "Brighter means a larger incidence angle."}
+  los_x:         {what_it_is: "East component of the line-of-sight unit vector.", unit: null, how_to_read: "Colour shows the component value."}
+  los_y:         {what_it_is: "North component of the line-of-sight unit vector.", unit: null, how_to_read: "Colour shows the component value."}
+  along_x:       {what_it_is: "East component of the along-track unit vector.", unit: null, how_to_read: "Colour shows the component value."}
+  along_y:       {what_it_is: "North component of the along-track unit vector.", unit: null, how_to_read: "Colour shows the component value."}
+  elevation_angle: {what_it_is: "Elevation angle of the radar beam.", unit: "degrees", how_to_read: "Brighter means a larger angle."}
+  bperp:         {what_it_is: "Perpendicular baseline between the two passes.", unit: null, how_to_read: "Colour shows the baseline value."}
+  bpar:          {what_it_is: "Parallel baseline between the two passes.", unit: null, how_to_read: "Colour shows the baseline value."}
+  tropo_hydro_phase: {what_it_is: "Hydrostatic troposphere phase screen.", unit: "rad", how_to_read: "Smooth gradients show the estimated atmospheric phase."}
+  tropo_wet_phase:   {what_it_is: "Wet troposphere phase screen.", unit: "rad", how_to_read: "Smooth gradients show the estimated atmospheric phase."}
+  tide_phase:    {what_it_is: "Solid-earth tide phase contribution.", unit: "rad", how_to_read: "Smooth gradients show the estimated tidal phase."}
+
+# one plain sentence per pipeline: what the manifest says it applies to. NOTHING here claims a working detector;
+# whether it is modelled (defines run()) is computed live by the route and never stored.
+pipelines:
+  earthquake_coseismic:   "Applies to land tiles with valid coherence, where the pair spans the event window."
+  land_subsidence:        "Applies to land with coherence above threshold and at least 10 pairs in a connected network."
+  volcanic_deformation:   "Applies to tiles within 50 km of a known volcano; the global scan also tests high terrain."
+  landslide:              "Applies to land with slope of 10 degrees or more, excluding water, layover and shadow."
+  glacier_ice_flow:       "Applies to ice and snow land classes or mapped glacier polygons."
+  permafrost_thaw:        "Applies to permafrost zones on land with at least 12 dates spanning one thaw season."
+  flood_inundation:       "Applies to land and coast, excluding permanent ice."
+  deforestation:          "Applies to forest land cover or tree cover of 30 percent or more."
+  wildfire_burn_scar:     "Applies to vegetated land (forest, shrub, grass), excluding water."
+  river_erosion:          "Applies to river corridors: the river buffer, with surface water present 1 to 99 percent of the time."
+  coastal_erosion:        "Applies to tiles within about 2 km of the mapped shoreline."
+  urban_damage:           "Applies to tiles where built-up area is above a threshold."
+  tropical_cyclone:       "Applies to ocean tiles more than 5 km offshore with sensor coverage and an active or recent storm or a high-wind flag."
+  tsunami_inundation:     "Applies to the coastal strip (within 2 km, up to 30 m elevation) when a trigger event exists."
+  oil_spill:              "Applies to ocean tiles with coverage and wind between about 2 and 10 m/s."
+  iceberg_calving_drift:  "Applies to ocean tiles near ice fronts, tidewater glacier termini or ice shelves."
+  tsunami_ocean_evidence: "Event-scoped: needs an earthquake or tsunami trigger or event window, and no radar data."

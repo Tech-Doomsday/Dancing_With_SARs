@@ -157,3 +157,44 @@ def test_two_scales_two_cache_files_and_render_version_invalidates(fake):
     assert m["cache_hit"] is False and m["render_version"] == base.render_version + 1
     p_new, _ = bg._cache_paths(gid, LAYER, bbox, 64, "auto", "db", bumped.render_version)
     assert p_new != p_db and p_new.exists()
+
+
+def test_preview_meta_header_stays_under_4kb_and_carries_no_long_prose(fake):
+    """X-Img-Meta rides in an HTTP header: the long what_it_is / how_to_read copy lives in /explain only."""
+    m = _preview(fake, use_cache=False)["meta"]
+    wire = json.dumps(m)                                      # ensure_ascii=True, exactly as the routes send it
+    assert len(wire) < 4096
+    assert wire.isascii()
+    assert "what_it_is" not in m and "how_to_read" not in m
+
+
+# ------------------------------------------------------------------ corners for trace arrays / extents
+def test_extent_corners_match_axis_corners_and_refuse_without_extent():
+    from engine.common.grids import extent_corners_lonlat
+    x, y = _utm_axes()
+    by_axes, _ = edge_corners_lonlat(x, y, 32611)
+    ext = (x[0] - 10, x[-1] + 10, y[-1] - 10, y[0] + 10)           # (xmin, xmax, ymin, ymax) pixel edges
+    by_extent, note = extent_corners_lonlat(ext, 32611)
+    assert note is None and np.allclose(by_axes, by_extent, atol=1e-9)
+    assert extent_corners_lonlat(None, 32611)[0] is None
+    assert extent_corners_lonlat(ext, None)[0] is None
+
+
+def test_antimeridian_straddle_is_null_with_a_note():
+    from engine.common.grids import quad_corners_lonlat
+    # a geographic box spanning the seam, expressed in EPSG:4326 degrees
+    c, note = quad_corners_lonlat(-179.0, 179.0, 0.0, 1.0, 4326)
+    assert c is None and "antimeridian" in note
+
+
+def test_trace_array_png_reports_corners_or_null():
+    from types import SimpleNamespace
+    from engine.api.background import trace_array_png
+    x, y = _utm_axes()
+    rec = SimpleNamespace(thumb=np.random.rand(40, 40).astype(np.float32), kind="float", epsg=32611,
+                          extent=(x[0] - 10, x[-1] + 10, y[-1] - 10, y[0] + 10), label="a", path="p")
+    _, meta = trace_array_png(rec, "auto", None, None, 64)
+    assert len(meta["corners_lonlat"]) == 4 and meta["corners_note"] is None
+    rec.extent = None
+    _, meta = trace_array_png(rec, "auto", None, None, 64)
+    assert meta["corners_lonlat"] is None and "no corners" in meta["corners_note"]

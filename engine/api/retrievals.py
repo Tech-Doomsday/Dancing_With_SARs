@@ -481,6 +481,21 @@ class ClipReader:
         raise RetrievalError(404, f"no layer {layer!r} on grid {grid!r} in granule {gid!r}")
 
 
+def clip_corners(grp) -> tuple:
+    """-> (corners_lonlat | None, note | None) for a stored clip group: [TL, TR, BR, BL] of the pixel
+    EDGES, from the group's own x / y axes. No axes (or an unprojectable / antimeridian clip) -> (None,
+    reason): never a guess."""
+    try:
+        keys = set(grp.array_keys())
+        if "x" not in keys or "y" not in keys:
+            return None, "no corners: this stored clip has no x / y axes"
+        from engine.common.grids import edge_corners_lonlat
+        return edge_corners_lonlat(np.asarray(grp["x"][:], np.float64), np.asarray(grp["y"][:], np.float64),
+                                   int(grp.attrs["epsg"]))
+    except Exception as err:
+        return None, f"no corners: {type(err).__name__}: {err}"
+
+
 def _plain(v):
     try:
         return v.item() if hasattr(v, "item") else v

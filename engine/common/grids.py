@@ -313,6 +313,22 @@ def edge_corners_lonlat(x: np.ndarray, y: np.ndarray, epsg: int) -> tuple:
         return None, f"no corners: {err}"
     west, east = float(min(ex[0], ex[-1])), float(max(ex[0], ex[-1]))
     north, south = float(max(ey[0], ey[-1])), float(min(ey[0], ey[-1]))
+    return quad_corners_lonlat(west, east, south, north, epsg)
+
+
+def extent_corners_lonlat(extent, epsg: int | None) -> tuple:
+    """(xmin, xmax, ymin, ymax) PIXEL EDGES in `epsg` -> (corners [TL, TR, BR, BL] as [lon, lat], note).
+    Same honest refusals as edge_corners_lonlat (no extent / no epsg / antimeridian -> (None, reason))."""
+    if not extent or not epsg:
+        return None, "no corners: this array carries no extent / EPSG"
+    try:
+        x0, x1, y0, y1 = (float(v) for v in extent)
+    except (TypeError, ValueError):
+        return None, "no corners: the extent is not four numbers"
+    return quad_corners_lonlat(min(x0, x1), max(x0, x1), min(y0, y1), max(y0, y1), int(epsg))
+
+
+def quad_corners_lonlat(west: float, east: float, south: float, north: float, epsg: int) -> tuple:
     from ._geo import transform_xy
     try:
         lon, lat = transform_xy(np.array([west, east, east, west]), np.array([north, north, south, south]),

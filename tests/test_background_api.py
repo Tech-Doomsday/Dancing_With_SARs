@@ -211,6 +211,9 @@ def test_granule_detail_decoded_fields_and_inventory(client):
     assert inv["n_layers"] > 0
     flat = [l["key"] for grid in inv["grids"] for l in grid["layers"]]
     assert any("unwrappedPhase" in k for k in flat)
+    layers = {l["key"]: l for grid in inv["grids"] for l in grid["layers"]}
+    phase = next(l for k, l in layers.items() if "unwrappedPhase" in k)       # roles resolve (layers.py)
+    assert phase["role"] == "unw_phase" and phase["previewable"] is True and phase["default_cmap"] == "diverging"
 
 
 def test_granule_unknown_layout_is_404_with_decoder_text(client):
@@ -787,3 +790,58 @@ def test_preview_defaults_are_auto_and_meta_reports_what_was_used(client):
     assert m["cmap_requested"] == "auto" and m["scale_requested"] == "auto"
     assert m["scale"] == "db" and m["unit"] == "dB" and m["cmap"] == "gray"
     assert "corners_lonlat" in m and "nan_fraction" in m
+
+
+
+# --------------------------------------------------------------------------- explain / overview / health
+SENTINEL = "SENTINEL-NOT-A-REAL-TOKEN-7f3a"
+_LOCAL_ROUTES = ["/api/background/explain", "/api/background/overview", "/api/background/health"]
+
+
+@pytest.mark.parametrize("path", _LOCAL_ROUTES)
+def test_local_routes_are_gated_401_503_200(client, monkeypatch, path):
+    c, _tmp, _bundle = client
+    assert c.get(path).status_code == 401
+    assert c.get(path, headers=_auth("wrong")).status_code == 401
+    r = c.get(path, headers=_auth())
+    assert r.status_code == 200 and r.json()["ok"] is True
+    monkeypatch.delenv("NISAR_BACKGROUND_TOKEN", raising=False)
+    assert c.get(path, headers=_auth()).status_code == 503
+
+
+def test_explain_route_has_every_step_and_live_counts(client):
+    c, _tmp, _bundle = client
+    j = c.get("/api/background/explain", headers=_auth()).json()
+    assert {f"P{i:02d}" for i in range(1, 14)} <= {s["code"] for s in j["steps"]}
+    assert j["counts"]["declared"] == len(j["pipelines"])
+    assert j["counts"]["modelled"] == sum(p["modelled"] for p in j["pipelines"].values()) == 2
+
+
+def test_overview_route_nodes_follow_chain_steps_and_say_declared_vs_modelled(client):
+    from engine.common.chain import STEPS
+    c, _tmp, _bundle = client
+    j = c.get("/api/background/overview", headers=_auth()).json()
+    assert [n["key"] for n in j["nodes"]][:5] == ["find", "plan", "download", "inspect", "preprocess"]
+    assert [s["code"] for s in j["steps"]] == [s.code for s in STEPS]
+    pipes = next(n for n in j["nodes"] if n["key"] == "pipelines")
+    labels = {ch["label"]: ch["value"] for ch in pipes["chips"]}
+    assert labels["declared"] > labels["modelled"] == 2
+
+
+def test_health_and_overview_never_contain_the_token_or_env_paths(client, monkeypatch):
+    c, tmp, _bundle = client
+    monkeypatch.setenv("NISAR_BACKGROUND_TOKEN", SENTINEL)
+    for path in _LOCAL_ROUTES:
+        body = c.get(path, headers=_auth(SENTINEL)).text
+        assert SENTINEL not in body, path
+        assert ".env" not in body.replace("dotenv", ""), path
+        assert str(ROOT) not in body and str(tmp) not in body, path
+
+
+def test_preview_route_defaults_to_auto_and_rejects_unknown_values(client):
+    c, _tmp, _bundle = client
+    q = {"id": GCOV_A, "layer": "science__LSAR__GCOV__grids__frequencyA__HHHH",
+         "west": WEST, "south": SOUTH, "east": EAST, "north": NORTH}
+    for bad in ({"scale": "log"}, {"cmap": "rainbow"}):
+        r = c.get("/api/background/preview", params={**q, **bad}, headers=_auth())
+        assert r.status_code == 400 and "not in" in r.json()["detail"]["error"]

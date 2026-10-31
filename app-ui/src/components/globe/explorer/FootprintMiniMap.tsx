@@ -11,19 +11,46 @@ const AMBER = "#e6c977";
 const CYAN = "#3fb6c9";
 const VIOLET = "#b39ce8";
 
+export interface SarOverlay {
+  url: string;
+  /** [TL, TR, BR, BL] as [lon, lat], from the engine (never computed here) */
+  corners: [[number, number], [number, number], [number, number], [number, number]];
+  opacity: number;
+}
+
 interface Props {
+  overlay?: SarOverlay | null;
   bbox: [number, number, number, number] | null;
   stackRings: { id: string; ring: [number, number][] | null }[];
   selectedId: string;
 }
 
+/** add / move / remove the SAR image layer; it sits under the footprint outlines */
+function applySar(map: MlMap, overlay: SarOverlay | null) {
+  const src = map.getSource("sar") as maplibregl.ImageSource | undefined;
+  if (!overlay) {
+    if (map.getLayer("sar")) map.removeLayer("sar");
+    if (src) map.removeSource("sar");
+    return;
+  }
+  if (src) {
+    src.updateImage({ url: overlay.url, coordinates: overlay.corners });
+  } else {
+    map.addSource("sar", { type: "image", url: overlay.url, coordinates: overlay.corners });
+    map.addLayer({ id: "sar", type: "raster", source: "sar",
+                   paint: { "raster-opacity": overlay.opacity, "raster-fade-duration": 0, "raster-resampling": "nearest" } },
+                 map.getLayer("stack-fill") ? "stack-fill" : undefined);
+  }
+  if (map.getLayer("sar")) map.setPaintProperty("sar", "raster-opacity", overlay.opacity);
+}
+
 const EMPTY: GeoJSON.FeatureCollection = { type: "FeatureCollection", features: [] };
 
-export default function FootprintMiniMap({ bbox, stackRings, selectedId }: Props) {
+export default function FootprintMiniMap({ bbox, stackRings, selectedId, overlay = null }: Props) {
   const elRef = useRef<HTMLDivElement | null>(null);
   const mapRef = useRef<MlMap | null>(null);
-  const propsRef = useRef({ bbox, stackRings, selectedId });
-  propsRef.current = { bbox, stackRings, selectedId };
+  const propsRef = useRef({ bbox, stackRings, selectedId, overlay });
+  propsRef.current = { bbox, stackRings, selectedId, overlay };
   const readyRef = useRef(false);
 
   useEffect(() => {
@@ -72,6 +99,7 @@ export default function FootprintMiniMap({ bbox, stackRings, selectedId }: Props
     const update = () => {
       if (!readyRef.current) return;
       const p = propsRef.current;
+      applySar(map, p.overlay);
       const stackSrc = map.getSource("stack") as maplibregl.GeoJSONSource | undefined;
       stackSrc?.setData({
         type: "FeatureCollection",
@@ -114,6 +142,11 @@ export default function FootprintMiniMap({ bbox, stackRings, selectedId }: Props
       readyRef.current = false;
     };
   }, []);
+
+  useEffect(() => {
+    const map = mapRef.current;
+    if (map && readyRef.current) applySar(map, overlay);
+  }, [overlay]);
 
   // data updates without recreating the map
   useEffect(() => {

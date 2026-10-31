@@ -28,6 +28,9 @@ Endpoints (all read-only; the first four run on the shared single worker pool, t
   GET /api/background/runs/{id}/arrays/{aid}[?cmap=&lo=&hi=&max_px=]   §5 array PNG
   GET /api/background/runs/{id}/arrays/{aid}/probe?fx=&fy=             §5 pixel probe
   GET /api/background/runs/{id}/pipelines/{name}        §6 input/process/output
+  GET /api/background/explain                           plain-language copy (config/explain.yaml) + live pipeline counts
+  GET /api/background/overview                          the end-to-end chain with live chips (local state only)
+  GET /api/background/health[/network]                  environment / dependency / stub checks (network = on demand)
 
 Tests inject a fake source through _SOURCE_FACTORY (the same seam pattern the granule search
 uses) and a fake registry through the runner; production always builds the real NisarSource.
@@ -378,6 +381,140 @@ def _pipeline_worker(run_id: str, name: str):
     from engine.registry import Registry
     runner = get_runner()
     return bg.pipeline_detail(runner, Registry(bundles_dir=runner.bundles_dir), run_id, name)
+
+
+# --------------------------------------------------------------------------- #
+# explain / overview / health: local state only (no Earthdata, no provider bytes)
+# --------------------------------------------------------------------------- #
+@router.get("/explain")
+def background_explain(authorization: str | None = Header(default=None)):
+    require_token(authorization)
+    return _run_local(_explain_worker)
+
+
+def _explain_worker():
+    from .explain import ExplainConfigError, explain_payload
+    try:
+        return explain_payload()
+    except ExplainConfigError as err:
+        raise BackgroundError(500, str(err))
+
+
+@router.get("/overview")
+def background_overview(authorization: str | None = Header(default=None)):
+    require_token(authorization)
+    return _run_local(_overview_worker)
+
+
+def _overview_worker():
+    """The chain, left to right. Titles / sentences / technical lines come from explain.yaml; the step list
+    (names, order, needs) from engine/common/chain.STEPS; every chip is read live and an unreadable one is
+    reported as null (the UI shows a dash), never guessed."""
+    from .explain import ExplainConfigError, explain_payload
+    try:
+        ex = explain_payload()
+    except ExplainConfigError as err:
+        raise BackgroundError(500, str(err))
+    runner = get_runner()
+    retrievals = bundles = runs = None
+    last_run = None
+    try:
+        from .routes_retrievals import manager
+        retrievals = manager().list()
+    except Exception:
+        pass
+    try:
+        root = Path(runner.bundles_dir)
+        bundles = sum(1 for d in root.iterdir() if d.is_dir() and (d / "bundle.json").exists()) if root.is_dir() else 0
+    except Exception:
+        pass
+    try:
+        runs = runner.list_states()
+        last_run = runs[0] if runs else None
+    except Exception:
+        pass
+    latest = retrievals[0] if retrievals else None
+    counts = ex["counts"]
+
+    def chip(label, value):
+        return {"label": label, "value": value}
+
+    chips = {
+        "find": [chip("retrievals", len(retrievals) if retrievals is not None else None)],
+        "plan": [chip("latest retrieval stage", (latest or {}).get("stage"))],
+        "download": [chip("latest retrieval status", (latest or {}).get("status"))],
+        "inspect": [chip("latest retrieval", (latest or {}).get("id"))],
+        "preprocess": [chip("steps", len(ex["steps"]))],
+        "bundle": [chip("cached bundles", bundles)],
+        "routing": [chip("declared", counts["declared"]), chip("modelled", counts["modelled"])],
+        "pipelines": [chip("declared", counts["declared"]), chip("modelled", counts["modelled"]),
+                      chip("last result status", (last_run or {}).get("status"))],
+        "verdict": [chip("runs", len(runs) if runs is not None else None)],
+    }
+    order = ["find", "plan", "download", "inspect", "preprocess", "bundle", "routing", "pipelines", "verdict"]
+    nodes = []
+    for key in order:
+        row = ex["nodes"].get(key) or {}
+        nodes.append({"key": key, "title": row.get("title"), "plain": row.get("plain"), "tech": row.get("tech"),
+                      "page": row.get("page"), "chips": chips[key],
+                      "run": {"retrieval_id": (latest or {}).get("id"), "run_id": (last_run or {}).get("id")}})
+    return {"ok": True, "nodes": nodes, "steps": ex["steps"], "counts": counts,
+            "featured_note": "declared = manifests on disk; modelled = those whose verdict module defines run()"}
+
+
+@router.get("/health")
+def background_health(authorization: str | None = Header(default=None)):
+    require_token(authorization)
+    return _run_local(_health_worker)
+
+
+def _scrub(obj, repo: str, data: str):
+    """Walk a JSON-able structure and replace the absolute repo / data prefixes (a path never leaves the engine)."""
+    if isinstance(obj, str):
+        out = obj
+        for prefix, tag in sorted(((data, "<data>"), (repo, "<repo>")), key=lambda t: -len(t[0])):
+            if prefix:
+                out = out.replace(prefix, tag)
+        return out
+    if isinstance(obj, dict):
+        return {k: _scrub(v, repo, data) for k, v in obj.items()}
+    if isinstance(obj, (list, tuple)):
+        return [_scrub(v, repo, data) for v in obj]
+    return obj
+
+
+def _health_worker():
+    from engine.common.debug import health as H
+    from engine.retrieval.settings import load_settings
+    from .state import get_runner as _gr
+    settings = load_settings()
+    snap = H.health_snapshot(settings)
+    env = snap["environment"]
+    env.pop("executable", None)                       # a filesystem path nobody needs
+    env["dotenv_present"] = None                      # presence of a secrets file is not shown here
+    env.pop("dotenv_gitignored", None)
+    snap["generated"] = float(snap.get("generated") or 0)
+    runner = _gr()
+    out = _scrub(snap, str(H.REPO), str(settings.data_dir))
+    out = bg.scrub_paths(_json_dumps(out), runner.bundles_dir)
+    import json as _json
+    return {"ok": True, "health": _json.loads(out), "note": "credentials: presence only; network and tests are on demand"}
+
+
+def _json_dumps(o) -> str:
+    import json as _json
+    return _json.dumps(o, default=str)
+
+
+@router.get("/health/network")
+def background_health_network(authorization: str | None = Header(default=None)):
+    require_token(authorization)
+    return _run_local(_network_worker)
+
+
+def _network_worker():
+    from engine.common.debug import health as H
+    return {"ok": True, "hosts": H.network_check()}
 
 
 __all__ = ["router", "require_token"]

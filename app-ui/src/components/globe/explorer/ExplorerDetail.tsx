@@ -6,7 +6,7 @@
  *  engine) · Timeline (this stack's epochs and day gaps with the selection highlighted) ·
  *  Data parts (what a scan would request vs what exists, engine-computed). Unknown = "—";
  *  undecoded tokens stay raw with an "undecoded" tag. */
-import { useEffect, useMemo, useRef, useState } from "react";
+import { Fragment, useEffect, useMemo, useRef, useState } from "react";
 import dynamic from "next/dynamic";
 import { Check, Copy, ImageOff, X } from "lucide-react";
 import { api } from "@/lib/api";
@@ -23,6 +23,10 @@ const FootprintMap = dynamic(() => import("./FootprintMiniMap"), {
   ssr: false,
   loading: () => <p className="p-3 text-[11px] text-[#8b949e]">footprint map…</p>,
 });
+
+import ExplainLine from "@/components/background/ExplainLine";
+import SarOverlayControl from "./SarOverlayControl";
+import type { SarOverlay } from "./FootprintMiniMap";
 
 type Tab = "summary" | "layers" | "timeline" | "data";
 
@@ -61,6 +65,7 @@ export default function ExplorerDetail({ granule, group, stack, stackGranules, b
   const gateFail = useGateFail();
   const retryNonce = useGateRetryNonce();
   const [tab, setTab] = useState<Tab>("summary");
+  const [sarOverlay, setSarOverlay] = useState<SarOverlay | null>(null);
   const [copied, setCopied] = useState(false);
   const [tileId, setTileId] = useState<string | null>(null);
   const [tileError, setTileError] = useState<string | null>(null);
@@ -275,8 +280,10 @@ export default function ExplorerDetail({ granule, group, stack, stackGranules, b
               bbox={bbox}
               stackRings={stackGranules.map((g) => ({ id: g.id, ring: g.footprint }))}
               selectedId={shown.id}
+              overlay={sarOverlay}
             />
           </div>
+          <SarOverlayControl granuleId={shown.id} bbox={bbox} inventory={detail?.inventory} onOverlay={setSarOverlay} />
 
           {/* key/value table */}
           <dl className="mt-2">
@@ -446,11 +453,18 @@ export default function ExplorerDetail({ granule, group, stack, stackGranules, b
                     </thead>
                     <tbody className="font-mono text-[#cfd6dc]">
                       {grid.layers.map((l) => (
-                        <tr key={l.key} className="border-t border-[#1c222b]">
-                          <td className="break-all py-0.5 pr-2">{l.path.split("/").slice(-2).join("/")}{!l.readable && <span className="ml-1 text-[#d9c98a]">({l.why_not ?? "not readable"})</span>}</td>
-                          <td className="py-0.5 pr-2">{l.shape.join("×")}</td>
-                          <td className="py-0.5">{l.dtype}</td>
-                        </tr>
+                        <Fragment key={l.key}>
+                          <tr className="border-t border-[#1c222b]">
+                            <td className="break-all py-0.5 pr-2">{l.path.split("/").slice(-2).join("/")}{!l.readable && <span className="ml-1 text-[#d9c98a]">({l.why_not ?? "not readable"})</span>}</td>
+                            <td className="py-0.5 pr-2">{l.shape.join("×")}</td>
+                            <td className="py-0.5">{l.dtype}</td>
+                          </tr>
+                          <tr>
+                            <td colSpan={3} className="pb-1 font-sans">
+                              <ExplainLine role={l.role} whatItIs={l.what_it_is} compact />
+                            </td>
+                          </tr>
+                        </Fragment>
                       ))}
                     </tbody>
                   </table>
