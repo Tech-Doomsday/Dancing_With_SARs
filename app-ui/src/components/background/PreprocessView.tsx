@@ -15,7 +15,7 @@ import type { BundleListItem, PreprocessingResponse, RunSummary, TraceArrayMeta 
 
 type Selection = { kind: "run"; id: string; label: string } | { kind: "bundle"; id: string; label: string } | null;
 
-export default function PreprocessView() {
+export default function PreprocessView({ initialRun, initialBundle }: { initialRun?: string; initialBundle?: string } = {}) {
   const gateFail = useGateFail();
   const retryNonce = useGateRetryNonce();
   const [runs, setRuns] = useState<RunSummary[]>([]);
@@ -50,6 +50,15 @@ export default function PreprocessView() {
         setLoading(false);
       });
   }, [gateFail]);
+  // deep link (?run= / ?bundle=): load that selection once on open
+  const bootedRef = useRef(false);
+  useEffect(() => {
+    if (bootedRef.current) return;
+    bootedRef.current = true;
+    if (initialRun) load({ kind: "run", id: initialRun, label: initialRun });
+    else if (initialBundle) load({ kind: "bundle", id: initialBundle, label: initialBundle });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
   // a saved token re-triggers the last load (the gate prompt's retry)
   useEffect(() => {
     if (retryNonce > 0) load(sel);

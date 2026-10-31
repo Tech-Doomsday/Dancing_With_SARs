@@ -21,7 +21,7 @@ Both still run after `require_token` and share the `_BG_HITS` rate limit (60/min
 
 Endpoints (all read-only; the first four run on the shared single worker pool, the last four do not):
   GET /api/background/granule?id=                       decoded fields + layer inventory + group
-  GET /api/background/preview?id=&layer=&box&max_px&cmap[&format=json]   PNG (+ X-Img-Meta) or meta JSON
+  GET /api/background/preview?id=&layer=&box&max_px&cmap(auto|…)&scale(auto|db|linear)[&format=json]   PNG (+ X-Img-Meta) or meta JSON
   GET /api/background/probe?id=&layer=&lon=&lat=        value at a point
   GET /api/background/stack-pair?id=                    the GCOV granules at a GUNW's two ends
   GET /api/background/runs/{id}/preprocessing[?bundle_id=]   §5 chain trace / bundle records
@@ -177,10 +177,17 @@ def background_preview(id: str = Query(..., min_length=1, max_length=400),
                        layer: str = Query(..., min_length=1, max_length=300),
                        west: float = Query(...), south: float = Query(...),
                        east: float = Query(...), north: float = Query(...),
-                       max_px: int = Query(256), cmap: str = Query("viridis"),
+                       max_px: int = Query(256), cmap: str = Query("auto"),
+                       scale: str = Query("auto"),
                        fmt: str | None = Query(None, alias="format"),
                        authorization: str | None = Header(default=None)):
     require_token(authorization)
+    if scale not in bg._SCALE_CHOICES:
+        raise HTTPException(status_code=400, detail={
+            "ok": False, "error": f"scale {scale!r} not in {'|'.join(bg._SCALE_CHOICES)}"})
+    if cmap not in bg._CMAP_CHOICES:
+        raise HTTPException(status_code=400, detail={
+            "ok": False, "error": f"cmap {cmap!r} not in {'|'.join(bg._CMAP_CHOICES)}"})
     for name, v, lo, hi in (("west", west, -180.0, 180.0), ("east", east, -180.0, 180.0),
                             ("south", south, -90.0, 90.0), ("north", north, -90.0, 90.0)):
         if not (lo <= v <= hi):
@@ -195,7 +202,7 @@ def background_preview(id: str = Query(..., min_length=1, max_length=400),
         raise HTTPException(status_code=400, detail={
             "ok": False, "error": f"south {south} must be below north {north}"})
     out = _run_bg(_preview_worker, id=id, layer=layer, bbox=(west, south, east, north),
-                  max_px=max_px, cmap=cmap, preview_window=True)
+                  max_px=max_px, cmap=cmap, scale=scale, preview_window=True)
     if fmt == "json":
         return {"ok": True, "meta": out["meta"]}
     import json as _json
@@ -204,10 +211,10 @@ def background_preview(id: str = Query(..., min_length=1, max_length=400),
                              "Cache-Control": "private, max-age=300"})
 
 
-def _preview_worker(*, id: str, layer: str, bbox: tuple, max_px: int, cmap: str):
+def _preview_worker(*, id: str, layer: str, bbox: tuple, max_px: int, cmap: str, scale: str = "auto"):
     source = _default_source()
     try:
-        return bg.preview(source, gid=id, layer=layer, bbox=bbox, max_px=max_px, cmap=cmap)
+        return bg.preview(source, gid=id, layer=layer, bbox=bbox, max_px=max_px, cmap=cmap, scale=scale)
     finally:
         source.close()
 

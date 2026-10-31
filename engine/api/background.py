@@ -248,24 +248,39 @@ def granule_detail(source, gid: str) -> dict:
 _PREVIEW_LOCK = threading.Lock()      # one preview at a time (the fetch can move hundreds of MB)
 
 
-def _cache_paths(gid: str, layer: str, bbox, max_px: int, cmap: str):
+def _cache_paths(gid: str, layer: str, bbox, max_px: int, cmap: str, scale: str = "auto", render_version: int = 0):
+    """Cache key = what was ASKED (cmap/scale as requested) + the render version, so changing either
+    parameter makes a new entry and bumping render_version in config/preview.yaml retires old ones."""
     from engine.common.config import data_root
     key = hashlib.sha256("|".join([gid, layer,
                                    ",".join(f"{v:.6f}" for v in bbox),
-                                   str(max_px), cmap]).encode()).hexdigest()[:32]
+                                   str(max_px), cmap, scale, f"v{render_version}"]).encode()).hexdigest()[:32]
     root = Path(data_root()) / "background" / "previews"
     return root / f"{key}.png", root / f"{key}.json"
 
 
-def preview(source, *, gid: str, layer: str, bbox: tuple, max_px: int, cmap: str,
-            use_cache: bool = True) -> dict:
+_CMAP_CHOICES = ("auto", "viridis", "diverging", "magma", "gray", "categorical")
+_SCALE_CHOICES = ("auto", "db", "linear")
+
+
+def preview(source, *, gid: str, layer: str, bbox: tuple, max_px: int, cmap: str = "auto",
+            scale: str = "auto", use_cache: bool = True, cfg=None) -> dict:
     """-> {png: bytes, meta: {...}}. The meta is the engine's own statement about the array:
-    shape/dtype/epsg/box/min-max/percentiles/nan fraction/wire bytes/cache hit. All-NaN clips
-    answer 422 with a clear message instead of a blank image."""
-    if cmap not in ("viridis", "diverging", "magma", "gray", "categorical"):
-        raise BackgroundError(400, f"cmap {cmap!r} not in viridis|diverging|magma|gray|categorical")
+    shape/dtype/epsg/box/min-max/percentiles/nan fraction/wire bytes/cache hit, the scale and colour
+    map actually used (+ what was requested), the unit (null = unknown), and the image's corner
+    coordinates (corners_lonlat, null + corners_note when they cannot be stated honestly).
+    All-NaN clips answer 422 with a clear message instead of a blank image."""
+    if cmap not in _CMAP_CHOICES:
+        raise BackgroundError(400, f"cmap {cmap!r} not in {'|'.join(_CMAP_CHOICES)}")
+    if scale not in _SCALE_CHOICES:
+        raise BackgroundError(400, f"scale {scale!r} not in {'|'.join(_SCALE_CHOICES)}")
+    from .preview_cfg import PreviewConfigError, load_preview_config
+    try:
+        cfg = cfg or load_preview_config()
+    except PreviewConfigError as err:
+        raise BackgroundError(500, str(err))
     max_px = max(16, min(int(max_px or 256), _LAYER_CAP))
-    png_path, json_path = _cache_paths(gid, layer, bbox, max_px, cmap)
+    png_path, json_path = _cache_paths(gid, layer, bbox, max_px, cmap, scale, cfg.render_version)
     if use_cache and json_path.exists() and png_path.exists():
         try:
             meta = json.loads(json_path.read_text())
@@ -278,26 +293,42 @@ def preview(source, *, gid: str, layer: str, bbox: tuple, max_px: int, cmap: str
                                    "(single concurrent preview by design)")
     try:
         import numpy as np
+        from engine.common.grids import edge_corners_lonlat
+        from engine.common.layers import parse_layer_key
         ref, _dec = find_granule(source, gid)
         clip, grid, arr, fr = _clip_of(source, ref, bbox, layer)
         from . import background_img as bimg
+        info = parse_layer_key(layer).info
+        kind = info.kind if info else None
+        use_scale = cfg.resolve_scale(scale, kind)
+        use_cmap = cfg.resolve_cmap(cmap, kind)
         view = bimg.finite_view(arr)
+        if use_scale == "db":
+            view = bimg.to_db(view)
         note = bimg.slice_note(arr)
         finite = view[np.isfinite(view)]
         if finite.size == 0:
             raise BackgroundError(422, "no valid pixels in this clip — every sampled value of "
-                                       f"layer {layer!r} is NaN / no-data here")
+                                       f"layer {layer!r} is NaN / no-data here"
+                                       + (" (values <= 0 have no dB value)" if use_scale == "db" else ""))
         shown, stride = bimg.decimate(view, max_px)
-        if cmap == "categorical":
+        if use_cmap == "categorical":
             lo = hi = 0.0
         else:
-            lo, hi = bimg.auto_range(shown, symmetric=(cmap == "diverging"))
-        body = bimg.render(shown, cmap, lo, hi)
+            lo, hi = bimg.auto_range(shown, symmetric=(use_cmap == "diverging"))
+        body = bimg.render(shown, use_cmap, lo, hi)
+        corners, corners_note = (None, "no grid axes for this layer")
+        if grid is not None and getattr(grid, "x", None) is not None and getattr(grid, "y", None) is not None:
+            corners, corners_note = edge_corners_lonlat(grid.x, grid.y, int(grid.epsg))
         meta = {
-            "id": gid, "layer": layer, "cmap": cmap, "lo": lo, "hi": hi,
+            "id": gid, "layer": layer, "cmap": use_cmap, "cmap_requested": cmap,
+            "scale": use_scale, "scale_requested": scale, "unit": cfg.unit(use_scale),
+            "render_version": cfg.render_version, "lo": lo, "hi": hi,
+            "nan_fraction": float(1.0 - np.isfinite(view).mean()),
             "shown_stride": int(stride), "shown_shape": [int(shown.shape[0]), int(shown.shape[1])],
             "epsg": int(grid.epsg) if grid is not None else None,
             "clip_bbox_lonlat": _extent_lonlat(grid, grid.epsg) if grid is not None else None,
+            "corners_lonlat": corners, "corners_note": corners_note,
             "requested_bbox": [float(v) for v in bbox],
             "slice_note": note,
             "stats": bimg.stats(arr),

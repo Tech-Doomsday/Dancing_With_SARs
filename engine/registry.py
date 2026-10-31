@@ -274,6 +274,25 @@ class Registry:
                 return m
         raise KeyError(name)
 
+    def is_modelled(self, name: str) -> bool:
+        """True when the pipeline's verdict module defines run() — the SAME entry-point test the workers
+        use (ENTRY_FUNC), so a count built on it can never disagree with what a run would report
+        (a folder without run() ends as NOT_MODELLED). Import problems count as not modelled."""
+        for p in self.sys_path:
+            if p not in sys.path:
+                sys.path.insert(0, p)
+        try:
+            mod = importlib.import_module(self.module_for(name))
+        except Exception:
+            return False
+        return callable(getattr(mod, ENTRY_FUNC, None))
+
+    def counts(self) -> dict:
+        """Live, never stored: declared = manifests found on disk (the _template folder is not one),
+        modelled = those that define run(). The numbers the UI shows; nothing hard-codes them."""
+        modelled = [m.name for m in self.manifests if self.is_modelled(m.name)]
+        return {"declared": len(self.manifests), "modelled": len(modelled), "modelled_names": modelled}
+
     def describe(self) -> list:
         """What GET /pipelines needs: one plain dict per manifest."""
         return [{"name": m.name, "code": m.code, "sensor": m.sensor, "applies": m.applies, "uses_codes": list(m.uses_codes),

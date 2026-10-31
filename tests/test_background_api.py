@@ -760,3 +760,30 @@ def test_rate_limiter_is_atomic_under_concurrency():
     assert sum(r is None for r in results) == 12
     assert len(hits) == 12
     assert all(isinstance(r, int) and r >= 1 for r in results if r is not None)
+
+
+# --------------------------------------------------------------------------- scale / cmap=auto (route level)
+# NOTE: written without a FastAPI environment — not executed in the session that added them.
+def test_preview_invalid_scale_and_cmap_are_400_listing_allowed_values(client):
+    c, _tmp, _b = client
+    layer = "science__LSAR__GCOV__grids__frequencyA__HHHH"
+    base = (f"/api/background/preview?id={GCOV_A}&layer={layer}"
+            f"&west={WEST}&south={SOUTH}&east={EAST}&north={NORTH}&max_px=32")
+    r = c.get(base + "&scale=log", headers=_auth())
+    assert r.status_code == 400 and "auto|db|linear" in r.json()["detail"]["error"]
+    r = c.get(base + "&cmap=jet", headers=_auth())
+    assert r.status_code == 400 and "auto" in r.json()["detail"]["error"]
+
+
+def test_preview_defaults_are_auto_and_meta_reports_what_was_used(client):
+    import json
+    c, _tmp, _b = client
+    layer = "science__LSAR__GCOV__grids__frequencyA__HHHH"
+    r = c.get(f"/api/background/preview?id={GCOV_A}&layer={layer}"
+              f"&west={WEST}&south={SOUTH}&east={EAST}&north={NORTH}&max_px=32", headers=_auth())
+    assert r.status_code == 200, r.text
+    assert len(r.headers["X-Img-Meta"]) < 4096
+    m = json.loads(r.headers["X-Img-Meta"])
+    assert m["cmap_requested"] == "auto" and m["scale_requested"] == "auto"
+    assert m["scale"] == "db" and m["unit"] == "dB" and m["cmap"] == "gray"
+    assert "corners_lonlat" in m and "nan_fraction" in m

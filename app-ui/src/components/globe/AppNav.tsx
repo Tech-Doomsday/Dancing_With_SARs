@@ -72,14 +72,18 @@ export default function AppNav({ active, dark = false }: { active: AppNavItem | 
   );
 }
 
-/** Background sub-nav (§1): Data retrieval · Preprocessing · Pipelines — rendered by the
- *  background layout so the three gated sections stay one click apart. */
-export function BackgroundSubNav({ active }: { active: "retrieval" | "preprocessing" | "pipelines" }) {
+/** Background sub-nav (§1): Overview · Data retrieval · Preprocessing · Pipelines · Health —
+ *  rendered by the background layout so the gated sections stay one click apart. */
+export type BackgroundSection = "overview" | "retrieval" | "preprocessing" | "pipelines" | "health";
+
+export function BackgroundSubNav({ active }: { active: BackgroundSection }) {
   const hrefs = useContextHrefs();
-  const items = [
-    { key: "retrieval" as const, href: hrefs.background, label: "Data retrieval" },
-    { key: "preprocessing" as const, href: "/background/preprocessing", label: "Preprocessing" },
-    { key: "pipelines" as const, href: "/background/pipelines", label: "Pipelines" },
+  const items: { key: BackgroundSection; href: string; label: string }[] = [
+    { key: "overview", href: "/background/overview", label: "Overview" },
+    { key: "retrieval", href: hrefs.background, label: "Data retrieval" },
+    { key: "preprocessing", href: "/background/preprocessing", label: "Preprocessing" },
+    { key: "pipelines", href: "/background/pipelines", label: "Pipelines" },
+    { key: "health", href: "/background/health", label: "Health" },
   ];
   return (
     <nav aria-label="Background sections" className="flex items-center gap-2 text-xs">

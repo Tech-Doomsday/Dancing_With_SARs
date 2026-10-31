@@ -74,6 +74,16 @@ def slice_note(a: np.ndarray) -> str | None:
     return None
 
 
+def to_db(a: np.ndarray) -> np.ndarray:
+    """10*log10(a) for display. Values <= 0 and non-finite values become NaN (no-data, alpha 0):
+    a log of zero or a negative is not a number and is never painted as one."""
+    a = np.asarray(a, np.float64)
+    out = np.full(a.shape, np.nan, np.float32)
+    ok = np.isfinite(a) & (a > 0)
+    out[ok] = (10.0 * np.log10(a[ok])).astype(np.float32)
+    return out
+
+
 def decimate(a: np.ndarray, max_px: int) -> tuple:
     """Stride decimation (exact pixels, no resampling). -> (array, stride)."""
     step = max(1, int(np.ceil(max(a.shape) / max(1, int(max_px)))))
@@ -126,4 +136,4 @@ def render(a: np.ndarray, cmap: str, lo: float, hi: float) -> bytes:
     return png(out)
 
 
-__all__ = ["CMAPS", "auto_range", "decimate", "finite_view", "png", "render", "slice_note", "stats"]
+__all__ = ["CMAPS", "auto_range", "decimate", "finite_view", "png", "to_db", "render", "slice_note", "stats"]

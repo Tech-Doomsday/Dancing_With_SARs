@@ -22,9 +22,9 @@ test("legacy /workbench redirects to /background/pipelines", async ({ page }) =>
   await expect(page).toHaveURL(/\/background\/pipelines/);
 });
 
-test("/background redirects to /background/retrieval", async ({ page }) => {
+test("/background redirects to /background/overview", async ({ page }) => {
   await page.goto("/background");
-  await expect(page).toHaveURL(/\/background\/retrieval/);
+  await expect(page).toHaveURL(/\/background\/overview/);
 });
 
 test("the plain Landing stays at / (no legacy query, no redirect)", async ({ page }) => {

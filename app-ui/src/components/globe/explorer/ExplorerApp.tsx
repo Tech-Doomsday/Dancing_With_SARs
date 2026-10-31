@@ -22,6 +22,7 @@ import {
   type ExplorerFilters,
 } from "@/lib/explorer";
 import { parseExplorerState, writeExplorerState, type ExplorerUrlState } from "@/lib/urlstate";
+import { createUrlWriter, RETRIEVAL_PATH_PREFIX, type UrlWriter } from "@/lib/urlSync";
 import { fmtUtc } from "@/lib/format";
 import { loadQueryContext, saveQueryContext, toDateOnly } from "@/lib/queryContext";
 import AppNav from "../AppNav";
@@ -152,13 +153,27 @@ export default function ExplorerApp() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // ---- URL write-back (validated; a pasted link restores the same view) ------------------------
+  // ---- URL write-back (validated; a pasted link restores the same view). Never navigates and
+  // never fires after the user left /background/retrieval (see lib/urlSync). -----------------------
+  const urlWriter = useRef<UrlWriter<ExplorerUrlState> | null>(null);
+  useEffect(() => {
+    const w = createUrlWriter<ExplorerUrlState>({
+      pathPrefix: RETRIEVAL_PATH_PREFIX,
+      build: (current, patch) => {
+        writeExplorerState(current, { ...parseExplorerState(current), ...patch });
+        return current;
+      },
+    });
+    urlWriter.current = w;
+    return () => {
+      w.dispose();
+      if (urlWriter.current === w) urlWriter.current = null;
+      abortRef.current?.abort();        // a search still in flight must not set state after unmount
+    };
+  }, []);
   const pushUrl = useCallback((patch: Partial<ExplorerUrlState>) => {
-    const params = new URLSearchParams(window.location.search);
-    const st = parseExplorerState(params);
-    writeExplorerState(params, { ...st, ...patch });
-    router.replace(`/background/retrieval?${params.toString()}`, { scroll: false });
-  }, [router]);
+    urlWriter.current?.schedule(patch);
+  }, []);
 
   // ---- the search. The Search button runs it with the form values; a pasted link with a full
   // box re-runs it once on boot (restoring the same view — the ONLY automatic search). ----

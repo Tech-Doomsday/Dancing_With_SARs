@@ -17,7 +17,8 @@ import { useGateFail, useGateRetryNonce } from "./BackgroundGate";
 import { zoomBox } from "@/lib/groups";
 import type { BackgroundGroup, ExplorerGranule, StackPairResponse } from "@/lib/types";
 
-const CMAPS = ["viridis", "gray", "magma"] as const;
+const CMAPS = ["auto", "viridis", "gray", "magma", "diverging"] as const;
+const SCALES = [["auto", "auto"], ["db", "dB"], ["linear", "linear"]] as const;
 
 type EndState =
   | { s: "loading" }
@@ -36,7 +37,8 @@ export default function CompareView({ group, initialEnd, box, onClose }: {
   // own box (the toggle restores the shared box on both sides).
   const [views, setViews] = useState<{ L: [number, number, number, number]; R: [number, number, number, number] }>({ L: box, R: box });
   const [synced, setSynced] = useState(true);
-  const [cmap, setCmap] = useState<string>("viridis");
+  const [cmap, setCmap] = useState<string>("auto");
+  const [scale, setScale] = useState<string>("auto");
   const [swapped, setSwapped] = useState(initialEnd === "sec");
   const [pair, setPair] = useState<StackPairResponse | null>(null);
   const [pairError, setPairError] = useState<string | null>(null);
@@ -160,6 +162,7 @@ export default function CompareView({ group, initialEnd, box, onClose }: {
           box={paneBox}
           maxPx={maxPx}
           cmap={cmap}
+          scale={scale}
           synced={synced}
           onZoom={(fx, fy, f) => onZoom(paneKey, fx, fy, f)}
           onPan={(dx, dy) => onPan(paneKey, dx, dy)}
@@ -213,6 +216,17 @@ export default function CompareView({ group, initialEnd, box, onClose }: {
             aria-label="colour map for both panes"
           >
             {CMAPS.map((c) => <option key={c} value={c}>{c}</option>)}
+          </select>
+        </label>
+        <label className="flex items-center gap-1 text-[10px] text-[#8b949e]">
+          scale
+          <select
+            value={scale}
+            onChange={(ev) => setScale(ev.target.value)}
+            className="rounded border border-[#333b47] bg-[#0e1116] px-1 py-0.5 font-mono text-[10px] text-[#e6eaee]"
+            aria-label="value scale for both panes"
+          >
+            {SCALES.map(([v, l]) => <option key={v} value={v}>{l}</option>)}
           </select>
         </label>
         <button

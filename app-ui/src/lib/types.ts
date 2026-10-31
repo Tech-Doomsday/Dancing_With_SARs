@@ -368,6 +368,17 @@ export interface PreviewMeta {
   id: string;
   layer: string;
   cmap: string;
+  /** what was asked for ("auto" is resolved by the engine; `cmap` is what was used) */
+  cmap_requested?: string;
+  scale?: string;
+  scale_requested?: string;
+  /** null = unknown: show a dash, never "null" */
+  unit?: string | null;
+  render_version?: number;
+  nan_fraction?: number;
+  /** image corners [TL, TR, BR, BL] as [lon, lat], from the engine; null + corners_note = not drawable */
+  corners_lonlat?: [[number, number], [number, number], [number, number], [number, number]] | null;
+  corners_note?: string | null;
   lo: number;
   hi: number;
   shown_stride: number;

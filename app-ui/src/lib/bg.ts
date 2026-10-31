@@ -25,13 +25,13 @@ export const bg = {
   /** The PNG itself: fetched as a blob (Authorization header, never a URL token). */
   previewBlob: async (
     p: { id: string; layer: string; west: number; south: number; east: number; north: number;
-         maxPx?: number; cmap?: string; format?: "json" },
+         maxPx?: number; cmap?: string; scale?: string; format?: "json" },
     signal?: AbortSignal,
   ): Promise<{ blob: Blob | null; meta: PreviewMeta }> => {
     const q = new URLSearchParams({
       id: p.id, layer: p.layer,
       west: String(p.west), south: String(p.south), east: String(p.east), north: String(p.north),
-      max_px: String(p.maxPx ?? 256), cmap: p.cmap ?? "viridis",
+      max_px: String(p.maxPx ?? 256), cmap: p.cmap ?? "auto", scale: p.scale ?? "auto",
     });
     if (p.format) q.set("format", p.format);
     const { bgFetch } = await import("./bgApi");

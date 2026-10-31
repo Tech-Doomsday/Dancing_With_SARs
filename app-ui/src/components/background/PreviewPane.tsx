@@ -17,12 +17,13 @@ export type PaneState =
   | { s: "empty"; text: string }          // no acquisition at this date
   | { s: "error"; text: string };         // preview unavailable: <engine error text>
 
-export default function PreviewPane({ granule, layer, box, maxPx, cmap, synced, onZoom, onPan, title, onProbeMoved, emptyText }: {
+export default function PreviewPane({ granule, layer, box, maxPx, cmap, scale = "auto", synced, onZoom, onPan, title, onProbeMoved, emptyText }: {
   granule: ExplorerGranule | null;
   layer: string | null;
   box: [number, number, number, number];
   maxPx: number;
   cmap: string;
+  scale?: string;
   synced: boolean;
   onZoom: (focusX: number, focusY: number, factor: number) => void;
   onPan?: (dxFrac: number, dyFrac: number) => void;
@@ -40,7 +41,7 @@ export default function PreviewPane({ granule, layer, box, maxPx, cmap, synced, 
   const abortRef = useRef<AbortController | null>(null);
   const urlRef = useRef<string | null>(null);
 
-  const key = `${granule?.id ?? "-"}|${layer ?? "-"}|${box.map((v) => v.toFixed(4)).join(",")}|${maxPx}|${cmap}`;
+  const key = `${granule?.id ?? "-"}|${layer ?? "-"}|${box.map((v) => v.toFixed(4)).join(",")}|${maxPx}|${cmap}|${scale}`;
 
   useEffect(() => {
     if (!granule || !layer) {
@@ -52,7 +53,7 @@ export default function PreviewPane({ granule, layer, box, maxPx, cmap, synced, 
     abortRef.current = ctrl;
     setState({ s: "loading" });
     setProbe(null);
-    bg.previewBlob({ id: granule.id, layer, west: box[0], south: box[1], east: box[2], north: box[3], maxPx, cmap }, ctrl.signal)
+    bg.previewBlob({ id: granule.id, layer, west: box[0], south: box[1], east: box[2], north: box[3], maxPx, cmap, scale }, ctrl.signal)
       .then(({ blob, meta }) => {
         if (ctrl.signal.aborted) return;
         if (urlRef.current) URL.revokeObjectURL(urlRef.current);
@@ -175,7 +176,9 @@ export default function PreviewPane({ granule, layer, box, maxPx, cmap, synced, 
       <figcaption className="border-t border-[#262c36] px-2 py-1 text-[10px] leading-relaxed text-[#8b949e]">
         {meta ? (
           <>
-            cmap <span className="font-mono text-[#cfd6dc]">{meta.cmap}</span> · range{" "}
+            cmap <span className="font-mono text-[#cfd6dc]">{meta.cmap}</span> · scale{" "}
+            <span className="font-mono text-[#cfd6dc]">{meta.scale ?? "—"}</span> · unit{" "}
+            <span className="font-mono text-[#cfd6dc]">{meta.unit ?? "—"}</span> · range{" "}
             <span className="font-mono text-[#cfd6dc]">{fmtNum(meta.lo)} … {fmtNum(meta.hi)}</span> ·
             shape {meta.stats.shape[1]}×{meta.stats.shape[0]} {meta.stats.dtype} · NaN{" "}
             {(meta.stats.nan_fraction * 100).toFixed(1)}%

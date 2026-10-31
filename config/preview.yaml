@@ -1,0 +1,25 @@
+# How GET /api/background/preview turns a layer into a picture. Display encoding only — the
+# engine computes, the UI shows. Override the file with NISAR_PREVIEW_CONFIG, or the folder with
+# NISAR_CONFIG_DIR. Bump render_version whenever rendering changes: it invalidates cached previews.
+render_version: 2
+
+# scale=auto picks one of: db (10*log10, non-positive and non-finite values become no-data) | linear.
+# Keys are layer kinds from engine/common/layers.py (phase, coherence, cc, mask, power, float, angle, count).
+scale_by_kind:
+  power: db
+
+# cmap=auto picks a concrete colour map by layer kind; unknown kinds use default_cmap.
+cmap_by_kind:
+  power: gray
+  phase: diverging
+  coherence: viridis
+  cc: categorical
+  mask: categorical
+  count: viridis
+  angle: viridis
+  float: viridis
+default_cmap: viridis
+
+# unit shown for a rendered scale (null = unknown: the UI shows a dash)
+unit_by_scale:
+  db: dB

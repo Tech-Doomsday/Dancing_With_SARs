@@ -8,7 +8,7 @@
 import { boxFromCenter } from "@/lib/boxFromCenter";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import dynamic from "next/dynamic";
-import { useRouter, useSearchParams } from "next/navigation";
+import { useSearchParams } from "next/navigation";
 import { X } from "lucide-react";
 import { api, pollWhile } from "@/lib/api";
 import { useEngineUrl } from "@/lib/engineUrl";
@@ -17,6 +17,7 @@ import { colorize, validateLayerPayload, decodeLayer } from "@/lib/raster";
 import { parseCoordinates } from "@/lib/geo-input";
 import { mostNotableTier, TIER_PIN_COLORS } from "@/lib/status";
 import { parseUrlState, writeUrlState, type PanelMode, type UrlState } from "@/lib/urlstate";
+import { createUrlWriter, MAP_PATH_PREFIX, type UrlWriter } from "@/lib/urlSync";
 import { engineJson } from "@/lib/engineFetch";
 import { loadCamera } from "@/lib/camera";
 import { clearQueryContext, saveQueryContext } from "@/lib/queryContext";
@@ -49,7 +50,6 @@ interface LayerCacheEntry {
 
 export default function GlobeApp() {
   const engineUrl = useEngineUrl();
-  const router = useRouter();
   const searchParams = useSearchParams();
 
   // ---- engine + cache state ---------------------------------------------------------------
@@ -210,18 +210,25 @@ export default function GlobeApp() {
     return () => clearInterval(id);
   }, [refreshLists]);
 
-  // ---- URL state write-back (debounced; not during map motion) -------------------------------
-  const urlTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // ---- URL state write-back (debounced; never navigates, never fires after the user left /map) ----
+  const urlWriter = useRef<UrlWriter<UrlState> | null>(null);
+  useEffect(() => {
+    const w = createUrlWriter<UrlState>({
+      pathPrefix: MAP_PATH_PREFIX,
+      build: (current, patch) => {
+        writeUrlState(current, { ...parseUrlState(current), ...patch });
+        return current;
+      },
+    });
+    urlWriter.current = w;
+    return () => {
+      w.dispose();
+      if (urlWriter.current === w) urlWriter.current = null;
+    };
+  }, []);
   const pushUrl = useCallback((patch: Partial<UrlState>) => {
-    if (urlTimer.current) clearTimeout(urlTimer.current);
-    urlTimer.current = setTimeout(() => {
-      const st = parseUrlState(new URLSearchParams(window.location.search));
-      const next = { ...st, ...patch };
-      const params = new URLSearchParams(window.location.search);
-      writeUrlState(params, next);
-      router.replace(`/map?${params.toString()}`, { scroll: false });
-    }, 350);
-  }, [router]);
+    urlWriter.current?.schedule(patch);
+  }, []);
 
   // ---- pin -> tile-at (debounced ~300ms, AbortController, out-of-order ignored) ---------------
   useEffect(() => {

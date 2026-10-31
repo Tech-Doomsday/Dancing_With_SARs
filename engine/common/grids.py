@@ -284,3 +284,44 @@ def mosaic_first_valid(parts: list, *, fill=np.nan) -> np.ndarray:
         bad = ~np.isfinite(out) if out.dtype.kind == "f" else (out == fill)
         out = np.where(bad, p, out)
     return out
+
+
+# ---------------------------------------------------------------------------------------------
+# pixel-edge geometry for map overlays (engine computes; the UI only places the image)
+# ---------------------------------------------------------------------------------------------
+def axis_edges(centres: np.ndarray) -> np.ndarray:
+    """n pixel-centre coordinates (ascending or descending, evenly spaced) -> n+1 pixel EDGES.
+    The first/last edge sit exactly half a pixel beyond the outer centres."""
+    c = np.asarray(centres, dtype=np.float64)
+    if c.ndim != 1 or c.size < 2:
+        raise ValueError("need at least two pixel centres to know the pixel size")
+    step = float(np.median(np.diff(c)))
+    if step == 0 or not np.isfinite(step):
+        raise ValueError("pixel centres are not distinct")
+    return np.concatenate([c - step / 2, [c[-1] + step / 2]])
+
+
+def edge_corners_lonlat(x: np.ndarray, y: np.ndarray, epsg: int) -> tuple:
+    """-> (corners, note). corners = [[lon, lat] x4] in the order TL, TR, BR, BL of the IMAGE
+    (row 0 = north) taken from the outer pixel EDGES, so a picture of the array lands pixel-exact.
+    The quad is NOT axis-aligned in lon/lat (a UTM grid is rotated against the graticule).
+    A box that straddles the antimeridian, or one that cannot be projected, answers
+    (None, honest reason) instead of a guess."""
+    try:
+        ex, ey = axis_edges(x), axis_edges(y)
+    except ValueError as err:
+        return None, f"no corners: {err}"
+    west, east = float(min(ex[0], ex[-1])), float(max(ex[0], ex[-1]))
+    north, south = float(max(ey[0], ey[-1])), float(min(ey[0], ey[-1]))
+    from ._geo import transform_xy
+    try:
+        lon, lat = transform_xy(np.array([west, east, east, west]), np.array([north, north, south, south]),
+                                f"EPSG:{int(epsg)}", "EPSG:4326")
+    except Exception as err:                         # unsupported CRS etc.: say so
+        return None, f"no corners: {type(err).__name__}: {err}"
+    lon, lat = np.asarray(lon, float), np.asarray(lat, float)
+    if not (np.isfinite(lon).all() and np.isfinite(lat).all()):
+        return None, "no corners: projection returned non-finite coordinates"
+    if float(lon.max() - lon.min()) > 180.0:
+        return None, "no corners: the clip straddles the antimeridian (±180°); the image is not drawn"
+    return [[float(a), float(b)] for a, b in zip(lon, lat)], None

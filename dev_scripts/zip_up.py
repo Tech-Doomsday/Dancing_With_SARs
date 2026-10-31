@@ -4,7 +4,7 @@
     python dev_scripts/zip_up.py retrieval          # also: ret, retr, retirivel, "1" ...
     python dev_scripts/zip_up.py preprocessing      # also: processing, pro, pross, pre, common, "2" ...
     python dev_scripts/zip_up.py earthquake         # a single pipeline: name, keyword, or number (3.01)
-    python dev_scripts/zip_up.py pipelines          # stage 3 as a whole (all 16)
+    python dev_scripts/zip_up.py pipelines          # stage 3 as a whole (every pipeline folder)
     python dev_scripts/zip_up.py --list             # every target + accepted aliases
 
 What goes in the zip (each file appears once, under its strongest role):
@@ -45,6 +45,11 @@ IGNORE_DIRS = {
 }
 IGNORE_SUFFIXES = {".pyc", ".pyo", ".db", ".sqlite", ".sqlite3", ".log"}
 IGNORE_NAMES = {".DS_Store", "Thumbs.db"}
+
+
+def is_secret_env_file(name: str) -> bool:
+    """.env and .env.* carry NISAR_BACKGROUND_TOKEN / Earthdata credentials: never zipped (.env.example is fine)."""
+    return (name == ".env" or name.startswith(".env.")) and name != ".env.example"
 
 VISION_FILES = ["README.md", "docs/ARCHITECTURE.md", "pyproject.toml", "docs/SARs_full_workflow.html",
                 "SARs_full_workflow.html"]
@@ -110,7 +115,7 @@ def build_targets() -> list[Target]:
         ], ["engine/common"], [
             "config/tiling.yaml", "tests/test_scene_bundle_contract.py",
         ]),
-        Target("pipelines", "3 - ALL PIPELINES (16 + _template)", [
+        Target("pipelines", "3 - ALL PIPELINES (every folder + _template)", [
             "pipelines", "pipeline", "pipes", "allpipelines", "hazards", "hazard", "3",
         ], ["engine/pipelines"], [
             "tests/test_pipeline_independence.py", "tests/test_scene_bundle_contract.py",
@@ -203,7 +208,7 @@ def walk(p: Path):
     if p.is_symlink():
         return
     if p.is_file():
-        if p.name not in IGNORE_NAMES and p.suffix not in IGNORE_SUFFIXES:
+        if p.name not in IGNORE_NAMES and p.suffix not in IGNORE_SUFFIXES and not is_secret_env_file(p.name):
             yield p
         return
     if not p.is_dir():

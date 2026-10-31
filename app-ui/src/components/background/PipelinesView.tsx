@@ -17,10 +17,10 @@ import { useGateFail, useGateRetryNonce } from "./BackgroundGate";
 import type { PipelineInfo, RunSummary } from "@/lib/types";
 import { VerdictCard } from "@/components/VerdictCard";
 
-export default function PipelinesView() {
+export default function PipelinesView({ initialRun }: { initialRun?: string } = {}) {
   const [pipelines, setPipelines] = useState<PipelineInfo[]>([]);
   const [runs, setRuns] = useState<RunSummary[]>([]);
-  const [runId, setRunId] = useState<string>("");
+  const [runId, setRunId] = useState<string>(initialRun ?? "");
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {

@@ -39,7 +39,7 @@ async function post<T>(path: string, body: unknown): Promise<T> {
 export const api = {
   health: () => get<Health>("/api/health"),
   pipelines: () =>
-    get<{ ok: true; pipelines: PipelineInfo[]; implemented_count: number }>("/api/pipelines"),
+    get<{ ok: true; pipelines: PipelineInfo[]; implemented_count: number; declared_count?: number; modelled_count?: number }>("/api/pipelines"),
   bundles: () => get<{ ok: true; bundles: BundleListItem[] }>("/api/bundles"),
   events: (lon: number, lat: number, days = 30) =>
     get<{ ok: true; events: EventItem[]; source: string }>(

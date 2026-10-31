@@ -22,6 +22,14 @@ import zipfile
 from pathlib import Path
 
 
+def is_secret_env_file(rel_path: str) -> bool:
+    """.env and .env.* hold NISAR_BACKGROUND_TOKEN / Earthdata credentials: never zipped (the
+    .env.example templates are the only exception). Explicit, so it holds even when .gitignore
+    does not list the file."""
+    name = rel_path.replace("\\", "/").rsplit("/", 1)[-1]
+    return (name == ".env" or name.startswith(".env.")) and name != ".env.example"
+
+
 def get_included_files(repo_path: Path) -> list[str]:
     """Return every file git would include: tracked + untracked-but-not-ignored."""
     try:
@@ -37,7 +45,7 @@ def get_included_files(repo_path: Path) -> list[str]:
         sys.exit(f"Error running git ls-files: {e.stderr.decode().strip()}")
 
     files = result.stdout.decode("utf-8", errors="replace").split("\0")
-    return [f for f in files if f]  # drop trailing empty entry
+    return [f for f in files if f and not is_secret_env_file(f)]  # drop trailing empty entry + secrets
 
 
 def zip_repo(repo_path: Path, output_zip: Path) -> None:

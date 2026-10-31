@@ -27,3 +27,11 @@ app-ui/playwright-report/
 .env.local
 .env.*.local
 app-ui/.env.local
+
+# secrets: NISAR_BACKGROUND_TOKEN / Earthdata live in .env files; only the *.example templates are shared
+.env
+.env.*
+!.env.example
+app-ui/.env
+app-ui/.env.*
+!app-ui/.env.example
