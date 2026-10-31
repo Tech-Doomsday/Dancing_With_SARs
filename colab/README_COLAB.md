@@ -33,3 +33,12 @@ seconds since the last byte, granule N/M with a rough ETA. Per granule: one line
 ## Local web UI + Colab network
 
 `!python -u .../colab/serve.py` (or the notebook's last cells) prints a tunnel URL. In the local UI, click the engine pill in the nav bar (top-left, next to Landing · Map · Background), paste the URL and press Link — it is health-checked, remembered in the browser, and the page reloads onto it. (Alternative: set `NEXT_PUBLIC_ENGINE_API` in `app-ui/.env.local` and restart `npm run dev`.) Use *Use default* in the same popover to go back to the local engine. The URL is unauthenticated and scans are enabled: keep it private, stop the cell when done.
+
+## Retrievals are stored on the runtime disk (UI-build-3)
+
+Background → Data retrieval → "Plan & download" writes a retrieval (manifest + stored clips) under the engine's data
+directory. On Colab that is the **runtime disk — lost when the session ends**. Use "Download retrieval (zip)" in the
+UI, or run the optional last notebook cell to copy `retrievals/` and `clips/` to Google Drive.
+
+Credentials: `colab/build_colab_zip.py` no longer packs your `.env` by default (use Colab Secrets → `EARTHDATA_TOKEN`,
+or the hidden prompt). `--include-env` restores the old behaviour — then rotate the credentials if the zip leaves your machine.

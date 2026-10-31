@@ -164,10 +164,15 @@ def search_bbox_sync(*, bbox: tuple[float, float, float, float], levels: list[st
     granules: list[dict] = []
     degraded = False
     truncated = False
+    incomplete = False
+    warnings: list = []
     for level in levels:
         refs, deg = retriever.search(list(bbox), t0, t1, product_names[level],
                                      fresh=fresh, max_results=max_results)
         degraded = degraded or bool(deg)
+        if getattr(retriever, "last_search_incomplete", False) is True:     # ASF/CMR served a short page; not cached
+            incomplete = True
+            warnings.extend(str(w)[:300] for w in (getattr(retriever, "last_search_warnings", None) or [])[:2])
         # the budget applies PER search: a level that hit it is truncated; the union of several
         # levels exceeding the budget is not (the retriever's own rule: len(refs) >= budget)
         truncated = truncated or len(refs) >= max_results
@@ -195,6 +200,8 @@ def search_bbox_sync(*, bbox: tuple[float, float, float, float], levels: list[st
         "n_total": len(unique),
         "truncated": truncated,
         "degraded": degraded,
+        "search_incomplete": incomplete,       # ASF/CMR reported an incomplete result: the list may miss granules
+        "search_warnings": warnings,
         "search_budget": int(max_results),
         "generated_at": generated_at.strftime("%Y-%m-%dT%H:%M:%SZ"),
         "granules": unique,
@@ -219,6 +226,16 @@ _SINGLE_PRODUCTS = {"GCOV", "GSLC", "RSLC"}
 # GOFF is a pair product (task §4.1: "GOFF, if present, is treated as a pair"); the decoder's
 # pair layout already covers GUNW/GOFF/RUNW/ROFF/RIFG.
 _FACT_FIELDS = ("range_bandwidth_mhz", "crid", "version", "collection", "polarization")
+
+
+def _hashable(v):
+    """Provider facts can be lists (dual-pol mainBandPolarization is ['HH', 'HV']); make any value
+    comparable in a set WITHOUT changing what is reported."""
+    if isinstance(v, (list, tuple)):
+        return tuple(_hashable(x) for x in v)
+    if isinstance(v, dict):
+        return tuple(sorted((str(k), _hashable(x)) for k, x in v.items()))
+    return v
 
 
 def _epoch_dt(g: dict, field: str):
@@ -294,7 +311,7 @@ def group_acquisitions(granules: list[dict], merge_minutes: float = 10.0,
         rep_start = _epoch_iso(start) if start else None
         key = (f"{first['stack']}|{rep_ref}|{rep_sec}" if is_pair
                else f"{first['stack']}|{rep_start}")
-        differing = [f for f in _FACT_FIELDS if len({m.get(f) for m in members}) > 1]
+        differing = [f for f in _FACT_FIELDS if len({_hashable(m.get(f)) for m in members}) > 1]
         gflags: list[str] = []
         if truncated:
             gflags.append("search truncated — this group may be incomplete")

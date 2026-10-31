@@ -510,3 +510,84 @@ test.describe("normalizeEngineUrl (paste-an-engine-URL box)", () => {
     }
   });
 });
+
+// ---------------------------------------------------------------------------------------------
+// engineFetch.classifyEngineError — every failure kind maps to a message that names what failed
+// and what to do; none is a bare "Failed to fetch". (Inputs are FIXTURES, not engine data.)
+// ---------------------------------------------------------------------------------------------
+import { classifyEngineError, engineErrorText, EngineError } from "../src/lib/engineFetch";
+import { initialCamera, sanitizeCamera, DEFAULT_CAMERA } from "../src/lib/camera";
+
+test.describe("classifyEngineError", () => {
+  const BASE = "https://x.trycloudflare.com";
+  test("unreachable: tunnel down / refused", () => {
+    const e = classifyEngineError({ cause: new TypeError("Failed to fetch"), base: BASE });
+    expect(e).toBeInstanceOf(EngineError);
+    expect(e.kind).toBe("unreachable");
+    expect(e.message).toContain(BASE);
+    expect(e.message).not.toMatch(/failed to fetch/i);
+    expect(e.hint).toMatch(/re-run the colab serve cell/i);
+  });
+  test("timeout: names the limit", () => {
+    const e = classifyEngineError({ timedOut: true, timeoutMs: 25_000, base: BASE });
+    expect(e.kind).toBe("timeout");
+    expect(e.message).toContain("25 s");
+    expect(e.hint).toMatch(/try again/i);
+  });
+  test("busy: a failure while health says a retrieval is running names which one", () => {
+    const busy = { kind: "retrieve", run_id: "run-abc123def456", step: "3/13", started_at: "2026-10-30T10:00:00Z" };
+    const e = classifyEngineError({ cause: new TypeError("Failed to fetch"), timedOut: true, health: { busy } });
+    expect(e.kind).toBe("busy");
+    expect(e.message).toContain("a retrieval");
+    expect(e.message).toContain("run-abc123def456");
+    expect(e.hint).toMatch(/wait/i);
+    expect(e.busy).toEqual(busy);
+  });
+  test("busy:null health does not turn an unreachable engine into busy", () => {
+    expect(classifyEngineError({ cause: new TypeError("x"), health: { busy: null } }).kind).toBe("unreachable");
+  });
+  test("http: the engine's own text is the message, verbatim (all three envelope shapes)", () => {
+    expect(classifyEngineError({ status: 503, body: { detail: { ok: false, error: "no Earthdata credentials" } } }).message)
+      .toBe("no Earthdata credentials");
+    expect(classifyEngineError({ status: 422, body: { detail: "bad lon" } }).message).toBe("bad lon");
+    expect(classifyEngineError({ status: 500, body: { error: "boom" } }).message).toBe("boom");
+    expect(classifyEngineError({ status: 500, body: { error: "boom" } }).hint).toMatch(/colab log/i);
+  });
+  test("http: 429 says to wait; no text falls back to status line", () => {
+    const e = classifyEngineError({ status: 429, statusText: "Too Many Requests", body: {} });
+    expect(e.kind).toBe("http");
+    expect(e.message).toBe("429 Too Many Requests");
+    expect(e.hint).toMatch(/wait a minute/i);
+  });
+  test("http: a tunnel error page (524, HTML body) is called a tunnel problem, not the engine's text", () => {
+    const e = classifyEngineError({ status: 524, statusText: "", body: "<!DOCTYPE html><html>timeout</html>" });
+    expect(e.kind).toBe("http");
+    expect(e.status).toBe(524);
+    expect(e.message).toMatch(/^The tunnel answered 524/);
+    expect(e.message).not.toContain("<html");
+  });
+  test("engineErrorText unwraps the shapes and ignores junk", () => {
+    expect(engineErrorText({ detail: { error: "a" } })).toBe("a");
+    expect(engineErrorText(null)).toBe("");
+    expect(engineErrorText({ detail: [{ msg: "x" }] })).toBe("");
+  });
+});
+
+test.describe("map camera memory", () => {
+  test("a link with point+zoom wins; point without zoom keeps the saved view; default otherwise", () => {
+    const saved = { center: [10, 20] as [number, number], zoom: 5, projection: "mercator" as const };
+    const a = initialCamera({ lat: 23.7, lon: 90.4, z: 7 }, saved);
+    expect(a.source).toBe("url");
+    expect(a.camera.center).toEqual([90.4, 23.7]);
+    expect(a.camera.zoom).toBe(7);
+    expect(initialCamera({ lat: 23.7, lon: 90.4 }, saved).source).toBe("saved");
+    expect(initialCamera({ lat: 23.7, lon: 90.4 }, null).camera.zoom).toBe(10.5);
+    expect(initialCamera({}, null).camera).toBe(DEFAULT_CAMERA);
+  });
+  test("sanitizeCamera rejects corrupt values", () => {
+    expect(sanitizeCamera({ center: [200, 0], zoom: 3 })).toBeNull();
+    expect(sanitizeCamera({ center: [1, 2], zoom: NaN })).toBeNull();
+    expect(sanitizeCamera("x")).toBeNull();
+    expect(sanitizeCamera({ center: [1, 2], zoom: 3 })?.projection).toBe("globe");
+  });
+});

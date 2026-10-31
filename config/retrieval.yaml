@@ -4,6 +4,7 @@
 
 net:
   concurrency: 24            # simultaneous range GETs per process
+  granule_concurrency: 4     # granules fetched at the same time (the rest queue; they finish one by one)
   connect_timeout_s: 20
   stall_timeout_s: 25        # no bytes for this long => attempt counts as failed and is retried
   retries: 5

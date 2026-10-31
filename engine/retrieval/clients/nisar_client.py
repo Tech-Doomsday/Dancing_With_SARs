@@ -86,6 +86,10 @@ def plan_chunks(layer: LayerLayout, ys: slice, xs: slice) -> list[tuple[int, tup
     return [(int(t[c]), c) for c in iproduct(*rngs)]
 
 
+class RetrievalCancelled(Exception):
+    """Raised inside a granule's fetch when the retrieval was cancelled; nothing partial is stored as a clip."""
+
+
 # ------------------------------------------------------------------ client
 class NisarClient:
     def __init__(self, settings: Settings | None = None, auth: EarthdataAuth | None = None):
@@ -107,6 +111,9 @@ class NisarClient:
         self._prog_lock = threading.Lock()
         self.progress = {"product": "", "total": 0, "done": 0, "failed": 0, "skipped": 0, "cached": 0,
                          "started": 0.0, "active": {}, "cum_done": 0, "cum_total": 0, "recent": []}
+        self.cancel_event = threading.Event()   # set by a retrieval's Cancel; checked between chunk batches
+        self.granule_states: dict[str, dict] = {}   # granule_id -> live state (queued/indexing/fetching/stored/...)
+        self._granule_sem: asyncio.Semaphore | None = None
         self._inflight: dict[str, asyncio.Future] = {}
         self._index_inflight: dict[str, asyncio.Future] = {}
         self._fb: OrderedDict = OrderedDict()
@@ -292,13 +299,37 @@ class NisarClient:
         self.blocking.shutdown(wait=False)
 
     # ---------------------------------------------------------------- internals
+    # ---------------------------------------------------------------- per-granule state
+    def _gstate(self, gid: str, **kw) -> None:
+        """Live per-granule state for the retrieval display (read by progress_snapshot)."""
+        with self._prog_lock:
+            st = self.granule_states.setdefault(gid, {"state": "queued", "bytes_planned": 0, "bytes_done": 0,
+                                                      "chunks_planned": 0, "chunks_done": 0, "error": None,
+                                                      "started": None, "seconds": None})
+            st.update(kw)
+
+    def granule_concurrency(self) -> int:
+        try:
+            return max(1, int(self.cfg.net.get("granule_concurrency", 4)))
+        except (TypeError, ValueError):
+            return 4
+
     async def _fetch_many(self, granules, bbox, layers) -> FetchResult:
+        """Granules run through a bounded pool (`net.granule_concurrency`, default 4; the global range
+        request limit in HttpIO is unchanged), so they FINISH one by one — each finished granule is already
+        in the clip store (`_granule_clip_uncached`) when the next one starts. A cancel (`cancel_event`)
+        lets in-flight ranges finish, stops queued granules, and keeps everything already stored."""
         res = FetchResult([], {}, {})
         n = len(granules)
+        sem = asyncio.Semaphore(self.granule_concurrency())
         with self._prog_lock:
             pg = self.progress
             pg.update(total=n, done=0, failed=0, skipped=0, cached=0, started=time.monotonic(), active={})
             pg["cum_total"] += n
+            for g in granules:
+                self.granule_states[g.granule_id] = {
+                    "state": "queued", "product": g.product, "bytes_planned": 0, "bytes_done": 0,
+                    "chunks_planned": 0, "chunks_done": 0, "error": None, "started": None, "seconds": None}
 
         def finish(g, how: str, t_start: float, extra: str = "") -> None:
             with self._prog_lock:
@@ -315,57 +346,91 @@ class NisarClient:
                 pg["recent"] = (pg["recent"] + [{"id": g.granule_id, "how": how, "s": round(time.monotonic() - t_start, 1)}])[-8:]
             _slog.info("granule %d/%d %s in %.1fs: %s%s", done, total, how, time.monotonic() - t_start,
                        g.granule_id, f" ({extra})" if extra else "")
-            self._notify(g.granule_id, how, round(time.monotonic() - t_start, 1), extra)
-
-        # Bounded granule concurrency: at most N granules are active at once (the global range-request
-        # budget still applies underneath), so granules finish one by one and each finished clip is
-        # already in the clip store when the next starts. N: NISAR_GRANULE_CONCURRENCY (default 4).
-        try:
-            n_conc = max(1, int(os.environ.get("NISAR_GRANULE_CONCURRENCY", "4")))
-        except ValueError:
-            n_conc = 4
-        gate = asyncio.Semaphore(n_conc)
 
         async def one(g):
-            async with gate:
-                await _one_inner(g)
-
-        async def _one_inner(g):
-            t_start = time.monotonic()
-            if getattr(self, "cancel_requested", False):
-                res.skipped[g.granule_id] = "cancelled before it started"
-                finish(g, "skipped", t_start, "cancelled")
-                return
-            with self._prog_lock:
-                pg["active"][g.granule_id] = t_start
-            self._notify(g.granule_id, "fetching", 0.0, "")
-            try:
-                clip = await self._granule_clip(g, bbox, layers)
-                if clip is None:
-                    res.skipped[g.granule_id] = "bbox does not overlap this granule's grids"
-                    finish(g, "skipped", t_start, "bbox does not overlap this granule")
-                else:
-                    res.clips.append(clip)
-                    res.degraded |= clip.source.startswith("stale")
-                    finish(g, clip.source, t_start)
-            except Exception as ex:  # reported, never swallowed
-                res.errors[g.granule_id] = f"{type(ex).__name__}: {ex}"
-                logging.getLogger("nisar.client").error("granule %s failed", g.granule_id, exc_info=True)   # keep the traceback
-                finish(g, "failed", t_start, f"{type(ex).__name__}: {ex}"[:160])
+            async with sem:
+                if self.cancel_event.is_set():
+                    res.skipped[g.granule_id] = "cancelled before it started"
+                    self._gstate(g.granule_id, state="cancelled")
+                    with self._prog_lock:
+                        pg["done"] += 1
+                        pg["skipped"] += 1
+                    return
+                t_start = time.monotonic()
+                with self._prog_lock:
+                    pg["active"][g.granule_id] = t_start
+                self._gstate(g.granule_id, state="indexing", started=t_start)
+                try:
+                    clip = await self._granule_clip(g, bbox, layers)
+                    secs = round(time.monotonic() - t_start, 1)
+                    if clip is None:
+                        res.skipped[g.granule_id] = "bbox does not overlap this granule's grids"
+                        self._gstate(g.granule_id, state="skipped", seconds=secs)
+                        finish(g, "skipped", t_start, "bbox does not overlap this granule")
+                    else:
+                        res.clips.append(clip)
+                        res.degraded |= clip.source.startswith("stale")
+                        self._gstate(g.granule_id, state="stored", seconds=secs, source=clip.source)
+                        finish(g, clip.source, t_start)
+                except RetrievalCancelled:
+                    res.skipped[g.granule_id] = "cancelled while fetching (chunks already fetched stay cached)"
+                    self._gstate(g.granule_id, state="cancelled", seconds=round(time.monotonic() - t_start, 1))
+                    finish(g, "skipped", t_start, "cancelled")
+                except Exception as ex:  # reported, never swallowed
+                    res.errors[g.granule_id] = f"{type(ex).__name__}: {ex}"
+                    logging.getLogger("nisar.client").error("granule %s failed", g.granule_id, exc_info=True)   # keep the traceback
+                    self._gstate(g.granule_id, state="failed", error=f"{type(ex).__name__}: {ex}"[:300],
+                                 seconds=round(time.monotonic() - t_start, 1))
+                    finish(g, "failed", t_start, f"{type(ex).__name__}: {ex}"[:160])
 
         await asyncio.gather(*(one(g) for g in granules))
         order = {g.granule_id: i for i, g in enumerate(granules)}
         res.clips.sort(key=lambda c: order[c.granule.granule_id])
         return res
 
-    def _notify(self, granule_id: str, state: str, seconds: float, detail: str) -> None:
-        """Optional per-granule hook (set by the retrieval job). Must never break a fetch."""
-        hook = getattr(self, "granule_hook", None)
-        if hook is not None:
-            try:
-                hook(granule_id, state, seconds, detail)
-            except Exception:
-                logging.getLogger("nisar.client").exception("granule_hook failed (ignored)")
+    # ---------------------------------------------------------------- plan (no data chunks downloaded)
+    def plan_tile(self, granules: list, bbox, layers: str | None = None) -> list[dict]:
+        """Exact compressed bytes per granule and layer for the window — from the layout index
+        (chunk tables), BEFORE any data chunk is downloaded. Builds/loads the index (small metadata reads)."""
+        return self.io.lt.run(self._plan_many(granules, tuple(bbox), layers))
+
+    async def _plan_many(self, granules, bbox, layers) -> list[dict]:
+        sem = asyncio.Semaphore(self.granule_concurrency())
+
+        async def one(g):
+            async with sem:
+                try:
+                    return await self._plan_granule(g, bbox, layers)
+                except Exception as ex:   # reported as a row, never swallowed
+                    return [{"granule_id": g.granule_id, "product": g.product, "error": f"{type(ex).__name__}: {ex}"[:300]}]
+        out: list[dict] = []
+        for rows in await asyncio.gather(*(one(g) for g in granules)):
+            out.extend(rows)
+        return out
+
+    async def _plan_granule(self, g, bbox, layers) -> list[dict]:
+        pat = re.compile(layers) if layers else None
+        ix = await self._index(g, pat)
+        rows: list[dict] = []
+        for gpath, gl in ix.grids.items():
+            win = bbox_window(gl, bbox)
+            if win is None:
+                continue
+            ys, xs = win
+            for p in gl.layers:
+                if pat and not pat.search(p):
+                    continue
+                L = ix.layers[p]
+                row = {"granule_id": g.granule_id, "product": g.product, "grid": gl.key, "layer": L.key,
+                       "shape": list(L.shape), "chunk_shape": list(L.chunks), "dtype": str(L.dtype),
+                       "window": [ys.start, ys.stop, xs.start, xs.stop], "fast": bool(L.fast)}
+                if not L.fast:
+                    row.update(chunks=0, bytes=None, note="read through h5py (contiguous / exotic filter): bytes not planned")
+                else:
+                    plan = [ci for ci, _ in plan_chunks(L, ys, xs) if ci >= 0]
+                    row.update(chunks=len(plan), bytes=int(sum(int(L.sizes[ci]) for ci in plan)))
+                rows.append(row)
+        return rows
 
     def progress_snapshot(self) -> dict:
         """Everything the scan display can show about the retriever, read-only and cheap: wire counters
@@ -385,6 +450,8 @@ class NisarClient:
                     "recent": list(pg["recent"][-4:])}
         cache = {**{k: v for k, v in self.counters.items() if not k.endswith("_s")},
                  "ram_hits": self.ram.hits, "disk_hits": self.disk.hits}
+        with self._prog_lock:
+            gran["states"] = {gid: dict(st) for gid, st in self.granule_states.items()}
         return {"net": self.io.metrics.live(), "granules": gran, "cache": cache,
                 "search": {"truncated": bool(self.last_search_truncated), "incomplete": bool(self.last_search_incomplete)}}
 
@@ -500,7 +567,7 @@ class NisarClient:
         cat = catalog_of(ix)
         d = self.cfg.catalog_dirs[1]
         d.mkdir(parents=True, exist_ok=True)
-        tmp = d / f"{g.product}.{os.getpid()}.tmp"
+        tmp = d / f"{g.product}.{os.getpid()}.{threading.get_ident()}.tmp"
         tmp.write_text(json.dumps(cat))
         replace_file(tmp, d / f"{g.product}.json")
         self._catalogs[g.product] = cat
@@ -600,6 +667,8 @@ class NisarClient:
     async def _stream_clip(self, g: GranuleRef, bbox, layers) -> GranuleClip | None:
         pat = re.compile(layers) if layers else None
         ix = await self._index(g, pat)
+        if self.cancel_event.is_set():
+            raise RetrievalCancelled(g.granule_id)
         loop = asyncio.get_running_loop()
         out_grids: dict[str, GridClip] = {}
         jobs: list = []                      # (layer, ckey, out, dst, src_slices_fn...)
@@ -627,6 +696,8 @@ class NisarClient:
                         jobs.append((L, ci, coord, arr, ys, xs))
         if not out_grids:
             return None
+        self._gstate(g.granule_id, state="fetching", chunks_planned=len(jobs),
+                     bytes_planned=int(sum(int(j[0].sizes[j[1]]) for j in jobs)))
         stats = await self._run_jobs(g, jobs)
         if slow:
             await loop.run_in_executor(self.blocking, self._fallback_layers, g, slow)
@@ -672,12 +743,23 @@ class NisarClient:
         if need:
             self.counters["chunks_net"] += len(need)
             ranges = [(int(L.offsets[ci]), int(L.sizes[ci])) for L, ci, *_ in need]
+            cancelled = False
             async for idxs, mvs in self.io.stream_ranges(g.url, ranges):
                 for i, mv in zip(idxs, mvs):
                     job = need[i]
                     pending.append(loop.run_in_executor(self.pool, self._decode_and_store, g, job, mv, decode_place))
+                with self._prog_lock:
+                    st = self.granule_states.get(g.granule_id)
+                    if st is not None:
+                        st["chunks_done"] += len(idxs)
+                        st["bytes_done"] += sum(int(need[i][0].sizes[need[i][1]]) for i in idxs)
+                if self.cancel_event.is_set():       # between chunk batches: stop asking; in-flight work finishes below
+                    cancelled = True
+                    break
         if pending:
             await asyncio.gather(*pending)
+        if need and cancelled:
+            raise RetrievalCancelled(g.granule_id)
         return {"chunks": len(jobs), "network": len(need)}
 
     def _decode_and_store(self, g, job, mv, decode_place):

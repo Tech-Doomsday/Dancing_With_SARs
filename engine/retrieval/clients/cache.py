@@ -156,7 +156,7 @@ class ClipStore:
         import zarr
         from zarr.codecs import BloscCodec
         d = self._dir(k)
-        tmp = d.with_name(d.name + f".tmp{os.getpid()}.{threading.get_ident()}")
+        tmp = d.with_name(d.name + f".tmp{os.getpid()}-{threading.get_ident()}")
         shutil.rmtree(tmp, ignore_errors=True)
         (tmp).mkdir(parents=True)
         root = zarr.open_group(str(tmp / "data.zarr"), mode="w", zarr_format=3)

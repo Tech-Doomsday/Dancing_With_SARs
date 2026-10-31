@@ -14,7 +14,6 @@ import dynamic from "next/dynamic";
 import { useRouter, useSearchParams } from "next/navigation";
 import { ChevronDown, ChevronUp, RotateCcw, Search } from "lucide-react";
 import { api, granulesBbox } from "@/lib/api";
-import RetrievalPanel from "./RetrievalPanel";
 import { boxFromCenter, centerOfBox, RANGE_MAX_KM, RANGE_MIN_KM } from "@/lib/boxFromCenter";
 import { useEngineUrl } from "@/lib/engineUrl";
 import type { BackgroundGroup, ExplorerGranule, ExplorerStack, GranuleExplorerResponse } from "@/lib/types";
@@ -31,6 +30,7 @@ import ExplorerSummary from "./ExplorerSummary";
 import ExplorerDetail from "./ExplorerDetail";
 import ExplorerList from "./ExplorerList";
 import CompareView from "@/components/background/CompareView";
+import RetrievalPanel from "@/components/background/RetrievalPanel";
 
 const TimelineCanvas = dynamic(() => import("./TimelineCanvas"), {
   ssr: false,
@@ -162,7 +162,7 @@ export default function ExplorerApp() {
 
   // ---- the search. The Search button runs it with the form values; a pasted link with a full
   // box re-runs it once on boot (restoring the same view — the ONLY automatic search). ----
-  const runSearch = useCallback((w: number, s: number, e: number, n: number, lvls: string[], fromIso: string, toIso: string) => {
+  const runSearch = useCallback((w: number, s: number, e: number, n: number, lvls: string[], fromIso: string, toIso: string, fresh = false) => {
     setError(null);
     setRetryAfter(null);
     if (w > e) {
@@ -182,6 +182,7 @@ export default function ExplorerApp() {
       level: lvls.join(",") || "GUNW",
       from: fromIso || undefined,
       to: toIso || undefined,
+      fresh: fresh || undefined,
     }, ctrl.signal)
       .then((r) => {
         setData(r);
@@ -384,6 +385,22 @@ export default function ExplorerApp() {
           budget is {data.search_budget}); narrow the box or dates.
         </p>
       )}
+      {data?.search_incomplete && (
+        <p role="alert" className="flex flex-wrap items-center gap-3 border-b border-[#5a3a1f] bg-[#2e1f12] px-4 py-2 text-xs text-[#f0b36a]">
+          <span>
+            ASF returned an incomplete listing — this list may be missing granules, and the result was not cached.
+            {data.search_warnings?.[0] ? ` (${data.search_warnings[0]})` : ""}
+          </span>
+          <button
+            type="button"
+            disabled={loading}
+            onClick={() => runSearch(data.bbox[0], data.bbox[1], data.bbox[2], data.bbox[3], levels, data.window.t0, data.window.t1, true)}
+            className="rounded border border-[#f0b36a] px-2 py-0.5 hover:bg-[#3a2a18] disabled:opacity-50"
+          >
+            Retry — ask ASF again
+          </button>
+        </p>
+      )}
       {data?.degraded && (
         <p role="status" className="border-b border-[#3a3524] bg-[#222012] px-4 py-2 text-xs text-[#d9c98a]">
           served from stale cache (ASF unreachable at search time) — counts may lag.
@@ -400,10 +417,21 @@ export default function ExplorerApp() {
         />
       )}
 
+      {/* ---- stages 2-5: plan / download / inspect / preprocess (UI-build-3) ---- */}
+      <details className="border-b border-[#2a313c] bg-[#0e1116]" open={false}>
+        <summary className="cursor-pointer px-4 py-2 text-xs text-[#7ec8d3]">Plan &amp; download the data for this tile (stages 2–5)</summary>
+        <RetrievalPanel
+          lon={data ? (data.bbox[0] + data.bbox[2]) / 2 : (Number.isFinite(Number(lonC)) && lonC.trim() !== "" ? Number(lonC) : null)}
+          lat={data ? (data.bbox[1] + data.bbox[3]) / 2 : (Number.isFinite(Number(latC)) && latC.trim() !== "" ? Number(latC) : null)}
+          levels={levels}
+          foundCount={data?.n_total ?? 0}
+        />
+      </details>
+
       {/* ---- main area: timeline | detail ---- */}
       <div className="flex min-h-0 flex-1 flex-col lg:flex-row">
         <section className="flex min-h-0 flex-1 flex-col" aria-label="granule timeline">
-          {!data && !loading && (
+          {!data && !loading && !error && (
             <div className="flex flex-1 items-center justify-center p-8 text-center text-xs text-[#8b949e]">
               enter a box and press Search — the engine answers how many NISAR granules exist
               there, on which tracks and passes, with what day gaps.
@@ -464,13 +492,6 @@ export default function ExplorerApp() {
               )}
             </div>
           )}
-          <RetrievalPanel
-            bbox={(() => {
-              const v = [west, south, east, north].map((x) => (x.trim() === "" ? NaN : Number(x)));
-              return v.every(Number.isFinite) && v[0] < v[2] && v[1] < v[3] ? (v as [number, number, number, number]) : null;
-            })()}
-            levels={levels}
-          />
         </section>
 
         {/* ---- detail panel (desktop right ≈380 px; mobile bottom sheet) ---- */}
@@ -492,11 +513,12 @@ export default function ExplorerApp() {
               engineOnline={health === true}
               onClose={() => setSelectedIds([])}
               onShowOnGlobe={(lat, lon) => {
-                // in-app navigation: no document reload; the map is created at this camera
-                saveQueryContext({ lat, lon });
+                // in-app navigation: no document reload; the context carries the point
+                saveQueryContext({ lat, lon, tile: undefined, bbox: undefined });
                 router.push(`/map?lat=${lat}&lon=${lon}&z=7`);
               }}
               onScanTile={(tileId) => {
+                saveQueryContext({ tile: tileId });
                 router.push(`/map?tile=${encodeURIComponent(tileId)}&panel=pin`);
               }}
               onCompare={openCompare}

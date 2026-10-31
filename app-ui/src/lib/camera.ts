@@ -1,44 +1,62 @@
-/** Last map camera, kept per browser tab so switching Map <-> Background never resets the view.
- *  Only a view the user (or a link) chose is stored; everything read back is re-validated. */
-export interface Camera { center: [number, number]; zoom: number }
+/** Map camera memory — the globe remembers where it was looking, per tab session, so switching
+ *  Map -> Background -> Map (or following "Show on globe") never resets to the world view.
+ *  Pure helpers + sessionStorage (every access try/catch: private mode and blocked storage must
+ *  never break the map). Nothing here is science; it stores the camera the user left. */
 
-const KEY = "nisar:camera:v1";
-export const DEFAULT_CAMERA: Camera = { center: [0, 20], zoom: 1.4 };
+export interface Camera {
+  center: [number, number]; // [lon, lat]
+  zoom: number;
+  projection: "globe" | "mercator";
+}
 
-function valid(c: unknown): c is Camera {
-  if (!c || typeof c !== "object") return false;
-  const { center, zoom } = c as Camera;
-  return Array.isArray(center) && center.length === 2
-    && Number.isFinite(center[0]) && Number.isFinite(center[1])
-    && Math.abs(center[0]) <= 180 && Math.abs(center[1]) <= 90
-    && Number.isFinite(zoom) && zoom >= 0 && zoom <= 24;
+export const DEFAULT_CAMERA: Camera = { center: [0, 20], zoom: 1.4, projection: "globe" };
+/** zoom used when a link names a point but no zoom */
+export const DEFAULT_POINT_ZOOM = 10.5;
+
+const KEY = "nisar:map-camera:v1";
+
+export function sanitizeCamera(raw: unknown): Camera | null {
+  if (!raw || typeof raw !== "object") return null;
+  const r = raw as Record<string, unknown>;
+  const c = r.center;
+  if (!Array.isArray(c) || c.length !== 2) return null;
+  const [lon, lat] = c as unknown[];
+  const zoom = r.zoom;
+  if (typeof lon !== "number" || typeof lat !== "number" || typeof zoom !== "number") return null;
+  if (!Number.isFinite(lon) || !Number.isFinite(lat) || !Number.isFinite(zoom)) return null;
+  if (lon < -180 || lon > 180 || lat < -90 || lat > 90 || zoom < 0 || zoom > 24) return null;
+  return { center: [lon, lat], zoom, projection: r.projection === "mercator" ? "mercator" : "globe" };
 }
 
 export function loadCamera(): Camera | null {
   try {
-    const raw = window.sessionStorage.getItem(KEY);
-    if (!raw) return null;
-    const c = JSON.parse(raw);
-    return valid(c) ? c : null;
-  } catch { return null; }
+    const txt = window.sessionStorage.getItem(KEY);
+    return txt ? sanitizeCamera(JSON.parse(txt)) : null;
+  } catch {
+    return null;
+  }
 }
 
-export function saveCamera(c: Camera): void {
-  if (!valid(c)) return;
-  try { window.sessionStorage.setItem(KEY, JSON.stringify(c)); } catch { /* private mode */ }
+export function saveCamera(cam: Camera): void {
+  try {
+    const ok = sanitizeCamera(cam);
+    if (ok) window.sessionStorage.setItem(KEY, JSON.stringify(ok));
+  } catch { /* storage unavailable: the camera is simply not remembered */ }
 }
 
-/** A ?lat=&lon=&z= link names its own camera (zoom defaults to 10.5). Takes precedence over the saved one. */
-export function cameraFromParams(p: URLSearchParams): Camera | null {
-  const lat = Number(p.get("lat")), lon = Number(p.get("lon"));
-  if (p.get("lat") === null || p.get("lon") === null) return null;
-  const z = p.get("z") === null ? 10.5 : Number(p.get("z"));
-  const c = { center: [lon, lat] as [number, number], zoom: z };
-  return valid(c) ? c : null;
-}
-
-/** What the map should be created at: link > saved > world. Safe on the server (returns world). */
-export function initialCamera(p: URLSearchParams): Camera {
-  if (typeof window === "undefined") return DEFAULT_CAMERA;
-  return cameraFromParams(p) ?? loadCamera() ?? DEFAULT_CAMERA;
+/** Where a new map must be created. A link that names a point and a zoom wins (the user asked
+ *  to go there); otherwise the camera the user left; otherwise the world view. */
+export function initialCamera(
+  url: { lat?: number; lon?: number; z?: number },
+  saved: Camera | null,
+): { camera: Camera; source: "url" | "saved" | "default" } {
+  // a point WITHOUT a zoom (the nav's Map link) must not undo the view the user left
+  if (url.lat !== undefined && url.lon !== undefined && !(url.z === undefined && saved)) {
+    return {
+      camera: { center: [url.lon, url.lat], zoom: url.z ?? DEFAULT_POINT_ZOOM, projection: saved?.projection ?? "globe" },
+      source: "url",
+    };
+  }
+  if (saved) return { camera: saved, source: "saved" };
+  return { camera: DEFAULT_CAMERA, source: "default" };
 }

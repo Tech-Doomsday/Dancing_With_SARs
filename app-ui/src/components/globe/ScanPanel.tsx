@@ -110,7 +110,7 @@ function Progress(props: { runState: RunState; onFollow: () => void }) {
     return () => clearInterval(id);
   }, [run.id]);
   const pr = run.progress as ScanProgress;
-  const stage = String(pr.stage ?? "queued");
+  const stage = plainStage(String(pr.stage ?? "queued"));
   const stepIndex = pr.step_index;
   const stepTotal = pr.step_total;
   const shownElapsed = typeof pr.elapsed_s === "number" ? Math.round(pr.elapsed_s) : elapsed;
@@ -127,7 +127,7 @@ function Progress(props: { runState: RunState; onFollow: () => void }) {
       <p className="text-sm font-semibold text-[#7a6438]">Scanning… {stage}</p>
       {stepIndex != null && stepTotal != null && (
         <p className="mono mt-0.5 text-[11px] text-[#7a6438]">
-          step {stepIndex}/{stepTotal} · running now
+          step {stepIndex} of {stepTotal} · running now{stepIndex <= 2 ? " — finding and downloading data (retrieval), not yet preprocessing" : ""}
         </p>
       )}
       <p className="mono mt-0.5 text-[11px] text-[#7a6438]">elapsed {fmtDur(shownElapsed)}</p>
@@ -200,7 +200,8 @@ function Progress(props: { runState: RunState; onFollow: () => void }) {
       </details>
 
       <p className="mt-2 text-[10px] text-[#7a6438]">
-        this cannot be cancelled yet — you can leave and return to this scan with its link.
+        a scan cannot be cancelled — you can leave and return to it with its link. For a cancellable, resumable
+        download use Background → Data retrieval → “Plan &amp; download”.
       </p>
       <Link
         href={`/?panel=results&scan=${run.id}`}
@@ -285,6 +286,17 @@ function CheckCoverage(props: { tile: TileInfo; engineOnline: boolean; credentia
       )}
     </div>
   );
+}
+
+/** engine step codes -> plain words (the engine's own names stay available in the Background tabs) */
+const STEP_WORDS: Record<string, string> = {
+  P01: "Finding granules", P02: "Downloading the tile window", P03: "Decoding", P04: "Harmonising grids",
+  P05: "Geometry", P06: "Phase → line of sight", P07: "Corrections", P08: "Backscatter", P09: "Ancillary layers",
+  P10: "Temporal stacks", P11: "Stable mask", P12: "Routing", P13: "Provenance",
+};
+function plainStage(stage: string): string {
+  const m = /^(P\d\d)\b/.exec(stage);
+  return m && STEP_WORDS[m[1]] ? `${STEP_WORDS[m[1]]} (${stage})` : stage;
 }
 
 export default function ScanPanel(props: ScanPanelProps) {

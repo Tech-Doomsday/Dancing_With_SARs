@@ -41,8 +41,8 @@ from .routes_bundles import router as bundles_router
 from .routes_events import router as events_router
 from .routes_jobs import router as jobs_router
 from .routes_pipelines import router as pipelines_router
-from .routes_runs import router as runs_router
 from .routes_retrievals import router as retrievals_router
+from .routes_runs import router as runs_router
 from .routes_scanner import router as scanner_router
 from .routes_tiles import router as tiles_router
 
@@ -69,19 +69,17 @@ def _ui_origins() -> list[str]:
 def create_app() -> FastAPI:
     app = FastAPI(title="nisar-hazard-engine", version="0.1.0")
 
-    # Catch-all INSIDE the CORS layer (added before it): an unexpected exception becomes a readable
-    # JSON 500 that still carries CORS headers. Outside it, the browser only ever saw "Failed to fetch".
+    # Catch-all INSIDE the CORS layer (added before it): an unexpected exception becomes a readable JSON 500 that
+    # still carries CORS headers. Outside it the browser only ever saw "Failed to fetch" and the cause was hidden.
     @app.middleware("http")
     async def _readable_500(request, call_next):
         try:
             return await call_next(request)
         except Exception as ex:                                   # noqa: BLE001 — reported, not swallowed
-            import logging
             from fastapi.responses import JSONResponse
             logging.getLogger("nisar.api").exception("unhandled error on %s %s", request.method, request.url.path)
             return JSONResponse(status_code=500, content={"detail": {
                 "ok": False, "error": f"engine error: {type(ex).__name__}: {ex}"}})
-
     app.add_middleware(
         CORSMiddleware,
         allow_origins=_ui_origins(),
@@ -116,25 +114,25 @@ def create_app() -> FastAPI:
         except Exception as ex:
             db_dir = f"unavailable: {type(ex).__name__}: {ex}"
         creds = "present" if earthdata_present() else "absent"
+        try:                                      # answers without touching the worker pool
+            from .state import get_runner
+            busy = get_runner().busy()
+        except Exception:
+            busy = None
         granule_search = {
             "status": "enabled" if creds == "present" else "disabled",
             "reason": None if creds == "present" else
             "Earthdata credentials absent — ASF search needs EARTHDATA_TOKEN (or EARTHDATA_USERNAME + EARTHDATA_PASSWORD)",
         }
-        try:
-            from .state import get_runner as _gr
-            busy = _gr().busy_info()
-        except Exception:
-            busy = None
         return {
             "ok": True,
-            "busy": busy,     # {kind, run_id, step, started_at} | None — never touches the worker pool
             "data_dir": str(data_dir),
             "data_dir_exists": data_dir.exists(),
             "db_dir": db_dir,
             "bundles_dir": str(bundles_dir),
             "bundles_dir_exists": bundles_dir.exists(),
             "scans_enabled": scans_enabled(),
+            "busy": busy,                         # {kind, run_id, step, started_at} | null
             "earthdata_credentials": creds,
             "cache_write": {"status": "enabled" if cache_enabled else "disabled",
                             "reason": cache_reason},

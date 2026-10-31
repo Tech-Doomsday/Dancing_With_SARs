@@ -12,8 +12,8 @@ import { useEffect, useRef, useState } from "react";
 import maplibregl, { type Map as MlMap, type StyleSpecification } from "maplibre-gl";
 import "maplibre-gl/dist/maplibre-gl.css";
 import { seamSplits } from "@/lib/raster";
+import { DEFAULT_CAMERA, initialCamera, loadCamera, saveCamera } from "@/lib/camera";
 import "./globe-overrides.css";
-import { DEFAULT_CAMERA, saveCamera } from "@/lib/camera";
 
 const ESRI_ATTRIBUTION = "Source: Esri, Vantor, Earthstar Geographics, and the GIS User Community";
 const ESRI_TILES = "https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}";
@@ -40,8 +40,6 @@ export interface FlyTarget {
 }
 
 export interface GlobeMapProps {
-  /** where to CREATE the map (link or saved view); omitted = the world view */
-  initialCamera?: { center: [number, number]; zoom: number };
   flyTarget: FlyTarget | null;
   pin: [number, number] | null;
   tilePolygon: [number, number][] | null;
@@ -53,6 +51,8 @@ export interface GlobeMapProps {
   fitFootprintKey?: number;
   detectionOutline: [number, number][] | null;
   flat: boolean;
+  /** a link that names a point: the map is CREATED here (no world-view frame, no fly-in) */
+  startAt?: { lat?: number; lon?: number; z?: number };
   reducedMotion: boolean;
   idleSpin: boolean;
   onMapClick: (lat: number, lon: number) => void;
@@ -119,12 +119,15 @@ export default function GlobeMap(props: GlobeMapProps) {
     const container = containerRef.current;
     if (!container) return;
     let map: MlMap;
+    // create the map directly at the requested / last-seen camera (never world view -> fly)
+    const start = initialCamera(cbRef.current.startAt ?? {}, loadCamera());
+    const startedElsewhere = start.camera !== DEFAULT_CAMERA;
     try {
       map = new maplibregl.Map({
         container,
         style: STYLE,
-        center: cbRef.current.initialCamera?.center ?? DEFAULT_CAMERA.center,
-        zoom: cbRef.current.initialCamera?.zoom ?? DEFAULT_CAMERA.zoom,
+        center: start.camera.center,
+        zoom: start.camera.zoom,
         attributionControl: { compact: true },
         canvasContextAttributes: { preserveDrawingBuffer: true },
         maxPitch: 0,
@@ -138,10 +141,6 @@ export default function GlobeMap(props: GlobeMapProps) {
     mapRef.current = map;
     // test hook: how many map instances this page has constructed (never read by app code)
     try { const w = window as unknown as { __nisarMapCreates?: number }; w.__nisarMapCreates = (w.__nisarMapCreates ?? 0) + 1; } catch { /* ignore */ }
-    map.on("moveend", () => {
-      const c = map.getCenter();
-      saveCamera({ center: [c.lng, c.lat], zoom: map.getZoom() });
-    });
     map.on("error", () => { /* tile errors are transient; the UI must not die on them */ });
     map.on("load", () => {
       map.addSource("esri", {
@@ -188,6 +187,8 @@ export default function GlobeMap(props: GlobeMapProps) {
       // attribution already bound to the raster source
       map.addControl(new maplibregl.NavigationControl({ showCompass: true, visualizePitch: false }), "bottom-right");
       map.addControl(new maplibregl.ScaleControl({ maxWidth: 96, unit: "metric" }), "bottom-right");
+      const c0 = map.getCenter().wrap();      // remember the camera the map actually opened at
+      saveCamera({ center: [c0.lng, c0.lat], zoom: map.getZoom(), projection: cbRef.current.flat ? "mercator" : "globe" });
       setReady(true);
     });
     map.on("click", (e) => {
@@ -201,6 +202,7 @@ export default function GlobeMap(props: GlobeMapProps) {
     });
     map.on("moveend", () => {
       const c = map.getCenter().wrap();
+      saveCamera({ center: [c.lng, c.lat], zoom: map.getZoom(), projection: cbRef.current.flat ? "mercator" : "globe" });
       cbRef.current.onMove(c.lat, c.lng, map.getZoom());
     });
     // idle spin (DEC2): slow, stopped by any interaction; not when reduced motion is requested
@@ -221,7 +223,8 @@ export default function GlobeMap(props: GlobeMapProps) {
       if (spinRAF) cancelAnimationFrame(spinRAF);
       spinRAF = 0;
     };
-    map.once("load", () => startSpin());
+    // a map opened at a requested/remembered camera must stay there: no idle spin
+    if (!startedElsewhere) map.once("load", () => startSpin());
     const userInteracted = () => stopSpin();
     map.on("mousedown", userInteracted);
     map.on("touchstart", userInteracted);
@@ -229,6 +232,10 @@ export default function GlobeMap(props: GlobeMapProps) {
     map.on("dragstart", userInteracted);
     return () => {
       stopSpin();
+      try {      // leaving the page (tab switch) keeps the camera for the next map
+        const c = map.getCenter().wrap();
+        saveCamera({ center: [c.lng, c.lat], zoom: map.getZoom(), projection: cbRef.current.flat ? "mercator" : "globe" });
+      } catch { /* map already gone */ }
       setReady(false);
       map.remove();
       mapRef.current = null;

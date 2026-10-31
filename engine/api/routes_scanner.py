@@ -186,11 +186,30 @@ def _bbox_granules(west: float, south: float, east: float, north: float, level: 
             max_results=budget, fresh=fresh)
     except ScanError as ex:
         raise HTTPException(status_code=ex.status, detail={"ok": False, "error": str(ex)}) from ex
-    except TimeoutError as ex:
-        raise HTTPException(status_code=504, detail={"ok": False, "error": (
-            "the ASF search took longer than 25s and was stopped before the tunnel could cut the "
-            "connection. Press Search again — pages already fetched are cached.")}) from ex
+    return _meta_answer(out)
+
+
+def _meta_answer(out: dict):
+    """A finished metadata result is a plain 200 (unchanged contract); a slow one is 202 + job id."""
+    if isinstance(out, dict) and out.get("pending"):
+        from fastapi.responses import JSONResponse
+        return JSONResponse(status_code=202, content={
+            "ok": True, "pending": True, "job_id": out["job_id"],
+            "poll": f"/api/granules/jobs/{out['job_id']}",
+            "note": "the search is still running; poll the job (no request stays open past ~25 s)"})
     return {"ok": True, **out}
+
+
+@router.get("/granules/jobs/{job_id}")
+def granule_job(job_id: str):
+    rec = get_runner().meta_job(job_id)
+    if rec is None:
+        raise HTTPException(status_code=404, detail={"ok": False, "error": f"unknown or expired search job: {job_id}"})
+    if rec["status"] == "error":
+        raise HTTPException(status_code=int(rec.get("http") or 500), detail={"ok": False, "error": rec["error"]})
+    if rec["status"] == "done":
+        return {"ok": True, "pending": False, **rec["result"]}
+    return {"ok": True, "pending": True, "job_id": job_id, **{k: v for k, v in rec.items() if k != "status"}}
 
 
 def _raise_429(retry_after: int):
@@ -259,11 +278,7 @@ def granules_route(lon: float | None = Query(default=None), lat: float | None = 
                                     t0=iso(t0), t1=iso(t1))
     except ScanError as ex:
         raise HTTPException(status_code=ex.status, detail={"ok": False, "error": str(ex)}) from ex
-    except TimeoutError as ex:
-        raise HTTPException(status_code=504, detail={"ok": False, "error": (
-            "the ASF search took longer than 25s and was stopped before the tunnel could cut the "
-            "connection. Press Search again — pages already fetched are cached.")}) from ex
-    return {"ok": True, **out}
+    return _meta_answer(out)
 
 
 def _include_goff() -> bool:

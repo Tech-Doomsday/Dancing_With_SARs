@@ -9,7 +9,7 @@ export interface Health {
   bundles_dir_exists: boolean;
   note: string;
   /** what the retrieval worker is doing now; null when idle (never touches the worker pool) */
-  busy?: { kind: string; run_id: string | null; step: string | null; started_at: number | null } | null;
+  busy?: { kind: string; run_id: string | null; step: string | number | null; started_at: number | null } | null;
   scans_enabled?: boolean;
   earthdata_credentials?: "present" | "absent";
   cache_write?: { status: "enabled" | "disabled"; reason: string | null };
@@ -305,6 +305,9 @@ export interface GranuleExplorerResponse {
   n_total: number;
   truncated: boolean;
   degraded: boolean;
+  /** ASF/CMR reported an incomplete result — the list may miss granules and was NOT cached */
+  search_incomplete?: boolean;
+  search_warnings?: string[];
   search_budget: number;
   generated_at: string;
   granules: ExplorerGranule[];

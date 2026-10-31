@@ -3,12 +3,15 @@
 
     python colab/build_colab_zip.py                 ->  dist/nisar-hazard-engine-colab.zip
 
-The zip is the whole repo (engine, config, tests, app-ui SOURCE, colab/ scripts) PLUS your real `.env`.
-zip_repo.py cannot do this: it follows .gitignore, and .env is git-ignored on purpose. Never included:
-node_modules, .next, data/, caches, *.zip, app-ui/.env.local.
+The zip is the whole repo (engine, config, tests, app-ui SOURCE, colab/ scripts). By DEFAULT it does NOT contain
+your `.env`: credentials come from Colab Secrets (EARTHDATA_TOKEN) or the hidden prompt, which nisar_colab.bootstrap()
+already supports. Packing the real `.env` is an explicit opt-in:
 
-The zip contains your Earthdata token. Keep it off public drives, repos and chats; delete it from the Colab
-runtime when you are done (Runtime > Disconnect and delete runtime also wipes /content)."""
+    python colab/build_colab_zip.py --include-env
+
+then the zip contains your Earthdata login / Supabase key — keep it off public drives, repos and chats, and rotate
+the credentials if it ever leaves your machine. Never included: node_modules, .next, data/, caches, *.zip,
+app-ui/.env.local."""
 from __future__ import annotations
 
 import fnmatch
@@ -41,14 +44,18 @@ def _has_credentials(env: Path) -> bool:
 
 
 def main() -> int:
-    env = ROOT / ".env"
-    if not env.is_file():
-        print("WARNING: no .env at the repo root; the zip gets .env.example renamed to .env (fill it in, or use Colab Secrets).")
-        env_src = ROOT / ".env.example"
+    include_env = "--include-env" in sys.argv[1:]
+    env_src = None
+    if include_env:
+        env = ROOT / ".env"
+        if not env.is_file():
+            print("WARNING: --include-env but no .env at the repo root; nothing credential-like is packed.")
+        else:
+            env_src = env
+            if not _has_credentials(env):
+                print("WARNING: .env has no EARTHDATA_TOKEN (or username+password). Colab will fall back to Secrets / a prompt.")
     else:
-        env_src = env
-        if not _has_credentials(env):
-            print("WARNING: .env has no EARTHDATA_TOKEN (or username+password). Colab will fall back to Secrets / a prompt.")
+        print("No .env packed (default). In Colab: add EARTHDATA_TOKEN under Secrets, or type it at the hidden prompt.")
     OUT.parent.mkdir(parents=True, exist_ok=True)
     n = 0
     with zipfile.ZipFile(OUT, "w", zipfile.ZIP_DEFLATED, compresslevel=6) as z:
@@ -56,8 +63,9 @@ def main() -> int:
             if p.is_file() and p.name != ".env" and _wanted(p):
                 z.write(p, p.relative_to(ROOT).as_posix())
                 n += 1
-        z.write(env_src, ".env")
-        n += 1
+        if env_src is not None:
+            z.write(env_src, ".env")
+            n += 1
     print(f"{OUT}  ({n} files, {OUT.stat().st_size / 1e6:.1f} MB)")
     print("Upload it to Colab, then run the first notebook cell (or: !unzip -q -o <zip> -d /content/nisar-hazard-engine).")
     return 0

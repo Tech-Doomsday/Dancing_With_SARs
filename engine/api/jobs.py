@@ -63,6 +63,10 @@ def earthdata_present() -> bool:
     return earthdata_auth().available
 
 
+META_WAIT_S = 20.0       # a metadata request waits this long, then answers 202 + job id
+META_TIMEOUT_S = 25.0    # no HTTP request may stay open longer than this (tunnels cut long requests, hiding the cause)
+
+
 class ScanError(RuntimeError):
     """A scan that must not start. `status` is the HTTP status the route answers with."""
 
@@ -106,12 +110,14 @@ class JobRunner:
                                     db_dir=self.db_dir / "jobs")
         self.verdicts = VerdictStore(self.db_dir / "verdicts.db")
         self.cache = cache if cache is not None else CloudCache.from_env()   # Supabase mirror (4.6)
-        self._pool = ThreadPoolExecutor(max_workers=1, thread_name_prefix="engine-run")
-        # Metadata lane (search / previews / probes): its own worker so a long retrieval never
-        # queues a bbox search behind it. Each job builds its OWN retriever through the factory
-        # (NisarClient owns threads + an event loop), and the on-disk caches use per-thread temp names.
-        self._meta_pool = ThreadPoolExecutor(max_workers=2, thread_name_prefix="engine-meta")
+        self._pool = ThreadPoolExecutor(max_workers=1, thread_name_prefix="engine-run")   # the RETRIEVAL worker
+        # Metadata lane (UI-build-3 §Phase 2): bbox search, previews, layout metadata. Separate from the
+        # retrieval worker so a Data-retrieval search never queues behind a scan/retrieval. Safe because every
+        # metadata job builds its OWN retriever (own HttpIO + event loop + threads, see NisarClient.__init__)
+        # and closes it; shared state is only the on-disk caches, which write via temp-file + atomic rename.
+        self._meta_pool = ThreadPoolExecutor(max_workers=4, thread_name_prefix="engine-meta")
         self._states: dict[str, dict] = {}
+        self._meta_jobs: dict[str, dict] = {}
         # §5 preprocessing traces (in-memory, bounded): run_id -> {trace payload + array records}.
         # Traces exist only for runs started WITH tracing in this process; they are evicted with
         # the run state (never persisted — the endpoint says so honestly).
@@ -123,6 +129,22 @@ class JobRunner:
     def _fresh_run_state(self, kind: str) -> dict:
         return {"status": "queued", "progress": {"stage": "queued"},
                 "error": None, "results": [], "kind": kind, "started_at": time.time()}
+
+    def busy(self) -> dict | None:
+        """What the retrieval worker is doing right now, or None. Never touches the worker pool and takes
+        no long lock, so /api/health can always answer."""
+        try:
+            for rid, st in list(self._states.items()):
+                if st.get("status") in ("queued", "running"):
+                    prog = st.get("progress") or {}
+                    return {"kind": st.get("kind") or "run", "run_id": rid,
+                            "step": prog.get("stage"), "started_at": st.get("started_at")}
+            mgr = getattr(self, "_retrievals", None)
+            if mgr is not None:
+                return mgr.busy()
+        except Exception:                      # health must answer even if a state is mid-update
+            return None
+        return None
 
     def _begin_run(self, kind: str, bundle_id: str, tile: str, pipelines: list, params: dict) -> str:
         """D10 first: rows that claim queued/running but have no live state in THIS process are
@@ -156,17 +178,19 @@ class JobRunner:
 
     def start_scan(self, *, lon: float, lat: float, as_of: str | None = None,
                    lookback_days: float | None = None,
-                   retriever_factory=None) -> str:
+                   retriever_factory=None, require_credentials: bool = True,
+                   retrieval_id: str | None = None) -> str:
         """§5.3: scan = tile_at -> build_scene_bundle -> save_bundle -> the SAME persistence tail.
         Guards run here (route thread); the work runs on the single worker thread. The retriever
         is constructed through `retriever_factory` (default NisarClient; tests inject a fake) and
         closed in finally."""
         if not scans_enabled():
             raise ScanError(403, "scans are disabled on this engine (set NISAR_ENABLE_SCANS=1)")
-        if not earthdata_present():
+        if require_credentials and not earthdata_present():      # a stored-retrieval preprocess needs no provider access
             raise ScanError(503, NO_EARTHDATA_MESSAGE)
         run_id = self._begin_run("scan", "", "", ["*"], {"scan": {
-            "lon": lon, "lat": lat, "as_of": as_of, "lookback_days": lookback_days}})
+            "lon": lon, "lat": lat, "as_of": as_of, "lookback_days": lookback_days,
+            **({"retrieval_id": retrieval_id} if retrieval_id else {})}})
         self._pool.submit(self._execute_scan, run_id, lon, lat, as_of, lookback_days,
                           retriever_factory)
         return run_id
@@ -179,9 +203,7 @@ class JobRunner:
         a scan's retriever (single-flight-safe by construction)."""
         if not earthdata_present():
             raise ScanError(503, NO_EARTHDATA_MESSAGE)
-        fut = self._meta_pool.submit(self._granule_search_sync, lon, lat, products, t0, t1,
-                                retriever_factory)
-        return fut.result(timeout=float(os.environ.get("NISAR_HTTP_MAX_S", "25")))
+        return self._meta_submit(self._granule_search_sync, lon, lat, products, t0, t1, retriever_factory)
 
     def granule_search_bbox(self, *, bbox: tuple, levels: list[str], t0: str, t1: str,
                             product_names: dict[str, str], max_results: int, fresh: bool,
@@ -191,9 +213,40 @@ class JobRunner:
         503 without credentials, then runs the real search and enrichment."""
         if not earthdata_present():
             raise ScanError(503, NO_EARTHDATA_MESSAGE)
-        fut = self._meta_pool.submit(self._granule_search_bbox_sync, bbox, levels, t0, t1,
-                                product_names, max_results, fresh, retriever_factory)
-        return fut.result(timeout=float(os.environ.get("NISAR_HTTP_MAX_S", "25")))
+        return self._meta_submit(self._granule_search_bbox_sync, bbox, levels, t0, t1,
+                                 product_names, max_results, fresh, retriever_factory)
+
+    def _meta_submit(self, fn, *args, wait_s: float | None = None) -> dict:
+        """Run `fn` on the metadata lane. Answer within `wait_s` (< META_TIMEOUT_S): the result when it is
+        ready, else {"pending": True, "job_id": ...} — the route answers 202 and the UI polls
+        meta_job(job_id). The work keeps running; no request stays open past the cap."""
+        from concurrent.futures import TimeoutError as _FT
+        wait_s = META_WAIT_S if wait_s is None else wait_s
+        fut = self._meta_pool.submit(fn, *args)
+        try:
+            return fut.result(timeout=wait_s)
+        except _FT:
+            job_id = f"meta-{uuid.uuid4().hex[:12]}"
+            with self._lock:
+                self._meta_jobs[job_id] = {"future": fut, "t": time.time()}
+                for old in sorted(self._meta_jobs, key=lambda k: self._meta_jobs[k]["t"])[:-50]:
+                    self._meta_jobs.pop(old, None)           # bounded
+            return {"pending": True, "job_id": job_id}
+
+    def meta_job(self, job_id: str) -> dict | None:
+        """-> None unknown | {"status": "pending"} | {"status": "done", "result": ...} | {"status": "error", "error", "http"}."""
+        with self._lock:
+            rec = self._meta_jobs.get(job_id)
+        if rec is None:
+            return None
+        fut = rec["future"]
+        if not fut.done():
+            return {"status": "pending", "waited_s": round(time.time() - rec["t"], 1)}
+        ex = fut.exception()
+        if ex is None:
+            return {"status": "done", "result": fut.result()}
+        return {"status": "error", "error": f"{type(ex).__name__}: {ex}",
+                "http": getattr(ex, "status", 500)}
 
     def _granule_search_bbox_sync(self, bbox, levels, t0, t1, product_names, max_results, fresh,
                                   retriever_factory) -> dict:
@@ -209,22 +262,6 @@ class JobRunner:
                 retriever.close()
             except Exception:
                 pass
-
-    def busy_info(self) -> dict | None:
-        """What the retrieval worker is doing now, for /api/health. Lock-free on purpose (a plain
-        snapshot of the state dict) so it answers while the worker is saturated; it never touches
-        a pool, the store or the network. None when idle."""
-        try:
-            items = list(self._states.items())
-        except RuntimeError:     # dict changed size mid-copy: report unknown-busy rather than block
-            return {"kind": "unknown", "run_id": None, "step": None, "started_at": None}
-        for rid, st in items:
-            if st.get("status") in ("queued", "running"):
-                prog = st.get("progress") or {}
-                return {"kind": st.get("kind") or "run", "run_id": rid,
-                        "step": prog.get("stage"), "started_at": st.get("started_at")}
-        extra = getattr(self, "_extra_busy", None)      # a retrieval job (engine/api/retrievals.py)
-        return extra() if extra else None
 
     # ------------------------------------------------------------------ reads
     @staticmethod
@@ -662,7 +699,6 @@ class JobRunner:
 
     def close(self):
         self._pool.shutdown(wait=False)
-        self._meta_pool.shutdown(wait=False)
         self.heavy.close()
         self.verdicts.close()
 

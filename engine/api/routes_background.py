@@ -40,6 +40,8 @@ import re
 import threading
 from pathlib import Path
 
+from concurrent.futures import TimeoutError as FuturesTimeout
+
 from fastapi import APIRouter, Header, HTTPException, Query, Response
 
 from . import background as bg
@@ -107,15 +109,6 @@ def require_token(authorization: str | None) -> None:
             "error": "missing or wrong background token — send 'Authorization: Bearer <NISAR_BACKGROUND_TOKEN>'"})
 
 
-def http_max_s() -> float:
-    """No HTTP request may stay open longer than this (tunnels cut long requests with a page that
-    has no CORS headers, which the browser shows as a bare 'Failed to fetch')."""
-    try:
-        return max(1.0, float(os.environ.get("NISAR_HTTP_MAX_S", "25")))
-    except ValueError:
-        return 25.0
-
-
 def _default_source():
     return _SOURCE_FACTORY()
 
@@ -129,16 +122,15 @@ def _run_bg(fn, *args, preview_window: bool = False, **kwargs):
     if not earthdata_present():
         raise HTTPException(status_code=503, detail={"ok": False, "error": NO_EARTHDATA_MESSAGE})
     runner = get_runner()
-    fut = runner._meta_pool.submit(fn, *args, **kwargs)     # metadata lane: never behind a retrieval
+    fut = runner._meta_pool.submit(fn, *args, **kwargs)     # metadata lane: never queued behind a scan/retrieval
     try:
-        return fut.result(timeout=http_max_s())
+        return fut.result(timeout=25.0)
     except BackgroundError as ex:
         raise HTTPException(status_code=ex.status, detail={"ok": False, "error": str(ex)}) from ex
-    except TimeoutError as ex:
+    except FuturesTimeout as ex:
         raise HTTPException(status_code=504, detail={
-            "ok": False, "error": (f"this request took longer than {http_max_s():.0f}s and was stopped so the "
-                                   "connection is not cut by the tunnel. Chunks already fetched are cached — "
-                                   "try again and it will continue faster.")}) from ex
+            "ok": False, "error": ("this read from NASA did not finish within 25 s (the engine keeps working on it; "
+                                   "ask again in a moment and it will usually be served from cache)")}) from ex
 
 
 def _run_local(fn, *args, **kwargs):

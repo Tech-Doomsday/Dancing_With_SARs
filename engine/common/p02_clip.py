@@ -46,6 +46,8 @@ def run(ctx: BuildContext) -> None:
     if res is None or not res.to_fetch:
         return
     cfg = ctx.cfg
+    if getattr(ctx.retriever, "stored", False):      # preprocessing from a retrieval: clips come from the store, no network
+        ctx.assume(f"P02 loaded clips from retrieval {getattr(ctx.retriever, 'retrieval_id', '?')} (no network call)")
     names = {"GUNW": cfg.products.gunw, "GCOV": cfg.products.gcov, "GOFF": cfg.products.goff}
     for prod, refs in res.to_fetch.items():
         name = names[prod]

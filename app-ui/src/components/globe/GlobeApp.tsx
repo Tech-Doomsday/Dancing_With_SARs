@@ -5,19 +5,20 @@
  *  (live slim run + pipeline-scoped layers, or cached rows), overlay rendering with an LRU layer
  *  cache, the Data tab, and URL state (§7.7). Honesty rules: engine strings verbatim, an empty
  *  cache renders an honest empty state, a field the engine doesn't compute is simply absent. */
-import { initialCamera } from "@/lib/camera";
 import { boxFromCenter } from "@/lib/boxFromCenter";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import dynamic from "next/dynamic";
 import { useRouter, useSearchParams } from "next/navigation";
 import { X } from "lucide-react";
-import { api, engineBase, pollWhile } from "@/lib/api";
+import { api, pollWhile } from "@/lib/api";
 import { useEngineUrl } from "@/lib/engineUrl";
 import { cache, cacheConfigured } from "@/lib/cache";
 import { colorize, validateLayerPayload, decodeLayer } from "@/lib/raster";
 import { parseCoordinates } from "@/lib/geo-input";
 import { mostNotableTier, TIER_PIN_COLORS } from "@/lib/status";
 import { parseUrlState, writeUrlState, type PanelMode, type UrlState } from "@/lib/urlstate";
+import { engineJson } from "@/lib/engineFetch";
+import { loadCamera } from "@/lib/camera";
 import { clearQueryContext, saveQueryContext } from "@/lib/queryContext";
 import type {
   CachedSummary, CachedVerdict, FeaturedArea, Health, LayerPayload, PipelineInfo, RunState, TileInfo,
@@ -100,8 +101,6 @@ export default function GlobeApp() {
   const lastOverlayOrder = useRef<string[]>([]);
 
   // ---- map state -----------------------------------------------------------------------------
-  // the map is CREATED at the link's camera (or the last saved one) — no world view followed by a fly
-  const [initialCam] = useState(() => initialCamera(new URLSearchParams(searchParams.toString())));
   const [flat, setFlat] = useState(false);
   const [flyTarget, setFlyTarget] = useState<{ center: [number, number]; zoom: number; key: number } | null>(null);
   const [pairFootprint, setPairFootprint] = useState<[number, number][] | null>(null);
@@ -113,6 +112,13 @@ export default function GlobeApp() {
   const pinRef = useRef<[number, number] | null>(null);
   useEffect(() => { pinRef.current = pin; }, [pin]);
 
+  // the camera a link asks for — read ONCE; GlobeMap creates the map there (no world view first)
+  const startAt = useMemo(() => {
+    const st = parseUrlState(new URLSearchParams(searchParams.toString()));
+    return { lat: st.lat, lon: st.lon, z: st.z };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
   const engineOnline = healthChecked ? health !== null : false;
 
   // ---- boot: URL state + env -----------------------------------------------------------------
@@ -122,6 +128,8 @@ export default function GlobeApp() {
       setPin([st.lat, st.lon]);
       setLatInput(String(st.lat));
       setLonInput(String(st.lon));
+      // no flyTarget here on purpose: GlobeMap is CREATED at this camera (startAt), so a fly
+      // from the world view would only add the zoom-out this fixes
     }
     if (st.tile && (st.lat === undefined || st.lon === undefined)) {
       // §7.7: a pasted ?tile= (or ?panel=granules&tile=) link restores the same view — the
@@ -150,6 +158,7 @@ export default function GlobeApp() {
     try {
       const saved = window.localStorage.getItem("globe-flat");
       if (saved === "1") setFlat(true);
+      else if (saved === null && loadCamera()?.projection === "mercator") setFlat(true);
     } catch { /* private mode */ }
     const mq = window.matchMedia("(prefers-reduced-motion: reduce)");
     setReducedMotion(mq.matches);
@@ -227,12 +236,7 @@ export default function GlobeApp() {
     const ctrl = new AbortController();
     setTileLoading(true);
     const id = setTimeout(() => {
-      fetch(`${engineBase()}/api/tile-at?lon=${pin[1]}&lat=${pin[0]}`, { signal: ctrl.signal, cache: "no-store" })
-        .then(async (res) => {
-          const body = await res.json().catch(() => ({}));
-          if (!res.ok) throw new Error(body?.detail?.error ?? body?.detail ?? `${res.status} ${res.statusText}`);
-          return body as { ok: true; tile: TileInfo };
-        })
+      engineJson<{ ok: true; tile: TileInfo }>(`/api/tile-at?lon=${pin[1]}&lat=${pin[0]}`, { signal: ctrl.signal })
         .then((body) => {
           setTile(body.tile);
           setTileError(null);
@@ -796,15 +800,15 @@ export default function GlobeApp() {
   return (
     <div className={`globe-root fixed inset-0 bg-[#0b0d12]${activeOverlayLegend ? " legend-open" : ""}`}>
       <GlobeMap
-        initialCamera={initialCam}
         flyTarget={flyTarget}
+        startAt={startAt}
+        fitFootprintKey={fitFootprintKey}
         pin={pin}
         tilePolygon={shownPolygon}
         pins={pins}
         selectedTile={selectedTile}
         overlays={overlaySpecs}
         pairFootprint={pairFootprint}
-        fitFootprintKey={fitFootprintKey}
         detectionOutline={selectedDetection?.bbox ? bboxRing(selectedDetection.bbox) : null}
         flat={flat}
         reducedMotion={reducedMotion}

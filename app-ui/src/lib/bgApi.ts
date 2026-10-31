@@ -12,6 +12,7 @@
  *  This is a STOPGAP: real authentication is an owner action (see the docs). */
 
 import { engineBase } from "./engineUrl";
+import { engineErrorText, engineFetch, ENGINE_LONG_MS } from "./engineFetch";
 
 const KEY = "nisar_bg_token";
 
@@ -70,7 +71,8 @@ export async function bgFetch(path: string, init?: RequestInit & { signal?: Abor
   if (token) headers.set("Authorization", `Bearer ${token}`);
   // paths are engine-relative ("/api/..."); resolve them against the engine in use
   const url = /^https?:\/\//i.test(path) ? path : `${engineBase()}${path}`;
-  const res = await fetch(url, { ...init, headers, cache: "no-store" });
+  // transport failures / timeouts become an EngineError that says what failed and what to do
+  const res = await engineFetch(url, { ...init, headers }, { timeoutMs: ENGINE_LONG_MS });
   if (res.status === 401) {
     throw new GateError("unauthorized", await engineText(res, "missing or wrong background token"));
   }
@@ -93,14 +95,5 @@ export async function bgGet<T>(path: string, signal?: AbortSignal): Promise<T> {
 }
 
 function extractError(body: unknown, res: Response): string {
-  if (body && typeof body === "object") {
-    const b = body as Record<string, unknown>;
-    if (typeof b.error === "string") return b.error;
-    if (b.detail && typeof b.detail === "object") {
-      const d = b.detail as Record<string, unknown>;
-      if (typeof d.error === "string") return d.error;
-    }
-    if (typeof b.detail === "string") return b.detail;
-  }
-  return `${res.status} ${res.statusText}`;
+  return engineErrorText(body) || `${res.status} ${res.statusText}`;
 }

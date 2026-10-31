@@ -6,6 +6,7 @@ from __future__ import annotations
 
 import json
 import os
+import threading
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -103,7 +104,7 @@ class GranuleIndex:
                                    "loaded": l.loaded})
         arrs["meta"] = np.frombuffer(json.dumps(meta).encode(), dtype=np.uint8)
         path.parent.mkdir(parents=True, exist_ok=True)
-        tmp = path.with_suffix(f".tmp{os.getpid()}.npz")
+        tmp = path.with_suffix(f".tmp{os.getpid()}-{threading.get_ident()}.npz")
         np.savez(tmp, **arrs)               # uncompressed: loads in a few ms
         replace_file(tmp, path)
 

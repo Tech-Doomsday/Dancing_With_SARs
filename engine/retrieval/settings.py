@@ -17,7 +17,7 @@ except ImportError:  # pragma: no cover
 
 DEFAULTS: dict[str, dict] = {
     "net": {
-        "concurrency": 24, "connect_timeout_s": 20, "stall_timeout_s": 25, "retries": 5,
+        "concurrency": 24, "granule_concurrency": 4, "connect_timeout_s": 20, "stall_timeout_s": 25, "retries": 5,
         "coalesce_gap_bytes": 262144, "max_request_bytes": 33554432,
         "index_block_size_bytes": 524288, "index_page_buffer": False, "block_size_bytes": 4194304,
         "url_ttl_s": 2400, "auth_hosts": ["earthdata.nasa.gov", "earthdatacloud.nasa.gov", "asf.alaska.edu"],

@@ -13,46 +13,27 @@ import type {
 } from "./types";
 
 import { engineBase } from "./engineUrl";
-import { engineFetch, EngineError, messageFor } from "./engineError";
-export { EngineError };
 
 /** The engine base is read at CALL time (not module load) so a URL pasted into the nav's engine
  *  link applies immediately. Components that DISPLAY it use useEngineUrl() from ./engineUrl. */
 export { engineBase };
 
-/** FastAPI wraps HTTPException payloads under `detail`; the engine's own error
- *  convention nests {ok: false, error} there. Unwrap every shape in one place. */
-function extractError(body: unknown, res: Response): string {
-  if (body && typeof body === "object") {
-    const b = body as Record<string, unknown>;
-    if (typeof b.error === "string") return b.error;
-    if (b.detail && typeof b.detail === "object") {
-      const d = b.detail as Record<string, unknown>;
-      if (typeof d.error === "string") return d.error;
-    }
-    if (typeof b.detail === "string") return b.detail;
-  }
-  return `${res.status} ${res.statusText}`;
-}
+import { engineJson, ENGINE_LONG_MS } from "./engineFetch";
+export { EngineError, classifyEngineError } from "./engineFetch";
 
-async function get<T>(path: string, opts?: { signal?: AbortSignal }): Promise<T> {
-  const res = await engineFetch(engineBase(), path, { cache: "no-store", signal: opts?.signal });
-  if (!res.ok) {
-    const body = await res.json().catch(() => ({}));
-    throw new EngineError("http", messageFor("http", { base: engineBase(), detail: extractError(body, res) }), { status: res.status });
-  }
-  return res.json() as Promise<T>;
+/** All engine calls go through engineFetch/engineJson (src/lib/engineFetch.ts): failures become
+ *  an EngineError whose message names what failed and what to do — never a bare "Failed to fetch".
+ *  HTTP errors keep the engine's own text verbatim as `message`. */
+async function get<T>(path: string, opts?: { signal?: AbortSignal; timeoutMs?: number }): Promise<T> {
+  return engineJson<T>(path, { signal: opts?.signal }, { timeoutMs: opts?.timeoutMs });
 }
 
 async function post<T>(path: string, body: unknown): Promise<T> {
-  const res = await engineFetch(engineBase(), path, {
+  return engineJson<T>(path, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(body),
   });
-  const json = await res.json().catch(() => ({}));
-  if (!res.ok) throw new EngineError("http", messageFor("http", { base: engineBase(), detail: extractError(json, res) }), { status: res.status });
-  return json as T;
 }
 
 export const api = {
@@ -99,14 +80,29 @@ export const api = {
     }),
   /** §5.5: granule availability (metadata-only; live-engine-only, DEC5). */
   granules: (lon: number, lat: number, opts?: { product?: string; from?: string; to?: string }, signal?: AbortSignal) =>
-    get<GranuleSearchResponse & { ok: true }>(
+    get<GranuleSearchResponse & { ok: true; pending?: boolean; job_id?: string }>(
       `/api/granules?lon=${lon}&lat=${lat}`
       + (opts?.product ? `&product=${encodeURIComponent(opts.product)}` : "")
       + (opts?.from ? `&from=${encodeURIComponent(opts.from)}` : "")
       + (opts?.to ? `&to=${encodeURIComponent(opts.to)}` : ""),
       { signal },
-    ),
+    ).then((r) => resolvePending(r, signal)),
 };
+
+/** The engine never holds a request open past ~25 s: a slow granule search answers 202 + job id and the
+ *  result is polled here (every 2 s, up to `maxWaitMs`). A fast search is a plain 200 and returns at once. */
+async function resolvePending<T>(first: T & { pending?: boolean; job_id?: string }, signal?: AbortSignal,
+                                 maxWaitMs = 10 * 60_000): Promise<T> {
+  let cur = first;
+  const t0 = Date.now();
+  while (cur && cur.pending && cur.job_id) {
+    if (signal?.aborted) throw new DOMException("aborted", "AbortError");
+    if (Date.now() - t0 > maxWaitMs) throw new Error("The granule search is still running on the engine after 10 minutes — try again later.");
+    await new Promise((r) => setTimeout(r, 2000));
+    cur = await get<T & { pending?: boolean; job_id?: string }>(`/api/granules/jobs/${encodeURIComponent(cur.job_id)}`, { signal });
+  }
+  return cur as T;
+}
 
 /** Self-scheduling poll: next request only after the previous settles (>=1.5 s).
  *  Poll errors are SURFACED through onError (the old loop swallowed them, which left
@@ -170,55 +166,8 @@ export function granulesBbox(
   if (p.to) q.set("to", p.to);
   if (p.max) q.set("max", String(p.max));
   if (p.fresh) q.set("fresh", "1");
-  return get<import("./types").GranuleExplorerResponse & { ok: true }>(
+  return get<import("./types").GranuleExplorerResponse & { ok: true; pending?: boolean; job_id?: string }>(
     `/api/granules?${q.toString()}`,
     { signal },
-  );
+  ).then((r) => resolvePending(r, signal));
 }
-
-// ---- Stage 3: Retrieve (POST/GET/cancel). Every call answers at once; the UI polls. ----
-export type RetrievalGranuleState = "queued" | "fetching" | "stored" | "skipped" | "failed" | "cancelled";
-export interface RetrievalGranule {
-  granule_id: string;
-  product: string;
-  start: string | null;
-  track: number | null;
-  direction: string | null;
-  state: RetrievalGranuleState;
-  source: string | null;      // how the clip was obtained (net / clip-cache ...), as the engine reports it
-  seconds: number | null;
-  error: string | null;
-  clip_key: string | null;
-  bytes_done: number | null;  // null = not measured (never estimated)
-  bytes_planned: number | null;
-}
-export interface Retrieval {
-  ok: true;
-  id: string;
-  status: "queued" | "running" | "done" | "failed" | "cancelled";
-  stage: string;
-  tile: string | null;
-  bbox: [number, number, number, number];
-  products: string[];
-  lookback_days: number;
-  max_granules: number | null;
-  started_at: number;
-  finished_at: number | null;
-  error: string | null;
-  flags: string[];
-  granules: RetrievalGranule[];
-  counts: Record<RetrievalGranuleState, number>;
-  total: number;
-}
-export interface RetrievalRequest {
-  bbox: [number, number, number, number];
-  products: string[];
-  lookback_days: number;
-  max_granules?: number;
-}
-export const retrievals = {
-  start: (body: RetrievalRequest) =>
-    post<{ ok: true; retrieval_id: string; tile: string | null; bbox: number[] }>("/api/retrievals", body),
-  get: (id: string, signal?: AbortSignal) => get<Retrieval>(`/api/retrievals/${encodeURIComponent(id)}`, { signal }),
-  cancel: (id: string) => post<{ ok: true; message: string }>(`/api/retrievals/${encodeURIComponent(id)}/cancel`, {}),
-};
