@@ -22,7 +22,7 @@ export interface DataPanelProps {
   credentials: "present" | "absent" | undefined;
   granuleSearchStatus: "enabled" | "disabled" | undefined;
   granuleSearchReason: string | null | undefined;
-  onFootprintOnMap: (ring: [number, number][] | null) => void;
+  onFootprintOnMap: (ring: [number, number][] | null, fit?: boolean) => void;
 }
 
 export default function DataPanel(props: DataPanelProps) {

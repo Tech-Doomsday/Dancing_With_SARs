@@ -14,7 +14,7 @@ import type { GranuleSearchResponse } from "@/lib/types";
 export interface GranuleDetailProps {
   data: GranuleSearchResponse;
   selection: TimelineSelection | null;
-  onFootprintOnMap: (ring: [number, number][] | null) => void;
+  onFootprintOnMap: (ring: [number, number][] | null, fit?: boolean) => void;
 }
 
 export default function GranuleDetail(props: GranuleDetailProps) {
@@ -56,7 +56,7 @@ export default function GranuleDetail(props: GranuleDetailProps) {
         {p.footprint && (
           <button
             type="button"
-            onClick={() => props.onFootprintOnMap(p.footprint)}
+            onClick={() => props.onFootprintOnMap(p.footprint, true)}
             className="mt-2 rounded-md border border-[#2c5f58] px-2 py-1 text-[11px] text-[#2c5f58] hover:bg-[#eff5f3]"
           >
             draw this pair&apos;s footprint on the globe

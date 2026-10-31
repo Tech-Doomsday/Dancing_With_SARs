@@ -105,6 +105,7 @@ export default function GlobeApp() {
   const [flat, setFlat] = useState(false);
   const [flyTarget, setFlyTarget] = useState<{ center: [number, number]; zoom: number; key: number } | null>(null);
   const [pairFootprint, setPairFootprint] = useState<[number, number][] | null>(null);
+  const [fitFootprintKey, setFitFootprintKey] = useState(0);
   const [webglMsg, setWebglMsg] = useState<string | null>(null);
   const [reducedMotion, setReducedMotion] = useState(false);
   const [isNarrow, setIsNarrow] = useState(false);
@@ -783,7 +784,10 @@ export default function GlobeApp() {
           credentials={health?.earthdata_credentials}
           granuleSearchStatus={health?.granule_search?.status}
           granuleSearchReason={health?.granule_search?.reason ?? null}
-          onFootprintOnMap={setPairFootprint}
+          onFootprintOnMap={(ring, fit) => {
+            setPairFootprint(ring ? [...ring] : null);
+            if (ring && fit) setFitFootprintKey((k) => k + 1);
+          }}
         />
       )}
     </>
@@ -800,6 +804,7 @@ export default function GlobeApp() {
         selectedTile={selectedTile}
         overlays={overlaySpecs}
         pairFootprint={pairFootprint}
+        fitFootprintKey={fitFootprintKey}
         detectionOutline={selectedDetection?.bbox ? bboxRing(selectedDetection.bbox) : null}
         flat={flat}
         reducedMotion={reducedMotion}

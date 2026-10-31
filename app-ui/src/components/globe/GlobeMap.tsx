@@ -49,6 +49,8 @@ export interface GlobeMapProps {
   selectedTile: string | null;
   overlays: OverlaySpec[];
   pairFootprint: [number, number][] | null;
+  /** bump to fit the camera to pairFootprint (set only by the explicit draw button) */
+  fitFootprintKey?: number;
   detectionOutline: [number, number][] | null;
   flat: boolean;
   reducedMotion: boolean;
@@ -175,8 +177,10 @@ export default function GlobeMap(props: GlobeMapProps) {
         },
       });
       map.addSource("pair-footprint", { type: "geojson", data: { type: "FeatureCollection", features: [] } });
+      map.addLayer({ id: "pair-footprint-fill", type: "fill", source: "pair-footprint",
+                     paint: { "fill-color": "#ffd166", "fill-opacity": 0.12 } });
       map.addLayer({ id: "pair-footprint-line", type: "line", source: "pair-footprint",
-                     paint: { "line-color": "#b08d57", "line-width": 2 } });
+                     paint: { "line-color": "#ffd166", "line-width": 3 } });
       map.addSource("detection-outline", { type: "geojson", data: { type: "FeatureCollection", features: [] } });
       map.addLayer({ id: "detection-line", type: "line", source: "detection-outline",
                      paint: { "line-color": "#9e3b2c", "line-width": 2.5, "line-dasharray": [2, 1.5] } });
@@ -311,6 +315,26 @@ export default function GlobeMap(props: GlobeMapProps) {
       features: props.pairFootprint ? [ringToPolygon(props.pairFootprint)] : [],
     });
   }, [props.pairFootprint, ready]);
+
+  // Pressing "draw this pair's footprint on the globe" also brings it into view: a footprint is a
+  // swath hundreds of km wide, so at the pin's zoom it is entirely off-screen. Selecting a bar alone
+  // does not move the camera (only this key does).
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map || !ready || !props.fitFootprintKey) return;
+    // A footprint is a swath hundreds of km wide: at the pin's zoom it is entirely off-screen, so
+    // "draw on the globe" must also bring it into view (the pin and tile stay drawn).
+    const ring = props.pairFootprint;
+    if (ring && ring.length >= 3 && ring.every((p) => Number.isFinite(p[0]) && Number.isFinite(p[1]) && Math.abs(p[1]) <= 90)) {
+      const lons = ring.map((p) => p[0]), lats = ring.map((p) => p[1]);
+      const reduce = typeof window !== "undefined" && window.matchMedia?.("(prefers-reduced-motion: reduce)").matches;
+      const wide = typeof window !== "undefined" && window.innerWidth >= 1024;
+      map.fitBounds([[Math.min(...lons), Math.min(...lats)], [Math.max(...lons), Math.max(...lats)]], {
+        padding: { top: 70, bottom: 70, left: wide ? 380 : 40, right: wide ? 460 : 40 },
+        maxZoom: 9, duration: reduce ? 0 : 900,
+      });
+    }
+  }, [props.fitFootprintKey]);  // eslint-disable-line react-hooks/exhaustive-deps
 
   // ---- detection outline ----
   useEffect(() => {

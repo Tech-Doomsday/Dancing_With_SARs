@@ -87,3 +87,16 @@ all HYPOTHESIS measurements (chunk shapes, coalesce gap, tunnel ~100 s cut, 53-g
   query context, so Data retrieval opens on that exact box. Invalid -> a visible message, box unchanged.
 - Limit, stated on screen: a SCAN still covers the engine's tile (scans are one-tile); Range changes the drawn box and the Data retrieval box.
 - Verified: `tsc` clean, `npm run ci` OK. NOT VERIFIED in a browser (none available); no e2e test for this panel.
+
+## 10. Readable engine errors with CORS; footprint button brings the footprint into view
+- Symptom (screenshots): Background > Data retrieval search ends in "connection was cut while the engine was still answering (the engine is reachable)";
+  Map > "draw this pair's footprint on the globe" shows nothing.
+- A. VERIFIED by reproduction (`tests/test_error_cors.py`, failed before the fix): the bbox route only caught ScanError/TimeoutError. Any other exception from the
+  search (ASF/requests/etc.) was unhandled -> bare 500 from the outermost middleware, no JSON and no CORS header -> the browser reports only a network error,
+  which the UI classified as "cut". Fix: `engine/api/main.py` catch-all middleware registered BEFORE CORS (so inside it) returns
+  `500 {"detail": {"ok": false, "error": "engine error: <Type>: <message>"}}` with CORS headers and logs the traceback (logger `nisar.api`).
+  The REAL cause of the user's failing search is still UNKNOWN: it needs one more Search press (the UI now shows the engine's text) or the engine log line `unhandled error on GET /api/granules`.
+- B. VERIFIED by reading: the button and data path were wired (`onFootprintOnMap` -> `pairFootprint` -> `pair-footprint` source). Cause (HYPOTHESIS, consistent with
+  the code and screenshots, not measured in a browser): the footprint is a swath hundreds of km wide and the map sits at the pin's zoom, so it is off-screen.
+  Fix: `GlobeMap.tsx` outline now has a fill + brighter colour; the explicit button bumps `fitFootprintKey` -> `fitBounds` (maxZoom 9). Selecting a bar does not move the camera.
+- Verified: new test passes; API regression 51 passed / 1 failed (the pre-existing earthquake test); `npm run ci` OK. NOT VERIFIED in a browser.

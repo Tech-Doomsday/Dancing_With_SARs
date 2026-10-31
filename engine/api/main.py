@@ -68,6 +68,20 @@ def _ui_origins() -> list[str]:
 
 def create_app() -> FastAPI:
     app = FastAPI(title="nisar-hazard-engine", version="0.1.0")
+
+    # Catch-all INSIDE the CORS layer (added before it): an unexpected exception becomes a readable
+    # JSON 500 that still carries CORS headers. Outside it, the browser only ever saw "Failed to fetch".
+    @app.middleware("http")
+    async def _readable_500(request, call_next):
+        try:
+            return await call_next(request)
+        except Exception as ex:                                   # noqa: BLE001 — reported, not swallowed
+            import logging
+            from fastapi.responses import JSONResponse
+            logging.getLogger("nisar.api").exception("unhandled error on %s %s", request.method, request.url.path)
+            return JSONResponse(status_code=500, content={"detail": {
+                "ok": False, "error": f"engine error: {type(ex).__name__}: {ex}"}})
+
     app.add_middleware(
         CORSMiddleware,
         allow_origins=_ui_origins(),
