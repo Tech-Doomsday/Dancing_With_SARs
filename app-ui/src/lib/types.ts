@@ -8,6 +8,8 @@ export interface Health {
   bundles_dir: string;
   bundles_dir_exists: boolean;
   note: string;
+  /** what the retrieval worker is doing now; null when idle (never touches the worker pool) */
+  busy?: { kind: string; run_id: string | null; step: string | null; started_at: number | null } | null;
   scans_enabled?: boolean;
   earthdata_credentials?: "present" | "absent";
   cache_write?: { status: "enabled" | "disabled"; reason: string | null };

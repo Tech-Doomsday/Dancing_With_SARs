@@ -42,6 +42,7 @@ from .routes_events import router as events_router
 from .routes_jobs import router as jobs_router
 from .routes_pipelines import router as pipelines_router
 from .routes_runs import router as runs_router
+from .routes_retrievals import router as retrievals_router
 from .routes_scanner import router as scanner_router
 from .routes_tiles import router as tiles_router
 
@@ -81,6 +82,7 @@ def create_app() -> FastAPI:
     app.include_router(jobs_router)
     app.include_router(scanner_router)
     app.include_router(background_router)
+    app.include_router(retrievals_router)
 
     @app.get("/api/health")
     def health():
@@ -105,8 +107,14 @@ def create_app() -> FastAPI:
             "reason": None if creds == "present" else
             "Earthdata credentials absent — ASF search needs EARTHDATA_TOKEN (or EARTHDATA_USERNAME + EARTHDATA_PASSWORD)",
         }
+        try:
+            from .state import get_runner as _gr
+            busy = _gr().busy_info()
+        except Exception:
+            busy = None
         return {
             "ok": True,
+            "busy": busy,     # {kind, run_id, step, started_at} | None — never touches the worker pool
             "data_dir": str(data_dir),
             "data_dir_exists": data_dir.exists(),
             "db_dir": db_dir,

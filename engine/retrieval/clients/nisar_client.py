@@ -315,11 +315,30 @@ class NisarClient:
                 pg["recent"] = (pg["recent"] + [{"id": g.granule_id, "how": how, "s": round(time.monotonic() - t_start, 1)}])[-8:]
             _slog.info("granule %d/%d %s in %.1fs: %s%s", done, total, how, time.monotonic() - t_start,
                        g.granule_id, f" ({extra})" if extra else "")
+            self._notify(g.granule_id, how, round(time.monotonic() - t_start, 1), extra)
+
+        # Bounded granule concurrency: at most N granules are active at once (the global range-request
+        # budget still applies underneath), so granules finish one by one and each finished clip is
+        # already in the clip store when the next starts. N: NISAR_GRANULE_CONCURRENCY (default 4).
+        try:
+            n_conc = max(1, int(os.environ.get("NISAR_GRANULE_CONCURRENCY", "4")))
+        except ValueError:
+            n_conc = 4
+        gate = asyncio.Semaphore(n_conc)
 
         async def one(g):
+            async with gate:
+                await _one_inner(g)
+
+        async def _one_inner(g):
             t_start = time.monotonic()
+            if getattr(self, "cancel_requested", False):
+                res.skipped[g.granule_id] = "cancelled before it started"
+                finish(g, "skipped", t_start, "cancelled")
+                return
             with self._prog_lock:
                 pg["active"][g.granule_id] = t_start
+            self._notify(g.granule_id, "fetching", 0.0, "")
             try:
                 clip = await self._granule_clip(g, bbox, layers)
                 if clip is None:
@@ -338,6 +357,15 @@ class NisarClient:
         order = {g.granule_id: i for i, g in enumerate(granules)}
         res.clips.sort(key=lambda c: order[c.granule.granule_id])
         return res
+
+    def _notify(self, granule_id: str, state: str, seconds: float, detail: str) -> None:
+        """Optional per-granule hook (set by the retrieval job). Must never break a fetch."""
+        hook = getattr(self, "granule_hook", None)
+        if hook is not None:
+            try:
+                hook(granule_id, state, seconds, detail)
+            except Exception:
+                logging.getLogger("nisar.client").exception("granule_hook failed (ignored)")
 
     def progress_snapshot(self) -> dict:
         """Everything the scan display can show about the retriever, read-only and cheap: wire counters

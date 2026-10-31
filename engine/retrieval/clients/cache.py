@@ -156,7 +156,7 @@ class ClipStore:
         import zarr
         from zarr.codecs import BloscCodec
         d = self._dir(k)
-        tmp = d.with_name(d.name + f".tmp{os.getpid()}")
+        tmp = d.with_name(d.name + f".tmp{os.getpid()}.{threading.get_ident()}")
         shutil.rmtree(tmp, ignore_errors=True)
         (tmp).mkdir(parents=True)
         root = zarr.open_group(str(tmp / "data.zarr"), mode="w", zarr_format=3)
@@ -203,6 +203,6 @@ class SearchCache:
     def put(self, k: str, items: list[dict]):
         self.root.mkdir(parents=True, exist_ok=True)
         p = self.root / f"{k}.json"
-        tmp = p.with_suffix(f".{os.getpid()}.tmp")
+        tmp = p.with_suffix(f".{os.getpid()}.{threading.get_ident()}.tmp")
         tmp.write_text(json.dumps({"created": time.time(), "items": items}))
         replace_file(tmp, p)

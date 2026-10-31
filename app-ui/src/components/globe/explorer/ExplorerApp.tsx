@@ -14,6 +14,8 @@ import dynamic from "next/dynamic";
 import { useRouter, useSearchParams } from "next/navigation";
 import { ChevronDown, ChevronUp, RotateCcw, Search } from "lucide-react";
 import { api, granulesBbox } from "@/lib/api";
+import RetrievalPanel from "./RetrievalPanel";
+import { boxFromCenter, centerOfBox, RANGE_MAX_KM, RANGE_MIN_KM } from "@/lib/boxFromCenter";
 import { useEngineUrl } from "@/lib/engineUrl";
 import type { BackgroundGroup, ExplorerGranule, ExplorerStack, GranuleExplorerResponse } from "@/lib/types";
 import {
@@ -56,6 +58,10 @@ export default function ExplorerApp() {
   const [levels, setLevels] = useState<string[]>(["GUNW"]);
   const [from, setFrom] = useState("");
   const [to, setTo] = useState("");
+  // centre + range fix the box: editing any of the three recomputes West/South/East/North
+  const [latC, setLatC] = useState("");
+  const [lonC, setLonC] = useState("");
+  const [rangeKm, setRangeKm] = useState("10");
   const [tileForBox, setTileForBox] = useState<string | null>(null);
 
   // ---- query state ----------------------------------------------------------------------------
@@ -259,12 +265,44 @@ export default function ExplorerApp() {
     ? `box ${data.bbox.map((v) => Number(v.toFixed(4))).join(", ")} · window ${data.window.t0} → ${data.window.t1} · level ${levels.join(",")}`
     : null;
 
+  const applyCenter = (la: string, lo: string, km: string) => {
+    setLatC(la); setLonC(lo); setRangeKm(km);
+    const b = boxFromCenter(Number(la), Number(lo), Number(km));
+    if (la.trim() !== "" && lo.trim() !== "" && b) {
+      setWest(String(b[0])); setSouth(String(b[1])); setEast(String(b[2])); setNorth(String(b[3]));
+      setTileForBox(null);                       // a hand-made box is not "tile X" any more
+    }
+  };
+  const centerBad = (latC.trim() !== "" || lonC.trim() !== "")
+    && !boxFromCenter(Number(latC), Number(lonC), Number(rangeKm));
+
+  // a box that arrives from elsewhere (tile, link, map) updates the centre/range fields to match it
+  useEffect(() => {
+    const v = [west, south, east, north].map((x) => (x.trim() === "" ? NaN : Number(x)));
+    if (!v.every(Number.isFinite) || v[0] >= v[2] || v[1] >= v[3]) return;
+    const cur = boxFromCenter(Number(latC), Number(lonC), Number(rangeKm));
+    if (cur && cur.every((x, i) => Math.abs(x - v[i]) < 1e-4)) return;      // it came from these fields
+    const c = centerOfBox(v as [number, number, number, number]);
+    setLatC(c.lat.toFixed(4)); setLonC(c.lon.toFixed(4)); setRangeKm(String(Number(c.rangeKm.toFixed(1))));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [west, south, east, north]);
+
   return (
     <div className="explorer-root fixed inset-0 flex flex-col bg-[#0e1116] text-[#d9dee4]">
       {/* ---- top bar ---- */}
       <header className="flex flex-wrap items-center gap-x-4 gap-y-2 border-b border-[#262c36] px-4 py-2.5">
         <AppNav active="background" dark />
         <div className="ml-auto flex flex-wrap items-center gap-2 text-xs">
+          <LabeledInput label="Lat" value={latC} onChange={(v) => applyCenter(v, lonC, rangeKm)} placeholder="23.7141" width="w-20" />
+          <LabeledInput label="Lon" value={lonC} onChange={(v) => applyCenter(latC, v, rangeKm)} placeholder="90.4009" width="w-24" />
+          <span title={`Side length of the square box centred on Lat/Lon (${RANGE_MIN_KM}–${RANGE_MAX_KM} km). Sets West/South/East/North.`}>
+            <LabeledInput label="Range km" value={rangeKm} onChange={(v) => applyCenter(latC, lonC, v)} placeholder="10" width="w-16" type="number" />
+          </span>
+          {centerBad && (
+            <span role="alert" className="text-[11px] text-[#ffb4b4]">
+              Lat/Lon/Range not usable (lat ±84, lon ±180, range {RANGE_MIN_KM}–{RANGE_MAX_KM} km)
+            </span>
+          )}
           <LabeledInput label="West" value={west} onChange={setWest} placeholder="-119.0" width="w-24" />
           <LabeledInput label="South" value={south} onChange={setSouth} placeholder="33.5" width="w-20" />
           <LabeledInput label="East" value={east} onChange={setEast} placeholder="-117.0" width="w-24" />
@@ -426,6 +464,13 @@ export default function ExplorerApp() {
               )}
             </div>
           )}
+          <RetrievalPanel
+            bbox={(() => {
+              const v = [west, south, east, north].map((x) => (x.trim() === "" ? NaN : Number(x)));
+              return v.every(Number.isFinite) && v[0] < v[2] && v[1] < v[3] ? (v as [number, number, number, number]) : null;
+            })()}
+            levels={levels}
+          />
         </section>
 
         {/* ---- detail panel (desktop right ≈380 px; mobile bottom sheet) ---- */}
@@ -447,10 +492,12 @@ export default function ExplorerApp() {
               engineOnline={health === true}
               onClose={() => setSelectedIds([])}
               onShowOnGlobe={(lat, lon) => {
-                window.location.href = `/map?lat=${lat}&lon=${lon}&z=7`;
+                // in-app navigation: no document reload; the map is created at this camera
+                saveQueryContext({ lat, lon });
+                router.push(`/map?lat=${lat}&lon=${lon}&z=7`);
               }}
               onScanTile={(tileId) => {
-                window.location.href = `/map?tile=${encodeURIComponent(tileId)}&panel=pin`;
+                router.push(`/map?tile=${encodeURIComponent(tileId)}&panel=pin`);
               }}
               onCompare={openCompare}
             />

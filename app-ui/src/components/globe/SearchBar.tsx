@@ -13,6 +13,12 @@ export interface SearchBarProps {
   lon: string;
   onLat: (v: string) => void;
   onLon: (v: string) => void;
+  /** side length (km) of the square box drawn around the pin; "" = the engine's own tile */
+  range?: string;
+  onRange?: (v: string) => void;
+  /** one honest line about what the range does / why it is not usable */
+  rangeNote?: string | null;
+  rangeBad?: boolean;
   onSubmit: (lat: number, lon: number) => void;
   onLocate: (lat: number, lon: number) => void;
   flat: boolean;
@@ -112,6 +118,21 @@ export default function SearchBar(props: SearchBarProps) {
             aria-label="Longitude (-180 to 180)"
           />
         </label>
+        {props.onRange && (
+          <label className="w-[72px] shrink-0 text-[11px] font-medium text-[#4a443c]"
+                 title="Side length of the square box around the pin, in km. Empty = the engine's own tile (about 10 km).">
+            Range km
+            <input suppressHydrationWarning
+              value={props.range ?? ""}
+              onChange={(e) => props.onRange?.(e.target.value)}
+              inputMode="decimal"
+              autoComplete="off"
+              placeholder="tile"
+              className="mono mt-0.5 w-full rounded-md border border-[#e7e2da] bg-white px-2 py-1.5 text-sm text-[#1c1a17] outline-none focus:border-[#2c5f58]"
+              aria-label="Box range in km (side length)"
+            />
+          </label>
+        )}
         <button
           type="submit"
           title="Go to coordinates"
@@ -122,6 +143,10 @@ export default function SearchBar(props: SearchBarProps) {
         </button>
       </form>
       {err && <p role="alert" className="mt-2 text-[11px] text-[#9e3b2c]">{err}</p>}
+      {props.rangeNote && (
+        <p role={props.rangeBad ? "alert" : undefined}
+           className={`mt-2 text-[11px] ${props.rangeBad ? "text-[#9e3b2c]" : "text-[#6b655d]"}`}>{props.rangeNote}</p>
+      )}
       <div className="mt-2 flex items-center justify-between gap-2">
         <button
           type="button"

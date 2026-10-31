@@ -13,6 +13,8 @@ import type {
 } from "./types";
 
 import { engineBase } from "./engineUrl";
+import { engineFetch, EngineError, messageFor } from "./engineError";
+export { EngineError };
 
 /** The engine base is read at CALL time (not module load) so a URL pasted into the nav's engine
  *  link applies immediately. Components that DISPLAY it use useEngineUrl() from ./engineUrl. */
@@ -34,22 +36,22 @@ function extractError(body: unknown, res: Response): string {
 }
 
 async function get<T>(path: string, opts?: { signal?: AbortSignal }): Promise<T> {
-  const res = await fetch(`${engineBase()}${path}`, { cache: "no-store", signal: opts?.signal });
+  const res = await engineFetch(engineBase(), path, { cache: "no-store", signal: opts?.signal });
   if (!res.ok) {
     const body = await res.json().catch(() => ({}));
-    throw new Error(extractError(body, res));
+    throw new EngineError("http", messageFor("http", { base: engineBase(), detail: extractError(body, res) }), { status: res.status });
   }
   return res.json() as Promise<T>;
 }
 
 async function post<T>(path: string, body: unknown): Promise<T> {
-  const res = await fetch(`${engineBase()}${path}`, {
+  const res = await engineFetch(engineBase(), path, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(body),
   });
   const json = await res.json().catch(() => ({}));
-  if (!res.ok) throw new Error(extractError(json, res));
+  if (!res.ok) throw new EngineError("http", messageFor("http", { base: engineBase(), detail: extractError(json, res) }), { status: res.status });
   return json as T;
 }
 
@@ -173,3 +175,50 @@ export function granulesBbox(
     { signal },
   );
 }
+
+// ---- Stage 3: Retrieve (POST/GET/cancel). Every call answers at once; the UI polls. ----
+export type RetrievalGranuleState = "queued" | "fetching" | "stored" | "skipped" | "failed" | "cancelled";
+export interface RetrievalGranule {
+  granule_id: string;
+  product: string;
+  start: string | null;
+  track: number | null;
+  direction: string | null;
+  state: RetrievalGranuleState;
+  source: string | null;      // how the clip was obtained (net / clip-cache ...), as the engine reports it
+  seconds: number | null;
+  error: string | null;
+  clip_key: string | null;
+  bytes_done: number | null;  // null = not measured (never estimated)
+  bytes_planned: number | null;
+}
+export interface Retrieval {
+  ok: true;
+  id: string;
+  status: "queued" | "running" | "done" | "failed" | "cancelled";
+  stage: string;
+  tile: string | null;
+  bbox: [number, number, number, number];
+  products: string[];
+  lookback_days: number;
+  max_granules: number | null;
+  started_at: number;
+  finished_at: number | null;
+  error: string | null;
+  flags: string[];
+  granules: RetrievalGranule[];
+  counts: Record<RetrievalGranuleState, number>;
+  total: number;
+}
+export interface RetrievalRequest {
+  bbox: [number, number, number, number];
+  products: string[];
+  lookback_days: number;
+  max_granules?: number;
+}
+export const retrievals = {
+  start: (body: RetrievalRequest) =>
+    post<{ ok: true; retrieval_id: string; tile: string | null; bbox: number[] }>("/api/retrievals", body),
+  get: (id: string, signal?: AbortSignal) => get<Retrieval>(`/api/retrievals/${encodeURIComponent(id)}`, { signal }),
+  cancel: (id: string) => post<{ ok: true; message: string }>(`/api/retrievals/${encodeURIComponent(id)}/cancel`, {}),
+};

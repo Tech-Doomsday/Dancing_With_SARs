@@ -5,6 +5,8 @@
  *  (live slim run + pipeline-scoped layers, or cached rows), overlay rendering with an LRU layer
  *  cache, the Data tab, and URL state (§7.7). Honesty rules: engine strings verbatim, an empty
  *  cache renders an honest empty state, a field the engine doesn't compute is simply absent. */
+import { initialCamera } from "@/lib/camera";
+import { boxFromCenter } from "@/lib/boxFromCenter";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import dynamic from "next/dynamic";
 import { useRouter, useSearchParams } from "next/navigation";
@@ -65,6 +67,17 @@ export default function GlobeApp() {
   const [tile, setTile] = useState<TileInfo | null>(null);
   const [tileError, setTileError] = useState<string | null>(null);
   const [tileLoading, setTileLoading] = useState(false);
+  // Range (km): a square box of this side around the pin. Empty = the engine's own tile box.
+  const [rangeInput, setRangeInput] = useState("");
+  const customBox = useMemo(() => {
+    if (!pin || rangeInput.trim() === "") return null;
+    return boxFromCenter(pin[0], pin[1], Number(rangeInput));
+  }, [pin, rangeInput]);
+  const rangeBad = rangeInput.trim() !== "" && !customBox;
+  const shownPolygon = useMemo<[number, number][] | null>(() => (customBox
+    ? [[customBox[0], customBox[1]], [customBox[2], customBox[1]], [customBox[2], customBox[3]],
+       [customBox[0], customBox[3]], [customBox[0], customBox[1]]]
+    : (tile?.polygon_lonlat ?? null)), [customBox, tile?.polygon_lonlat]);
   const [panel, setPanel] = useState<PanelMode>("explore");
   const [selectedTile, setSelectedTile] = useState<string | null>(null);
   const [cachedForTile, setCachedForTile] = useState<CachedSummary[] | null>(null);
@@ -87,6 +100,8 @@ export default function GlobeApp() {
   const lastOverlayOrder = useRef<string[]>([]);
 
   // ---- map state -----------------------------------------------------------------------------
+  // the map is CREATED at the link's camera (or the last saved one) — no world view followed by a fly
+  const [initialCam] = useState(() => initialCamera(new URLSearchParams(searchParams.toString())));
   const [flat, setFlat] = useState(false);
   const [flyTarget, setFlyTarget] = useState<{ center: [number, number]; zoom: number; key: number } | null>(null);
   const [pairFootprint, setPairFootprint] = useState<[number, number][] | null>(null);
@@ -242,6 +257,13 @@ export default function GlobeApp() {
       clearTimeout(id);
     };
   }, [pin, pushUrl]);
+
+  // the Data retrieval tab searches exactly the box drawn here: a custom range replaces the tile box
+  useEffect(() => {
+    if (!pin) return;
+    if (customBox) saveQueryContext({ lat: pin[0], lon: pin[1], bbox: customBox });
+    else if (tile?.bbox_lonlat) saveQueryContext({ lat: pin[0], lon: pin[1], bbox: tile.bbox_lonlat });
+  }, [customBox, tile?.bbox_lonlat, pin]);
 
   // ---- cached rows for the selected tile -------------------------------------------------------
   useEffect(() => {
@@ -770,9 +792,10 @@ export default function GlobeApp() {
   return (
     <div className={`globe-root fixed inset-0 bg-[#0b0d12]${activeOverlayLegend ? " legend-open" : ""}`}>
       <GlobeMap
+        initialCamera={initialCam}
         flyTarget={flyTarget}
         pin={pin}
-        tilePolygon={tile?.polygon_lonlat ?? null}
+        tilePolygon={shownPolygon}
         pins={pins}
         selectedTile={selectedTile}
         overlays={overlaySpecs}
@@ -811,6 +834,14 @@ export default function GlobeApp() {
           <AppNav active="map" dark />
         </div>
         <SearchBar
+          range={rangeInput}
+          onRange={setRangeInput}
+          rangeBad={rangeBad}
+          rangeNote={rangeBad
+            ? "Range must be 1–200 km, with the box inside ±84° latitude."
+            : customBox
+              ? `Box ${rangeInput} × ${rangeInput} km is drawn and used by Data retrieval. A scan still covers the engine's tile${tile ? ` ${tile.id}` : ""}.`
+              : null}
           lat={latInput}
           lon={lonInput}
           onLat={(v) => {

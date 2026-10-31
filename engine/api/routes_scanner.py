@@ -186,6 +186,10 @@ def _bbox_granules(west: float, south: float, east: float, north: float, level: 
             max_results=budget, fresh=fresh)
     except ScanError as ex:
         raise HTTPException(status_code=ex.status, detail={"ok": False, "error": str(ex)}) from ex
+    except TimeoutError as ex:
+        raise HTTPException(status_code=504, detail={"ok": False, "error": (
+            "the ASF search took longer than 25s and was stopped before the tunnel could cut the "
+            "connection. Press Search again — pages already fetched are cached.")}) from ex
     return {"ok": True, **out}
 
 
@@ -255,6 +259,10 @@ def granules_route(lon: float | None = Query(default=None), lat: float | None = 
                                     t0=iso(t0), t1=iso(t1))
     except ScanError as ex:
         raise HTTPException(status_code=ex.status, detail={"ok": False, "error": str(ex)}) from ex
+    except TimeoutError as ex:
+        raise HTTPException(status_code=504, detail={"ok": False, "error": (
+            "the ASF search took longer than 25s and was stopped before the tunnel could cut the "
+            "connection. Press Search again — pages already fetched are cached.")}) from ex
     return {"ok": True, **out}
 
 

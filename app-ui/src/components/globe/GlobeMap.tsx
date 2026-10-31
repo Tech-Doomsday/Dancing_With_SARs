@@ -13,6 +13,7 @@ import maplibregl, { type Map as MlMap, type StyleSpecification } from "maplibre
 import "maplibre-gl/dist/maplibre-gl.css";
 import { seamSplits } from "@/lib/raster";
 import "./globe-overrides.css";
+import { DEFAULT_CAMERA, saveCamera } from "@/lib/camera";
 
 const ESRI_ATTRIBUTION = "Source: Esri, Vantor, Earthstar Geographics, and the GIS User Community";
 const ESRI_TILES = "https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}";
@@ -39,6 +40,8 @@ export interface FlyTarget {
 }
 
 export interface GlobeMapProps {
+  /** where to CREATE the map (link or saved view); omitted = the world view */
+  initialCamera?: { center: [number, number]; zoom: number };
   flyTarget: FlyTarget | null;
   pin: [number, number] | null;
   tilePolygon: [number, number][] | null;
@@ -118,8 +121,8 @@ export default function GlobeMap(props: GlobeMapProps) {
       map = new maplibregl.Map({
         container,
         style: STYLE,
-        center: [0, 20],
-        zoom: 1.4,
+        center: cbRef.current.initialCamera?.center ?? DEFAULT_CAMERA.center,
+        zoom: cbRef.current.initialCamera?.zoom ?? DEFAULT_CAMERA.zoom,
         attributionControl: { compact: true },
         canvasContextAttributes: { preserveDrawingBuffer: true },
         maxPitch: 0,
@@ -131,6 +134,12 @@ export default function GlobeMap(props: GlobeMapProps) {
       return;
     }
     mapRef.current = map;
+    // test hook: how many map instances this page has constructed (never read by app code)
+    try { const w = window as unknown as { __nisarMapCreates?: number }; w.__nisarMapCreates = (w.__nisarMapCreates ?? 0) + 1; } catch { /* ignore */ }
+    map.on("moveend", () => {
+      const c = map.getCenter();
+      saveCamera({ center: [c.lng, c.lat], zoom: map.getZoom() });
+    });
     map.on("error", () => { /* tile errors are transient; the UI must not die on them */ });
     map.on("load", () => {
       map.addSource("esri", {

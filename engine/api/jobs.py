@@ -107,6 +107,10 @@ class JobRunner:
         self.verdicts = VerdictStore(self.db_dir / "verdicts.db")
         self.cache = cache if cache is not None else CloudCache.from_env()   # Supabase mirror (4.6)
         self._pool = ThreadPoolExecutor(max_workers=1, thread_name_prefix="engine-run")
+        # Metadata lane (search / previews / probes): its own worker so a long retrieval never
+        # queues a bbox search behind it. Each job builds its OWN retriever through the factory
+        # (NisarClient owns threads + an event loop), and the on-disk caches use per-thread temp names.
+        self._meta_pool = ThreadPoolExecutor(max_workers=2, thread_name_prefix="engine-meta")
         self._states: dict[str, dict] = {}
         # §5 preprocessing traces (in-memory, bounded): run_id -> {trace payload + array records}.
         # Traces exist only for runs started WITH tracing in this process; they are evicted with
@@ -118,7 +122,7 @@ class JobRunner:
     # ------------------------------------------------------------------ API
     def _fresh_run_state(self, kind: str) -> dict:
         return {"status": "queued", "progress": {"stage": "queued"},
-                "error": None, "results": [], "kind": kind}
+                "error": None, "results": [], "kind": kind, "started_at": time.time()}
 
     def _begin_run(self, kind: str, bundle_id: str, tile: str, pipelines: list, params: dict) -> str:
         """D10 first: rows that claim queued/running but have no live state in THIS process are
@@ -175,9 +179,9 @@ class JobRunner:
         a scan's retriever (single-flight-safe by construction)."""
         if not earthdata_present():
             raise ScanError(503, NO_EARTHDATA_MESSAGE)
-        fut = self._pool.submit(self._granule_search_sync, lon, lat, products, t0, t1,
+        fut = self._meta_pool.submit(self._granule_search_sync, lon, lat, products, t0, t1,
                                 retriever_factory)
-        return fut.result(timeout=600)
+        return fut.result(timeout=float(os.environ.get("NISAR_HTTP_MAX_S", "25")))
 
     def granule_search_bbox(self, *, bbox: tuple, levels: list[str], t0: str, t1: str,
                             product_names: dict[str, str], max_results: int, fresh: bool,
@@ -187,9 +191,9 @@ class JobRunner:
         503 without credentials, then runs the real search and enrichment."""
         if not earthdata_present():
             raise ScanError(503, NO_EARTHDATA_MESSAGE)
-        fut = self._pool.submit(self._granule_search_bbox_sync, bbox, levels, t0, t1,
+        fut = self._meta_pool.submit(self._granule_search_bbox_sync, bbox, levels, t0, t1,
                                 product_names, max_results, fresh, retriever_factory)
-        return fut.result(timeout=600)
+        return fut.result(timeout=float(os.environ.get("NISAR_HTTP_MAX_S", "25")))
 
     def _granule_search_bbox_sync(self, bbox, levels, t0, t1, product_names, max_results, fresh,
                                   retriever_factory) -> dict:
@@ -205,6 +209,22 @@ class JobRunner:
                 retriever.close()
             except Exception:
                 pass
+
+    def busy_info(self) -> dict | None:
+        """What the retrieval worker is doing now, for /api/health. Lock-free on purpose (a plain
+        snapshot of the state dict) so it answers while the worker is saturated; it never touches
+        a pool, the store or the network. None when idle."""
+        try:
+            items = list(self._states.items())
+        except RuntimeError:     # dict changed size mid-copy: report unknown-busy rather than block
+            return {"kind": "unknown", "run_id": None, "step": None, "started_at": None}
+        for rid, st in items:
+            if st.get("status") in ("queued", "running"):
+                prog = st.get("progress") or {}
+                return {"kind": st.get("kind") or "run", "run_id": rid,
+                        "step": prog.get("stage"), "started_at": st.get("started_at")}
+        extra = getattr(self, "_extra_busy", None)      # a retrieval job (engine/api/retrievals.py)
+        return extra() if extra else None
 
     # ------------------------------------------------------------------ reads
     @staticmethod
@@ -642,6 +662,7 @@ class JobRunner:
 
     def close(self):
         self._pool.shutdown(wait=False)
+        self._meta_pool.shutdown(wait=False)
         self.heavy.close()
         self.verdicts.close()
 
