@@ -15,7 +15,9 @@ import {
 export type AppNavItem = "landing" | "map" | "background";
 
 const ITEMS: { key: AppNavItem; href: string; label: string }[] = [
-  { key: "landing", href: "/", label: "Landing" },
+  /* the cinematic Speckle landing now owns "/", so the Landing tab points
+     at the plain-language console home that used to live there */
+  { key: "landing", href: "/console", label: "Landing" },
   { key: "map", href: "/map", label: "Map" },
   { key: "background", href: "/background/retrieval", label: "Background" },
 ];
@@ -31,7 +33,7 @@ function useContextHrefs(): Record<AppNavItem, string> {
     read();
     return subscribeQueryContext(read);
   }, []);
-  return { landing: "/", map: mapHref(ctx), background: retrievalHref(ctx) };
+  return { landing: "/console", map: mapHref(ctx), background: retrievalHref(ctx) };
 }
 
 export default function AppNav({ active, dark = false }: { active: AppNavItem | null; dark?: boolean }) {

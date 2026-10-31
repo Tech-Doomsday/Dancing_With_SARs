@@ -1,10 +1,11 @@
 import { expect, test } from "@playwright/test";
 
+/** NOTE: the plain-language console home now lives at /console; "/" is the Speckle cinematic landing. */
 /** §2 Landing — public, plain language, live status strip that never invents numbers.
  *  This suite runs with the ENGINE OFFLINE, so the honest state is: "down" + no numbers. */
 
 test("landing renders the promise, the Map CTA, and the four steps", async ({ page }) => {
-  await page.goto("/");
+  await page.goto("/console");
   await expect(page.getByRole("heading", { level: 1 })).toContainText(/NISAR radar data/i);
   const cta = page.getByRole("link", { name: /Open the Map/ });
   await expect(cta).toBeVisible();
@@ -16,13 +17,13 @@ test("landing renders the promise, the Map CTA, and the four steps", async ({ pa
 });
 
 test("landing explains how to read a result (tiers in words; rank score is not a probability)", async ({ page }) => {
-  await page.goto("/");
+  await page.goto("/console");
   await expect(page.getByText(/It is .*not.* a probability/i)).toBeVisible();
   await expect(page.getByText(/labels.*SYNTHETIC|SYNTHETIC/).first()).toBeVisible();
 });
 
 test("mini glossary defines GUNW, GCOV, tile, stack and tier in one line each", async ({ page }) => {
-  await page.goto("/");
+  await page.goto("/console");
   for (const term of ["GUNW", "GCOV", "tile", "stack", "tier"]) {
     await expect(page.getByText(term, { exact: true }).first()).toBeVisible();
   }
@@ -31,7 +32,7 @@ test("mini glossary defines GUNW, GCOV, tile, stack and tier in one line each", 
 });
 
 test("live status strip: engine down is SAID, and no numbers are shown (never invented)", async ({ page }) => {
-  await page.goto("/");
+  await page.goto("/console");
   // the default suite has the engine deliberately absent — the strip must say so
   await expect(page.getByText(/the engine is down right now/)).toBeVisible({ timeout: 20_000 });
   // and it must not render the up-state numbers
@@ -39,15 +40,23 @@ test("live status strip: engine down is SAID, and no numbers are shown (never in
 });
 
 test("footer carries the data sources and the not-for-emergency line", async ({ page }) => {
-  await page.goto("/");
+  await page.goto("/console");
   await expect(page.getByText(/not for emergency decisions/).first()).toBeVisible();
   await expect(page.getByText(/NISAR \(JPL\/ISRO\) via ASF DAAC/)).toBeVisible();
 });
 
 test("shared nav offers Landing · Map · Background from the landing page", async ({ page }) => {
-  await page.goto("/");
+  await page.goto("/console");
   const nav = page.getByRole("navigation", { name: "App sections" });
   await expect(nav.getByRole("link", { name: "Landing" })).toBeVisible();
   await expect(nav.getByRole("link", { name: "Map" })).toBeVisible();
   await expect(nav.getByRole("link", { name: "Background" })).toBeVisible();
+});
+
+test("the cinematic landing owns / and its way in leads to the console", async ({ page }) => {
+  await page.goto("/");
+  const cta = page.locator('a[href="/console"]').first();
+  await expect(cta).toBeAttached({ timeout: 20_000 });
+  await page.goto("/console");
+  await expect(page).toHaveURL(/\/console$/);
 });

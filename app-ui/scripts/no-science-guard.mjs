@@ -44,7 +44,11 @@ const FORBIDDEN_PATTERNS = [
   /momentFromMw|ruptureAreaFromMw|slipFromMoment\b/i,
 ];
 
-const ALLOWED_FILES = /no-science-guard|\.test\.|playwright/;
+// The Speckle landing story file is pure PRESENTATION copy — it NAMES engine
+// concepts in prose ("nodal plane" in the Chapter VIII earthquake narrative),
+// taken verbatim from the engine repo's manifests/docs, and computes nothing.
+// Same exemption category as the "UI labels that merely NAME" rule above.
+const ALLOWED_FILES = /no-science-guard|\.test\.|playwright|speckle[/\\]data\.ts$/;
 
 function* walk(dir) {
   for (const name of readdirSync(dir)) {

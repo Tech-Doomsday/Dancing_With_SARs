@@ -16,6 +16,11 @@ const nextConfig: NextConfig = {
   /* The engine API base URL (FastAPI). Overridable via env. */
   env: {
     NEXT_PUBLIC_ENGINE_API: process.env.NEXT_PUBLIC_ENGINE_API ?? "http://127.0.0.1:8900",
+    /* Speckle landing wiring: where the landing page's "Start exploring" /
+       "Console" call-to-actions lead (LINKS.app in
+       src/components/speckle/data.ts). Defaults to the console home inside
+       this app; override with a deployed URL when hosting elsewhere. */
+    NEXT_PUBLIC_SPECKLE_APP_URL: process.env.NEXT_PUBLIC_SPECKLE_APP_URL ?? "/console",
   },
   async redirects() {
     return [
