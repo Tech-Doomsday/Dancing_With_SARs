@@ -250,13 +250,15 @@ def granule_detail(source, gid: str) -> dict:
 _PREVIEW_LOCK = threading.Lock()      # one preview at a time (the fetch can move hundreds of MB)
 
 
-def _cache_paths(gid: str, layer: str, bbox, max_px: int, cmap: str, scale: str = "auto", render_version: int = 0):
+def _cache_paths(gid: str, layer: str, bbox, max_px: int, cmap: str, scale: str = "auto", render_version: int = 0,
+                 rng: tuple | None = None):
     """Cache key = what was ASKED (cmap/scale as requested) + the render version, so changing either
     parameter makes a new entry and bumping render_version in config/preview.yaml retires old ones."""
     from engine.common.config import data_root
     key = hashlib.sha256("|".join([gid, layer,
                                    ",".join(f"{v:.6f}" for v in bbox),
-                                   str(max_px), cmap, scale, f"v{render_version}"]).encode()).hexdigest()[:32]
+                                   str(max_px), cmap, scale, f"v{render_version}"]
+                                  + ([f"range={rng[0]!r},{rng[1]!r}"] if rng else [])).encode()).hexdigest()[:32]
     root = Path(data_root()) / "background" / "previews"
     return root / f"{key}.png", root / f"{key}.json"
 
@@ -294,8 +296,25 @@ _CMAP_CHOICES = ("auto", "viridis", "diverging", "magma", "gray", "categorical")
 _SCALE_CHOICES = ("auto", "db", "linear")
 
 
+def check_range(lo, hi) -> tuple | None:
+    """Explicit colour range (in the units of meta.scale: dB when the scale resolved to dB) -> (lo, hi) or
+    None when neither is given. One without the other, a non-finite value or lo >= hi is a 400."""
+    import math
+    if lo is None and hi is None:
+        return None
+    if lo is None or hi is None:
+        raise BackgroundError(400, "lo and hi go together: give both or neither")
+    lo, hi = float(lo), float(hi)
+    if not (math.isfinite(lo) and math.isfinite(hi)):
+        raise BackgroundError(400, "lo and hi must be finite numbers")
+    if lo >= hi:
+        raise BackgroundError(400, f"lo {lo} must be below hi {hi}")
+    return lo, hi
+
+
 def preview(source, *, gid: str, layer: str, bbox: tuple, max_px: int, cmap: str = "auto",
-            scale: str = "auto", use_cache: bool = True, cfg=None) -> dict:
+            scale: str = "auto", lo: float | None = None, hi: float | None = None,
+            use_cache: bool = True, cfg=None) -> dict:
     """-> {png: bytes, meta: {...}}. The meta is the engine's own statement about the array:
     shape/dtype/epsg/box/min-max/percentiles/nan fraction/wire bytes/cache hit, the scale and colour
     map actually used (+ what was requested), the unit (null = unknown), and the image's corner
@@ -311,7 +330,8 @@ def preview(source, *, gid: str, layer: str, bbox: tuple, max_px: int, cmap: str
     except PreviewConfigError as err:
         raise BackgroundError(500, str(err))
     max_px = max(16, min(int(max_px or 256), _LAYER_CAP))
-    png_path, json_path = _cache_paths(gid, layer, bbox, max_px, cmap, scale, cfg.render_version)
+    fixed = check_range(lo, hi)           # explicit colour range, e.g. so two dates share one stretch
+    png_path, json_path = _cache_paths(gid, layer, bbox, max_px, cmap, scale, cfg.render_version, fixed)
     if use_cache and json_path.exists() and png_path.exists():
         try:
             meta = json.loads(json_path.read_text())
@@ -345,16 +365,23 @@ def preview(source, *, gid: str, layer: str, bbox: tuple, max_px: int, cmap: str
         shown, stride = bimg.decimate(view, max_px)
         if use_cmap == "categorical":
             lo = hi = 0.0
+            fixed = None                  # a categorical map has no range to fix
+        elif fixed is not None:
+            lo, hi = fixed
         else:
             lo, hi = bimg.auto_range(shown, symmetric=(use_cmap == "diverging"))
         body = bimg.render(shown, use_cmap, lo, hi)
         corners, corners_note = (None, "no grid axes for this layer")
         if grid is not None and getattr(grid, "x", None) is not None and getattr(grid, "y", None) is not None:
-            corners, corners_note = edge_corners_lonlat(grid.x, grid.y, int(grid.epsg))
+            if (len(grid.y), len(grid.x)) != tuple(view.shape[-2:]):
+                corners_note = "no corners: the grid axes do not match the array shape"
+            else:       # corners of the DRAWN (decimated) image, not of the full-resolution array
+                corners, corners_note = edge_corners_lonlat(grid.x, grid.y, int(grid.epsg), stride=int(stride))
         meta = {
             "id": gid, "layer": layer, "cmap": use_cmap, "cmap_requested": cmap,
             "scale": use_scale, "scale_requested": scale, "unit": cfg.unit(use_scale),
             "render_version": cfg.render_version, "lo": lo, "hi": hi,
+            "range_fixed": fixed is not None,
             "nan_fraction": float(1.0 - np.isfinite(view).mean()),
             "shown_stride": int(stride), "shown_shape": [int(shown.shape[0]), int(shown.shape[1])],
             "epsg": int(grid.epsg) if grid is not None else None,
@@ -493,7 +520,7 @@ def register_trace(runner: "JobRunnerLike", run_id: str, payload: dict) -> dict:
         aid = f"t{i}"
         view = finite_view(rec.thumb)
         from engine.common.grids import extent_corners_lonlat
-        corners, corners_note = extent_corners_lonlat(rec.extent, rec.epsg)
+        corners, corners_note = extent_corners_lonlat(rec.extent, rec.epsg, stride=int(rec.stride), shape=rec.shape)
         m = {
             "corners_lonlat": corners, "corners_note": corners_note,
             "aid": aid, "path": path, "label": rec.label, "group": rec.group,
@@ -541,7 +568,8 @@ def trace_array_png(rec, cmap: str, lo: float | None, hi: float | None, max_px: 
             "epsg": rec.epsg, "extent": list(rec.extent) if rec.extent else None,
             "label": rec.label, "path": rec.path}
     from engine.common.grids import extent_corners_lonlat
-    meta["corners_lonlat"], meta["corners_note"] = extent_corners_lonlat(rec.extent, rec.epsg)
+    meta["corners_lonlat"], meta["corners_note"] = extent_corners_lonlat(
+        rec.extent, rec.epsg, stride=int(rec.stride) * int(stride), shape=rec.shape)
     return body, meta
 
 

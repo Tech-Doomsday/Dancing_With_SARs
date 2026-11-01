@@ -25,8 +25,10 @@ const FootprintMap = dynamic(() => import("./FootprintMiniMap"), {
 });
 
 import ExplainLine from "@/components/background/ExplainLine";
-import SarOverlayControl from "./SarOverlayControl";
+import SarOverlayControl, { type SarRequest } from "./SarOverlayControl";
 import type { SarOverlay } from "./FootprintMiniMap";
+import LayerThumb from "./LayerThumb";
+import BeforeAfter from "./BeforeAfter";
 
 type Tab = "summary" | "layers" | "timeline" | "data";
 
@@ -66,6 +68,9 @@ export default function ExplorerDetail({ granule, group, stack, stackGranules, b
   const retryNonce = useGateRetryNonce();
   const [tab, setTab] = useState<Tab>("summary");
   const [sarOverlay, setSarOverlay] = useState<SarOverlay | null>(null);
+  const [sarRequest, setSarRequest] = useState<SarRequest | null>(null);
+  const sarNonce = useRef(0);
+  const [baOpen, setBaOpen] = useState(false);
   const [copied, setCopied] = useState(false);
   const [tileId, setTileId] = useState<string | null>(null);
   const [tileError, setTileError] = useState<string | null>(null);
@@ -128,6 +133,16 @@ export default function ExplorerDetail({ granule, group, stack, stackGranules, b
     return () => ctrl.abort();
   }, [granule, engineOnline]);
 
+  useEffect(() => { if (tab !== "summary") setSarRequest(null); }, [tab]);
+  useEffect(() => { setSarRequest(null); setBaOpen(false); }, [granule?.id, variantId]);
+
+  /** Layers tab -> "Show on map": select this layer in the SAME overlay control (on the Summary tab, under the mini-map) */
+  const showOnMap = (layerKey: string) => {
+    sarNonce.current += 1;
+    setSarRequest({ layerKey, nonce: sarNonce.current });
+    setTab("summary");
+  };
+
   const copyName = () => {
     if (!granule) return;
     void navigator.clipboard?.writeText(granule.id).then(() => {
@@ -185,6 +200,10 @@ export default function ExplorerDetail({ granule, group, stack, stackGranules, b
     : null;
 
   const shown = selectedVariant ?? granule;
+  // the stack members the UI already holds, GCOV only, oldest first (the engine grouped them)
+  const gcovDates = stackGranules
+    .filter((g) => g.product === "GCOV" && g.start && Number.isFinite(Date.parse(g.start)))
+    .sort((a, b) => Date.parse(a.start!) - Date.parse(b.start!));
   const isPair = (group?.kind ?? (shown.ref_time && shown.sec_time ? "pair" : "single")) === "pair";
 
   return (
@@ -283,7 +302,8 @@ export default function ExplorerDetail({ granule, group, stack, stackGranules, b
               overlay={sarOverlay}
             />
           </div>
-          <SarOverlayControl granuleId={shown.id} bbox={bbox} inventory={detail?.inventory} onOverlay={setSarOverlay} />
+          <SarOverlayControl key={shown.id} granuleId={shown.id} bbox={bbox} inventory={detail?.inventory}
+                             onOverlay={setSarOverlay} request={sarRequest} onGate={gateFail} />
 
           {/* key/value table */}
           <dl className="mt-2">
@@ -381,6 +401,10 @@ export default function ExplorerDetail({ granule, group, stack, stackGranules, b
                   compare the two ends
                 </button>
               </div>
+              {pair && pair.ref.granules.length > 0 && pair.sec.granules.length > 0 && (
+                <BeforeAfter key={`${pair.id}`} candidates={[...pair.ref.granules, ...pair.sec.granules]} bbox={bbox}
+                             defaultBefore={pair.ref.granules[0].id} defaultAfter={pair.sec.granules[0].id} onGate={gateFail} />
+              )}
             </div>
           ) : (
             <div className="mt-2 rounded-md border border-[#262c36] bg-[#12161d] p-2 text-[10.5px] leading-relaxed text-[#8b949e]">
@@ -389,6 +413,18 @@ export default function ExplorerDetail({ granule, group, stack, stackGranules, b
                 <strong className="text-[#cfd6dc]">A {shown.product ?? "GCOV"} is one acquisition</strong>{" "}
                 — one date&apos;s backscatter picture, no pair, no baseline.
               </p>
+              {gcovDates.length >= 2 && (
+                <>
+                  <button type="button" onClick={() => setBaOpen((v) => !v)} aria-expanded={baOpen}
+                          className="mt-1.5 rounded border border-[#3fb6c9] px-2 py-1 text-[10px] text-[#7fd8e6] hover:bg-[#12262c]">
+                    {baOpen ? "hide" : "compare two dates of this stack (Before / After)"}
+                  </button>
+                  {baOpen && (
+                    <BeforeAfter key={shown.id} candidates={gcovDates} bbox={bbox}
+                                 defaultBefore={gcovDates[0].id} defaultAfter={gcovDates[gcovDates.length - 1].id} onGate={gateFail} />
+                  )}
+                </>
+              )}
             </div>
           )}
 
@@ -461,7 +497,20 @@ export default function ExplorerDetail({ granule, group, stack, stackGranules, b
                           </tr>
                           <tr>
                             <td colSpan={3} className="pb-1 font-sans">
-                              <ExplainLine role={l.role} whatItIs={l.what_it_is} compact />
+                              <div className="flex items-start gap-2">
+                                {l.previewable && (
+                                  <LayerThumb granuleId={shown.id} layerKey={l.key} bbox={bbox} previewable={l.previewable} onGate={gateFail} />
+                                )}
+                                <div className="min-w-0 flex-1">
+                                  <ExplainLine role={l.role} whatItIs={l.what_it_is} compact />
+                                  {l.previewable && (
+                                    <button type="button" onClick={() => showOnMap(l.key)}
+                                            className="mt-1 rounded border border-[#3fb6c9] px-1.5 py-0.5 text-[10px] text-[#7fd8e6] hover:bg-[#12262c]">
+                                      Show on map
+                                    </button>
+                                  )}
+                                </div>
+                              </div>
                             </td>
                           </tr>
                         </Fragment>

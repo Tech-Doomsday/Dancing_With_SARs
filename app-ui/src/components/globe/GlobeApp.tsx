@@ -99,6 +99,7 @@ export default function GlobeApp() {
   const [overlayErrors, setOverlayErrors] = useState<Record<string, string>>({});
   const layerCache = useRef<Map<string, LayerCacheEntry>>(new Map());
   const lastOverlayOrder = useRef<string[]>([]);
+  const [sarSpec, setSarSpec] = useState<OverlaySpec | null>(null);
 
   // ---- map state -----------------------------------------------------------------------------
   const [flat, setFlat] = useState(false);
@@ -475,8 +476,9 @@ export default function GlobeApp() {
       const entry = layerCache.current.get(`${resultsRunId ? "live" : "cached"}|${sourceId}|${o.pipeline}|${o.layer}`);
       if (entry) specs.push({ id: `overlay:${key}`, dataUrl: entry.dataUrl, bounds: entry.bounds, opacity: o.opacity });
     }
+    if (sarSpec) specs.push(sarSpec);          // a SAR image of a selected granule sits on top
     return specs;
-  }, [overlays, resultsRunId, cachedResults]);
+  }, [overlays, resultsRunId, cachedResults, sarSpec]);
 
   const pins: { tile: string; lon: number; lat: number; tier: string; label: string }[] = useMemo(() => {
     const out: { tile: string; lon: number; lat: number; tier: string; label: string }[] = [];
@@ -799,6 +801,7 @@ export default function GlobeApp() {
             setPairFootprint(ring ? [...ring] : null);
             if (ring && fit) setFitFootprintKey((k) => k + 1);
           }}
+          onSarOverlay={setSarSpec}
         />
       )}
     </>

@@ -63,7 +63,7 @@ export default function OverviewPage() {
               const href = hrefFor(n.page, n.run);
               return (
                 <li key={n.key} className="flex items-stretch gap-2">
-                  <div className="flex w-56 flex-col gap-1 rounded border border-[#262c36] bg-[#12161c] p-2.5">
+                  <div className="flex w-56 max-w-full flex-col gap-1 rounded border border-[#262c36] bg-[#12161c] p-2.5">
                     <h2 className="text-[11px] font-semibold text-[#f2efe9]">{dash(n.title)}</h2>
                     <p className="text-[#cfd6dc]">{dash(n.plain)}</p>
                     <p className="font-mono text-[10px] text-[#8b949e]">{dash(n.tech)}</p>
@@ -75,7 +75,7 @@ export default function OverviewPage() {
                       ))}
                     </div>
                     {href && (
-                      <Link href={href} className="mt-auto text-[10px] text-[#7fd8e6] underline-offset-2 hover:underline">
+                      <Link href={href} className="mt-auto rounded text-[10px] text-[#7fd8e6] underline-offset-2 hover:underline focus-visible:outline focus-visible:outline-2 focus-visible:outline-[#3fb6c9]">
                         open →
                       </Link>
                     )}
@@ -88,10 +88,13 @@ export default function OverviewPage() {
           <h2 className="mt-5 text-[11px] font-semibold text-[#f2efe9]">Preprocessing steps (from the engine)</h2>
           <ol className="mt-2 grid max-w-4xl gap-1" data-testid="overview-steps">
             {data.steps.map((s) => (
-              <li key={s.code} className="flex gap-2 border-b border-[#1c222b] py-1">
+              <li key={s.code} className="flex flex-wrap gap-x-2 gap-y-0.5 border-b border-[#1c222b] py-1">
                 <span className="w-9 shrink-0 font-mono text-[#e6c977]">{s.code}</span>
-                <span className="w-44 shrink-0 font-mono text-[#8b949e]">{s.name}</span>
-                <span className="text-[#cfd6dc]">{dash(s.plain)}</span>
+                <span className="w-44 max-w-full shrink-0 break-words font-mono text-[#8b949e]">{s.name}</span>
+                <span className="min-w-[12rem] flex-1 text-[#cfd6dc]">
+                  {dash(s.plain)}
+                  {s.technical && <span className="mt-0.5 block font-mono text-[10px] text-[#8b949e]" data-testid="step-technical">{s.technical}</span>}
+                </span>
                 <span className="ml-auto shrink-0 font-mono text-[10px] text-[#5a636e]">
                   needs {s.needs.length ? s.needs.join(" | ") : "—"}
                 </span>

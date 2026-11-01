@@ -179,3 +179,19 @@ def test_what_the_pyz_unpacks_is_enough_to_run_the_hub(tmp_path):
     got = json.loads(r.stdout.strip().splitlines()[-1])
     assert 9 <= got["tiles"] <= 16 and got["first"] == "46QBM32" and got["ok"] is True
     assert got["engine_from"].startswith(str(home))
+
+
+def test_cli_packs_the_repo_env_by_default_and_no_env_opts_out(tmp_path, monkeypatch, capsys):
+    root = _fake_root(tmp_path / "r")
+    monkeypatch.setattr(bh, "ROOT", root)
+    assert bh.main(["--out", str(tmp_path / "a.pyz")]) == 0
+    said = capsys.readouterr().out
+    with zipfile.ZipFile(tmp_path / "a.pyz") as z:
+        leaking = [n for n in z.namelist() if SENTINEL.encode() in z.read(n)]
+    assert leaking == [".env"]                                                   # the root .env, nothing else
+    assert "EARTHDATA_TOKEN" in said and SENTINEL not in said                    # names are printed, values never
+    assert bh.main(["--out", str(tmp_path / "b.pyz"), "--no-env"]) == 0
+    assert ".env" not in _names(tmp_path / "b.pyz")
+    (root / ".env").unlink()
+    assert bh.main(["--out", str(tmp_path / "c.pyz")]) == 0                      # no .env: still builds, says so
+    assert ".env" not in _names(tmp_path / "c.pyz") and "No .env at the repo root" in capsys.readouterr().out

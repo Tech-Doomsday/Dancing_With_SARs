@@ -9,8 +9,10 @@ import { api } from "@/lib/api";
 import { useEngineUrl } from "@/lib/engineUrl";
 import { retrievalHref, saveQueryContext, toDateOnly } from "@/lib/queryContext";
 import type { GranuleSearchResponse } from "@/lib/types";
-import GranuleTimeline, { type TimelineSelection } from "./GranuleTimeline";
+import GranuleTimeline, { selectionFromPath, type TimelineSelection } from "./GranuleTimeline";
 import GranuleDetail from "./GranuleDetail";
+import MapSarControl from "./MapSarControl";
+import type { OverlaySpec } from "./GlobeMap";
 
 export interface DataPanelProps {
   tileId: string | null;
@@ -23,6 +25,8 @@ export interface DataPanelProps {
   granuleSearchStatus: "enabled" | "disabled" | undefined;
   granuleSearchReason: string | null | undefined;
   onFootprintOnMap: (ring: [number, number][] | null, fit?: boolean) => void;
+  /** a georeferenced SAR image of the selected granule, drawn by the map (null = remove) */
+  onSarOverlay?: (o: OverlaySpec | null) => void;
 }
 
 export default function DataPanel(props: DataPanelProps) {
@@ -284,6 +288,13 @@ export default function DataPanel(props: DataPanelProps) {
             selection={selection}
             onFootprintOnMap={props.onFootprintOnMap}
           />
+          {(() => {
+            const sel = selectionFromPath(data, selection);
+            const gid = sel ? (sel.kind === "gunw" ? sel.pair.granule_ids[0] : sel.epoch.granule_ids[0]) : null;
+            return gid && props.onSarOverlay
+              ? <MapSarControl key={gid} granuleId={gid} bbox={props.tileBbox ?? null} onOverlay={props.onSarOverlay} />
+              : null;
+          })()}
         </>
       )}
       {!loading && !data && !error && (

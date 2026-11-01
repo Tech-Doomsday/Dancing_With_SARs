@@ -21,6 +21,14 @@ import type {
 
 export type { GateError } from "./bgApi";
 
+/** a non-2xx preview answer: keeps the HTTP status (429 = rate limited) so callers can back off */
+export class PreviewHttpError extends Error {
+  constructor(readonly status: number, message: string, readonly retryAfterS: number | null = null) {
+    super(message);
+    this.name = "PreviewHttpError";
+  }
+}
+
 export const bg = {
   granule: (id: string, signal?: AbortSignal) =>
     bgGet<GranuleDetailResponse>(
@@ -29,7 +37,9 @@ export const bg = {
   /** The PNG itself: fetched as a blob (Authorization header, never a URL token). */
   previewBlob: async (
     p: { id: string; layer: string; west: number; south: number; east: number; north: number;
-         maxPx?: number; cmap?: string; scale?: string; format?: "json" },
+         maxPx?: number; cmap?: string; scale?: string; format?: "json";
+         /** explicit colour range (engine units of meta.scale): both or neither */
+         lo?: number; hi?: number },
     signal?: AbortSignal,
   ): Promise<{ blob: Blob | null; meta: PreviewMeta }> => {
     const q = new URLSearchParams({
@@ -38,14 +48,17 @@ export const bg = {
       max_px: String(p.maxPx ?? 256), cmap: p.cmap ?? "auto", scale: p.scale ?? "auto",
     });
     if (p.format) q.set("format", p.format);
+    if (p.lo != null && p.hi != null) { q.set("lo", String(p.lo)); q.set("hi", String(p.hi)); }
     const { bgFetch } = await import("./bgApi");
     const res = await bgFetch(`/api/background/preview?${q.toString()}`, { signal });
     if (!res.ok) {
       const body = await res.json().catch(() => ({}));
-      throw new Error(
+      throw new PreviewHttpError(
+        res.status,
         (body as { detail?: { error?: string }; error?: string })?.detail?.error
         ?? (body as { error?: string })?.error
-        ?? `${res.status} ${res.statusText}`);
+        ?? `${res.status} ${res.statusText}`,
+        Number(res.headers.get("Retry-After")) || null);
     }
     if (p.format === "json") {
       const body = (await res.json()) as { meta: PreviewMeta };

@@ -379,6 +379,8 @@ export interface PreviewMeta {
   unit?: string | null;
   render_version?: number;
   nan_fraction?: number;
+  /** true when the colour range was given explicitly (lo/hi) instead of stretched from this image */
+  range_fixed?: boolean;
   /** image corners [TL, TR, BR, BL] as [lon, lat], from the engine; null + corners_note = not drawable */
   corners_lonlat?: [[number, number], [number, number], [number, number], [number, number]] | null;
   corners_note?: string | null;

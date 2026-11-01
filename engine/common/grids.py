@@ -301,31 +301,82 @@ def axis_edges(centres: np.ndarray) -> np.ndarray:
     return np.concatenate([c - step / 2, [c[-1] + step / 2]])
 
 
-def edge_corners_lonlat(x: np.ndarray, y: np.ndarray, epsg: int) -> tuple:
+def _strided_edges(first_edge: float, step: float, n: int, stride: int) -> tuple:
+    """(outer_first, outer_last) edges of an axis drawn with every `stride`-th pixel.
+
+    The full axis has n pixels of signed size `step`, starting at `first_edge`. Pixel j of the DRAWN
+    image shows source pixel j*stride, so it is centred on that source pixel's centre and spans
+    `stride` source pixels (the decimated-axes model). The drawn image has ceil(n/stride) pixels.
+    stride 1 returns the exact source edges (first_edge, first_edge + n*step)."""
+    if stride <= 1:
+        return first_edge, first_edge + n * step
+    m = -(-n // stride)                                     # ceil
+    c0 = first_edge + step / 2.0                            # centre of source pixel 0
+    return c0 - stride * step / 2.0, c0 + (m - 1) * stride * step + stride * step / 2.0
+
+
+def edge_corners_lonlat(x: np.ndarray, y: np.ndarray, epsg: int, stride: int = 1) -> tuple:
     """-> (corners, note). corners = [[lon, lat] x4] in the order TL, TR, BR, BL of the IMAGE
     (row 0 = north) taken from the outer pixel EDGES, so a picture of the array lands pixel-exact.
     The quad is NOT axis-aligned in lon/lat (a UTM grid is rotated against the graticule).
     A box that straddles the antimeridian, or one that cannot be projected, answers
-    (None, honest reason) instead of a guess."""
+    (None, honest reason) instead of a guess.
+
+    `stride` (>= 1) describes the DRAWN image: when only every stride-th pixel of the full axes
+    x / y was rendered (x[::stride], y[::stride], values not resampled), the corners are those of
+    that decimated grid: drawn pixel j is centred on source pixel j*stride and is `stride` source
+    pixels wide. So the far edge of the quad is the far edge of the last DRAWN pixel (it can sit up
+    to (stride-1)/2 source pixels past the last source edge, never a whole stride short of it).
+    stride 1 is the full-resolution result, unchanged."""
+    k = max(1, int(stride))
     try:
-        ex, ey = axis_edges(x), axis_edges(y)
+        xs, ys = np.asarray(x, np.float64), np.asarray(y, np.float64)
+        if xs.ndim != 1 or ys.ndim != 1 or xs.size < 2 or ys.size < 2:
+            raise ValueError("need at least two pixel centres to know the pixel size")
+        if k == 1:
+            ex, ey = axis_edges(xs), axis_edges(ys)
+            x0, x1, y0, y1 = float(ex[0]), float(ex[-1]), float(ey[0]), float(ey[-1])
+        else:
+            sx, sy = float(np.median(np.diff(xs))), float(np.median(np.diff(ys)))
+            if sx == 0 or sy == 0 or not (np.isfinite(sx) and np.isfinite(sy)):
+                raise ValueError("pixel centres are not distinct")
+            x0, x1 = _strided_edges(float(xs[0]) - sx / 2.0, sx, xs.size, k)
+            y0, y1 = _strided_edges(float(ys[0]) - sy / 2.0, sy, ys.size, k)
     except ValueError as err:
         return None, f"no corners: {err}"
-    west, east = float(min(ex[0], ex[-1])), float(max(ex[0], ex[-1]))
-    north, south = float(max(ey[0], ey[-1])), float(min(ey[0], ey[-1]))
+    west, east = min(x0, x1), max(x0, x1)
+    north, south = max(y0, y1), min(y0, y1)
     return quad_corners_lonlat(west, east, south, north, epsg)
 
 
-def extent_corners_lonlat(extent, epsg: int | None) -> tuple:
+def extent_corners_lonlat(extent, epsg: int | None, stride: int = 1, shape=None) -> tuple:
     """(xmin, xmax, ymin, ymax) PIXEL EDGES in `epsg` -> (corners [TL, TR, BR, BL] as [lon, lat], note).
-    Same honest refusals as edge_corners_lonlat (no extent / no epsg / antimeridian -> (None, reason))."""
+    Same honest refusals as edge_corners_lonlat (no extent / no epsg / antimeridian -> (None, reason)).
+
+    `extent` always describes the FULL array. When the image drawn from it was decimated by
+    `stride` (every stride-th pixel), pass `stride` and the full array `shape` (..., rows, cols):
+    the corners then follow the same decimated-axes model as edge_corners_lonlat. A stride > 1
+    without a usable shape answers (None, reason) - the geometry cannot be stated honestly."""
     if not extent or not epsg:
         return None, "no corners: this array carries no extent / EPSG"
     try:
         x0, x1, y0, y1 = (float(v) for v in extent)
     except (TypeError, ValueError):
         return None, "no corners: the extent is not four numbers"
-    return quad_corners_lonlat(min(x0, x1), max(x0, x1), min(y0, y1), max(y0, y1), int(epsg))
+    xmin, xmax, ymin, ymax = min(x0, x1), max(x0, x1), min(y0, y1), max(y0, y1)
+    k = max(1, int(stride))
+    if k > 1:
+        try:
+            ny, nx = int(shape[-2]), int(shape[-1])
+            if ny < 1 or nx < 1:
+                raise ValueError
+        except (TypeError, ValueError, IndexError):
+            return None, "no corners: the array was decimated but its full shape is unknown"
+        dx, dy = (xmax - xmin) / nx, (ymax - ymin) / ny
+        xmin, xmax = sorted(_strided_edges(xmin, dx, nx, k))
+        b, a = sorted(_strided_edges(ymax, -dy, ny, k))
+        ymin, ymax = b, a
+    return quad_corners_lonlat(xmin, xmax, ymin, ymax, int(epsg))
 
 
 def quad_corners_lonlat(west: float, east: float, south: float, north: float, epsg: int) -> tuple:

@@ -142,13 +142,13 @@ def clip_image(rid: str, granule: str, grid: str, layer: str, max_px: int = Quer
     try:
         a, grp = rd.array(granule, grid, layer)
         v = displayable(a)
-        corners, corners_note = clip_corners(grp)
     except RetrievalError as ex:
         raise _err(ex) from ex
     view = bimg.finite_view(v)
     if not np.isfinite(view).any():
         raise HTTPException(status_code=422, detail={"ok": False, "error": "no valid pixels in this stored array"})
     shown, stride = bimg.decimate(view, max_px)
+    corners, corners_note = clip_corners(grp, stride=int(stride), shown_shape=view.shape)
     lo, hi = bimg.auto_range(shown, symmetric=False)
     png = bimg.render(shown, "viridis", lo, hi)
     meta = {"lo": lo, "hi": hi, "cmap": "viridis", "full_shape": list(v.shape), "shown_shape": list(shown.shape),

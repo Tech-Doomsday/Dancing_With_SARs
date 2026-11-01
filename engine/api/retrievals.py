@@ -488,17 +488,21 @@ class ClipReader:
         raise RetrievalError(404, f"no layer {layer!r} on grid {grid!r} in granule {gid!r}")
 
 
-def clip_corners(grp) -> tuple:
+def clip_corners(grp, stride: int = 1, shown_shape=None) -> tuple:
     """-> (corners_lonlat | None, note | None) for a stored clip group: [TL, TR, BR, BL] of the pixel
     EDGES, from the group's own x / y axes. No axes (or an unprojectable / antimeridian clip) -> (None,
-    reason): never a guess."""
+    reason): never a guess. `stride` = the decimation of the image that was drawn from the clip (see
+    edge_corners_lonlat); `shown_shape` = the (rows, cols) of the full array it was drawn from, used to
+    refuse a clip whose axes do not match it."""
     try:
         keys = set(grp.array_keys())
         if "x" not in keys or "y" not in keys:
             return None, "no corners: this stored clip has no x / y axes"
         from engine.common.grids import edge_corners_lonlat
-        return edge_corners_lonlat(np.asarray(grp["x"][:], np.float64), np.asarray(grp["y"][:], np.float64),
-                                   int(grp.attrs["epsg"]))
+        gx, gy = np.asarray(grp["x"][:], np.float64), np.asarray(grp["y"][:], np.float64)
+        if shown_shape is not None and (gy.size, gx.size) != tuple(shown_shape[-2:]):
+            return None, "no corners: the clip axes do not match the array shape"
+        return edge_corners_lonlat(gx, gy, int(grp.attrs["epsg"]), stride=stride)
     except Exception as err:
         return None, f"no corners: {type(err).__name__}: {err}"
 

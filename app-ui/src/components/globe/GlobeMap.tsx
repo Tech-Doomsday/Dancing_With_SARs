@@ -23,6 +23,11 @@ export interface OverlaySpec {
   dataUrl: string;
   bounds: [number, number, number, number]; // [W, S, E, N]
   opacity: number;
+  /** georeferenced SAR image: the engine's pixel-edge corners [TL, TR, BR, BL] as [lon, lat]. When present
+   *  they ARE the image-source coordinates (a UTM grid is rotated against the graticule, so a bbox would
+   *  misplace it) and bounds is only a bookkeeping envelope. No seam split: the engine answers null corners
+   *  (and the image is not drawn) for a clip that straddles +/-180. Never computed in the UI. */
+  corners?: [[number, number], [number, number], [number, number], [number, number]];
 }
 
 export interface PinFeature {
@@ -364,12 +369,17 @@ export default function GlobeMap(props: GlobeMapProps) {
     let cancelled = false;
     const wanted = new Map(props.overlays.map((o) => [o.id, o]));
 
-    const applyPart = (id: string, url: string, bounds: [number, number, number, number], opacity: number) => {
-      if (!map.getSource(id)) {
-        map.addSource(id, { type: "image", url, coordinates: [
-          [bounds[0], bounds[3]], [bounds[2], bounds[3]],
-          [bounds[2], bounds[1]], [bounds[0], bounds[1]],
-        ] });
+    const applyPart = (id: string, url: string, bounds: [number, number, number, number], opacity: number,
+                       corners?: OverlaySpec["corners"]) => {
+      const coordinates = corners ?? [
+        [bounds[0], bounds[3]], [bounds[2], bounds[3]],
+        [bounds[2], bounds[1]], [bounds[0], bounds[1]],
+      ];
+      const existing = map.getSource(id) as maplibregl.ImageSource | undefined;
+      if (!existing) {
+        map.addSource(id, { type: "image", url, coordinates });
+      } else if (corners) {
+        existing.setCoordinates(corners);
       }
       if (!map.getLayer(id)) {
         // NOTE: default linear resampling — nearest renders black on maplibre 5.23/5.24 (S1)
@@ -381,6 +391,13 @@ export default function GlobeMap(props: GlobeMapProps) {
 
     void (async () => {
       for (const [id, o] of wanted) {
+        if (o.corners) {         // one quad, placed exactly where the engine says; no crop, no seam split
+          applyPart(`${id}:0`, o.dataUrl, o.bounds, o.opacity, o.corners);
+          const extra = `${id}:1`;
+          if (map.getLayer(extra)) map.removeLayer(extra);
+          if (map.getSource(extra)) map.removeSource(extra);
+          continue;
+        }
         const parts = seamSplits(o.bounds);
         if (!parts.length) continue;
         for (let i = 0; i < parts.length; i++) {

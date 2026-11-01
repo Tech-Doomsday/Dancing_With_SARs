@@ -38,7 +38,7 @@ function applySar(map: MlMap, overlay: SarOverlay | null) {
   } else {
     map.addSource("sar", { type: "image", url: overlay.url, coordinates: overlay.corners });
     map.addLayer({ id: "sar", type: "raster", source: "sar",
-                   paint: { "raster-opacity": overlay.opacity, "raster-fade-duration": 0, "raster-resampling": "nearest" } },
+                   paint: { "raster-opacity": overlay.opacity, "raster-fade-duration": 0 } },   // default linear: "nearest" renders black on maplibre 5.23/5.24 image sources (see GlobeMap.tsx)
                  map.getLayer("stack-fill") ? "stack-fill" : undefined);
   }
   if (map.getLayer("sar")) map.setPaintProperty("sar", "raster-opacity", overlay.opacity);

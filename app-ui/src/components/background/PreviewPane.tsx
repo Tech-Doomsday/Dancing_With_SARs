@@ -10,6 +10,7 @@ import { bg } from "@/lib/bg";
 import { GateError } from "@/lib/bgApi";
 import { useGateFail, useGateRetryNonce } from "./BackgroundGate";
 import type { ExplorerGranule, PreviewMeta } from "@/lib/types";
+import { dash } from "@/lib/explainCache";
 
 export type PaneState =
   | { s: "loading" }
@@ -176,12 +177,13 @@ export default function PreviewPane({ granule, layer, box, maxPx, cmap, scale = 
       <figcaption className="border-t border-[#262c36] px-2 py-1 text-[10px] leading-relaxed text-[#8b949e]">
         {meta ? (
           <>
-            cmap <span className="font-mono text-[#cfd6dc]">{meta.cmap}</span> · scale{" "}
-            <span className="font-mono text-[#cfd6dc]">{meta.scale ?? "—"}</span> · unit{" "}
-            <span className="font-mono text-[#cfd6dc]">{meta.unit ?? "—"}</span> · range{" "}
+            cmap <span className="font-mono text-[#cfd6dc]">{dash(meta.cmap)}</span> · scale{" "}
+            <span className="font-mono text-[#cfd6dc]">{dash(meta.scale)}</span> · unit{" "}
+            <span className="font-mono text-[#cfd6dc]" data-testid="pane-unit">{dash(meta.unit)}</span> · range{" "}
             <span className="font-mono text-[#cfd6dc]">{fmtNum(meta.lo)} … {fmtNum(meta.hi)}</span> ·
-            shape {meta.stats.shape[1]}×{meta.stats.shape[0]} {meta.stats.dtype} · NaN{" "}
-            {(meta.stats.nan_fraction * 100).toFixed(1)}%
+            shape {meta.stats.shape[1]}×{meta.stats.shape[0]} {meta.stats.dtype} · no-data{" "}
+            {/* the engine's own fraction of pixels drawn transparent (incl. values with no dB value) */}
+            {(() => { const f = meta.nan_fraction ?? meta.stats?.nan_fraction; return f == null ? "—" : `${(f * 100).toFixed(1)}%`; })()}
             {meta.cache_hit && <span className="ml-1 rounded border border-[#4a3a1f] px-1 text-[9px] uppercase text-[#e6c977]">cache</span>}
             {meta.slice_note && <span> · {meta.slice_note}</span>}
             <br />

@@ -192,9 +192,58 @@ def test_trace_array_png_reports_corners_or_null():
     from engine.api.background import trace_array_png
     x, y = _utm_axes()
     rec = SimpleNamespace(thumb=np.random.rand(40, 40).astype(np.float32), kind="float", epsg=32611,
+                          stride=1, shape=(40, 40),     # a real ArrayRec always carries both
                           extent=(x[0] - 10, x[-1] + 10, y[-1] - 10, y[0] + 10), label="a", path="p")
     _, meta = trace_array_png(rec, "auto", None, None, 64)
     assert len(meta["corners_lonlat"]) == 4 and meta["corners_note"] is None
     rec.extent = None
     _, meta = trace_array_png(rec, "auto", None, None, 64)
     assert meta["corners_lonlat"] is None and "no corners" in meta["corners_note"]
+
+
+# ------------------------------------------------------------------ explicit colour range (Before/After)
+def test_explicit_range_is_used_and_reported_and_changes_the_picture(fake):
+    auto = _preview(fake, use_cache=False)
+    fixed = _preview(fake, lo=-30.0, hi=0.0, use_cache=False)
+    assert (fixed["meta"]["lo"], fixed["meta"]["hi"], fixed["meta"]["range_fixed"]) == (-30.0, 0.0, True)
+    assert auto["meta"]["range_fixed"] is False and auto["meta"]["lo"] != -30.0
+    assert fixed["png"] != auto["png"]                               # a different stretch is a different picture
+    assert len(json.dumps(fixed["meta"])) < 4096                    # still rides in the X-Img-Meta header
+
+
+def test_same_explicit_range_on_two_calls_gives_the_same_stretch(fake):
+    a = _preview(fake, lo=-25.0, hi=-2.0, use_cache=False)
+    b = _preview(fake, lo=-25.0, hi=-2.0, use_cache=False)
+    assert a["png"] == b["png"] and (a["meta"]["lo"], a["meta"]["hi"]) == (b["meta"]["lo"], b["meta"]["hi"])
+
+
+def test_range_must_be_both_finite_and_ordered(fake):
+    from engine.api.background import BackgroundError
+    for kw in ({"lo": -3.0}, {"hi": 3.0}, {"lo": 1.0, "hi": 1.0}, {"lo": 2.0, "hi": 1.0},
+               {"lo": float("nan"), "hi": 1.0}, {"lo": 0.0, "hi": float("inf")}):
+        with pytest.raises(BackgroundError) as ei:
+            _preview(fake, use_cache=False, **kw)
+        assert ei.value.status == 400, kw
+
+
+def test_cache_key_includes_the_range_and_is_unchanged_without_one(fake):
+    import hashlib
+    from engine.api.background import _cache_paths
+    from engine.common.config import data_root
+    bbox = (1.0, 2.0, 3.0, 4.0)
+    p0, _ = _cache_paths("g", "l", bbox, 64, "auto", "auto", 7)
+    legacy = hashlib.sha256("|".join(["g", "l", ",".join(f"{v:.6f}" for v in bbox), "64", "auto", "auto", "v7"]
+                                     ).encode()).hexdigest()[:32]
+    assert p0.stem == legacy                                         # no range -> old cache entries stay valid
+    assert _cache_paths("g", "l", bbox, 64, "auto", "auto", 7, (-30.0, 0.0))[0] != p0
+    assert (_cache_paths("g", "l", bbox, 64, "auto", "auto", 7, (-30.0, 0.0))[0]
+            != _cache_paths("g", "l", bbox, 64, "auto", "auto", 7, (-30.0, -1.0))[0])
+    first = _preview(fake, lo=-30.0, hi=0.0)
+    again = _preview(fake, lo=-30.0, hi=0.0)
+    other = _preview(fake, lo=-20.0, hi=0.0)
+    assert again["meta"]["cache_hit"] is True and other["meta"]["cache_hit"] is False and other["meta"]["lo"] == -20.0
+
+
+def test_categorical_ignores_a_range(fake):
+    m = _preview(fake, cmap="categorical", lo=-30.0, hi=0.0, use_cache=False)["meta"]
+    assert (m["lo"], m["hi"], m["range_fixed"]) == (0.0, 0.0, False)

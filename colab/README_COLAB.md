@@ -9,8 +9,8 @@ Upload it to `/content` in Colab and run, in a notebook cell:
 import runpy; runpy.run_path("/content/nisar_hub.pyz", run_name="__main__")
 ```
 
-It unpacks to `/content/nisar-hub`, installs what Colab lacks (a minute, once per runtime), takes your Earthdata token from
-Colab Secrets (`EARTHDATA_TOKEN`) or a hidden prompt, opens a Cloudflare tunnel and prints **one link ending in `?k=<secret>`**.
+It unpacks to `/content/nisar-hub`, installs what Colab lacks (a minute, once per runtime), takes your Earthdata token from the `.env`
+it was built with (else Colab Secrets `EARTHDATA_TOKEN`, else a hidden prompt), opens a Cloudflare tunnel and prints **one link ending in `?k=<secret>`**.
 Open it:
 
 * **Retrieve**: type latitude, longitude and a size in km. The page shows the 10 km engine tiles that cover it (a 30 km box is
@@ -27,8 +27,8 @@ anything without it gets a 401. Treat the link like a password. Stop the hub wit
 
 | Build | Result |
 | --- | --- |
-| `python colab/build_hub.py` | token via Secrets / prompt (recommended) |
-| `... --include-env` | also packs your root `.env` (no prompt): the file is then SECRET, never share it. No other `.env*` is ever packed |
+| `python colab/build_hub.py` | packs the repo **and your root `.env`** (token included, no prompt in Colab). The file is then SECRET: never share it. `dist/` is git-ignored. No other `.env*` is ever packed |
+| `... --no-env` | no credentials inside: Colab reads `EARTHDATA_TOKEN` from Secrets or asks (use this for a file you hand to others) |
 | `... --wheels` | also packs the pinned dependencies as wheels (~90 MB; build machine needs network). Colab installs from them first, PyPI only fills gaps |
 | `... --out PATH`, `--py 3.11` | output path; Python version the wheels are for (default 3.12) |
 
