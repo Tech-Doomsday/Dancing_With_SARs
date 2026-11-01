@@ -1,4 +1,4 @@
-# Implementation Plan — Porting the Earthquake Science Core into `nisar-hazard-engine` + One UI
+# Implementation Plan — Porting the Earthquake Science Core into `nisar-hazard-engine` (product name: Speckle) + One UI
 
 **Deliverable set for this session:** this plan **plus** `skeleton/` — a runnable, tested first slice of the port (Okada library, science kernels, pipeline wiring, API, UI scaffold) that drops into the main repo.
 

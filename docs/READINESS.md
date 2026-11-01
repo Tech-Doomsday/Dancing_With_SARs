@@ -6,6 +6,16 @@ plus reading the code. Re-run the hub to refresh; this file is a snapshot, the h
 **Verdict: the measurement path (retrieval -> P01..P13 -> SceneBundle) is built and contract-clean; the pipelines are not
 yet implementable end to end, because of five gaps that sit upstream of the pipelines, not inside them.**
 
+> **Update 2026-11-01 — this file is an older snapshot (2026-10-25); the corrections below were checked against the code.**
+> * Pipelines declared: **17** (`engine/pipelines/*/manifest.yaml`, `config/explain.yaml` lists the same 17), not 16. Modelled (define `run()`): **2** —
+>   `earthquake_coseismic`, `tsunami_ocean_evidence`. Live numbers: `GET /api/background/overview` or `Registry().counts()`; nothing here is the source of truth.
+> * Gap 4 ("0 of 16 define run()") and gap 5 ("verdict / api / lib are stubs") are **superseded**: `engine/verdict/*` (collect, calibrate, link_events, select, persist),
+>   the FastAPI routes and `engine/lib/okada.py` are implemented. Adapters R1, R2, R3, R11, R15, R16 are implemented; the other R-adapters are still stubs.
+> * `volcanic_deformation` is a scaffold (about 11 lines, no `run()`): it needs (1) the S7 volcano list as `S7_volcanoes.geojson` (or `facts.json`) plus a DEM in the
+>   ancillary directory so routing (P12) stops answering `unknown`, (2) ascending + descending LOS combined into vertical / east-west, (3) topography-correlated atmosphere
+>   removal, (4) a Mogi / sill source inversion with model choice, (5) its own R1 low-magnitude seismicity fetch. Gap 2 below (nothing writes ancillary layers) is still true.
+> * `earthquake_coseismic` now analyses every stack and the newest `earthquake.scan_max_pairs` pairs per stack in scan mode (`config/common.yaml`).
+
 ## What works
 
 * P01..P13 + `SceneBundle` + `check_bundle(deep=True)`: all 13 steps run and the contract is clean on a full synthetic scene.

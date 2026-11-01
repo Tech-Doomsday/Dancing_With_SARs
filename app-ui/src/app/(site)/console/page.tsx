@@ -73,7 +73,7 @@ export default function LandingPage() {
       {/* 1 · promise + primary button */}
       <section className="rounded-xl border border-[#e7e2da] bg-white p-6 sm:p-8">
         <p className="text-xs font-medium uppercase tracking-widest text-[#8a837b]">
-          nisar-hazard-engine — public overview
+          Speckle — public overview
         </p>
         <h1 className="mt-2 max-w-3xl text-2xl font-semibold leading-snug text-[#1c1a17] sm:text-3xl">
           Watching NISAR radar data for signs of ground hazards — and telling you how strong the
@@ -166,7 +166,7 @@ export default function LandingPage() {
           Every finding carries a tier — a word, not a percentage: <strong>supported</strong> (the
           evidence backs it), <strong>candidate</strong> (interesting but uncatalogued),
           {" "}<strong>not supported</strong>, <strong>insufficient</strong> (not enough good data to
-          say), and <strong>quiet</strong> (cleanly nothing). The number under a finding is a
+          say), and <strong>quiet</strong> (nothing above the detection floor in the interferograms actually analysed — not a claim about the whole lookback or about slow motion). The number under a finding is a
           rank score — it orders findings inside one tier. It is <em>not</em> a probability, and the
           Map shows that warning next to every score.
         </p>

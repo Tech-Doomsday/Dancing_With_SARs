@@ -160,7 +160,7 @@ function FindingCard(props: FindingsPanelProps & { result: PipelineResult }) {
             <div className="h-full rounded-full bg-[#b08d57]" style={{ width: `${Math.round(rawP * 100)}%` }} />
           </div>
           <p className="mt-0.5 text-[10px] text-[#8a837b]">
-            rank score {Math.round(rawP * 100)}/100 — within-tier rank score, NOT a probability
+            rank score {Math.round(rawP * 100)}/100 — within-tier rank score, NOT a probability · SUPPORTED = two screening checks passed
           </p>
         </div>
       )}

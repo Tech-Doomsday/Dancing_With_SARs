@@ -166,13 +166,17 @@ def search_bbox_sync(*, bbox: tuple[float, float, float, float], levels: list[st
     truncated = False
     incomplete = False
     warnings: list = []
+    incomplete_levels: list = []
     for level in levels:
         refs, deg = retriever.search(list(bbox), t0, t1, product_names[level],
                                      fresh=fresh, max_results=max_results)
         degraded = degraded or bool(deg)
         if getattr(retriever, "last_search_incomplete", False) is True:     # ASF/CMR served a short page; not cached
             incomplete = True
-            warnings.extend(str(w)[:300] for w in (getattr(retriever, "last_search_warnings", None) or [])[:2])
+            from engine.common.p01_granule_resolution import incomplete_detail
+            incomplete_levels.append(level)
+            warnings.extend(f"{level}: {incomplete_detail(w, 300)}"
+                            for w in (getattr(retriever, "last_search_warnings", None) or [])[:2])
         # the budget applies PER search: a level that hit it is truncated; the union of several
         # levels exceeding the budget is not (the retriever's own rule: len(refs) >= budget)
         truncated = truncated or len(refs) >= max_results
@@ -202,6 +206,7 @@ def search_bbox_sync(*, bbox: tuple[float, float, float, float], levels: list[st
         "degraded": degraded,
         "search_incomplete": incomplete,       # ASF/CMR reported an incomplete result: the list may miss granules
         "search_warnings": warnings,
+        "search_incomplete_levels": incomplete_levels,      # which product(s) came back short (ASF never says which granules)
         "search_budget": int(max_results),
         "generated_at": generated_at.strftime("%Y-%m-%dT%H:%M:%SZ"),
         "granules": unique,

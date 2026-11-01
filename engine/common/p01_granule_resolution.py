@@ -141,10 +141,12 @@ def resolve(ctx: BuildContext, products: list[str]) -> Resolved:
         if getattr(rtv, "last_search_incomplete", False) is True:       # ASF/CMR served a short page, even after a retry
             res.search_incomplete = True
             warns = getattr(rtv, "last_search_warnings", None)
+            raw = str(warns[0]) if isinstance(warns, list) and warns else ""
             ctx.flag("search_incomplete", "warn", "P01",
-                     f"{prod} listing may be missing granules: ASF/CMR reported an incomplete result"
-                     + (f" ({str(warns[0])[:120]})" if isinstance(warns, list) and warns else "") + "; not cached",
-                     product=prod)
+                     f"{prod} listing may be missing granules (ASF/CMR reported an incomplete result"
+                     + (f": {incomplete_detail(raw)}" if raw else "")
+                     + f"; which {prod} granules are missing is not reported by ASF, so this list is partial and not cached)",
+                     product=prod, listed=len(refs), detail_raw=raw[:300])
         refs = [r for r in refs if (r.product or name) == name]
         refs, dropped = _drop_older(refs)
         res.dropped_older += dropped
@@ -155,6 +157,13 @@ def resolve(ctx: BuildContext, products: list[str]) -> Resolved:
         else:
             _group_pairs(ctx, res, metas, prod, merge, as_of)
     return res
+
+
+def incomplete_detail(raw: str, limit: int = 160) -> str:
+    """Tidy asf_search's own warning text (it glues sentences: 'results.Expected 17, got 15') and keep it short."""
+    import re
+    s = re.sub(r"\.(?=[A-Z])", ". ", " ".join(str(raw).split()))
+    return s[:limit]
 
 
 def run(ctx: BuildContext) -> None:

@@ -322,7 +322,8 @@ export default function ExplorerDetail({ granule, group, stack, stackGranules, b
                   v={shown.sec_time ? `${shown.sec_time} UTC` : null}
                   tag={shown.cycle_sec != null ? `cycle ${shown.cycle_sec}` : undefined}
                 />
-                <Row k="Baseline" v={shown.baseline_days != null ? `${shown.baseline_days} d` : null} />
+                <Row k="Baseline" v={shown.baseline_days != null ? `${shown.baseline_days} d` : null}
+                     tag={shown.baseline_days != null ? "context only: the verdict uses the two dates and a fixed mm floor, not this length" : undefined} />
               </>
             ) : (
               <Row k="Acquired" v={shown.start ? `${shown.start} UTC` : null} />

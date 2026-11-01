@@ -5,7 +5,7 @@ The engine's P06 already converted phase -> LOS displacement (`los_m`,
 floor; this module does the pipeline-specific work declared in the manifest:
 
     * pair selection (event mode: pairs spanning the event window; scan mode:
-      the newest pair of the primary stack),
+      the newest `scan_max_pairs` pairs of every stack),
     * quality mask (finite LOS, coherence gate, connected-component gate),
     * far-field referencing (12 % margin median; degenerate-MAD fallback),
     * cycle-jump suspect screen (diagnostic, never corrective),
@@ -29,43 +29,101 @@ def _core(bundle):
     return g.core_slices(), (g.dx, abs(g.dy))
 
 
-def select_pairs(bundle, params: EqParams) -> tuple[list[int], list[str]]:
-    """-> (pair indices to analyse, refusal reasons). Empty indices + reasons => INSUFFICIENT."""
-    stack = bundle.stack()
-    if stack is None or stack.interferometric is None or not stack.interferometric.pairs:
+def select_pairs(bundle, params: EqParams) -> tuple[list[tuple[str, int]], list[str]]:
+    """-> ([(stack_key, pair index)] to analyse, refusal reasons). Empty list + reasons => INSUFFICIENT.
+
+    EVERY stack that holds interferograms is considered (ascending and descending are analysed
+    separately, never merged; the best pair across them wins in verdict.run).
+      * event mode: every pair, in any stack, that spans the event window;
+      * scan mode (no event window): the newest `params.scan_max_pairs` times-resolved pairs of EACH stack,
+        so a signal that appeared a few weeks ago is not hidden behind one quiet newest pair."""
+    keys = bundle.interferometric_stack_keys()
+    if not keys:
         return [], ["no usable NISAR data (M1 interferograms) for this tile/window"]
 
-    ifg = stack.interferometric
     reasons: list[str] = []
-    indices: list[int] = []
-
+    picked: list[tuple[str, int]] = []
     event_window = bundle.request.event_window
     if event_window:
         t0, t1 = event_window
-        for key, index, pair in bundle.pairs_spanning(t0, t1):
-            if key != stack.key:
-                continue
-            indices.append(index)
-        if not indices:
+        for key, index, _pair in bundle.pairs_spanning(t0, t1):
+            picked.append((key, index))
+        if not picked:
             reasons.append(
-                f"no interferogram of stack {stack.key} spans the event window "
-                f"({t0} .. {t1}); earthquake_coseismic needs ref <= event start and sec >= event end"
-            )
-        # oldest secondary first so "best" tie-breaks are deterministic
-        indices.sort(key=lambda i: (ifg.pairs[i].sec_time or "", ifg.pairs[i].ref_time or ""))
+                f"no interferogram of stack(s) {', '.join(keys)} spans the event window "
+                f"({t0} .. {t1}); earthquake_coseismic needs ref <= event start and sec >= event end")
     else:
-        # scan mode: the newest times-resolved pair of the primary stack
-        best = -1
-        for i, pair in enumerate(ifg.pairs):
-            if not pair.times_resolved or not pair.sec_time:
-                continue
-            if best < 0 or (pair.sec_time, pair.ref_time or "") > (ifg.pairs[best].sec_time, ifg.pairs[best].ref_time or ""):
-                best = i
-        if best < 0:
+        for key in keys:
+            pairs = bundle.stack(key).interferometric.pairs
+            ok = [i for i, p in enumerate(pairs) if p.times_resolved and p.sec_time]
+            ok.sort(key=lambda i: (pairs[i].sec_time, pairs[i].ref_time or ""), reverse=True)
+            picked.extend((key, i) for i in ok[: max(1, int(params.scan_max_pairs))])
+        if not picked:
             reasons.append("no times-resolved pair available for scan-mode analysis")
-        else:
-            indices = [best]
-    return indices, reasons
+    # oldest secondary first so "best" tie-breaks are deterministic
+    picked.sort(key=lambda ki: (bundle.stack(ki[0]).interferometric.pairs[ki[1]].sec_time or "",
+                                bundle.stack(ki[0]).interferometric.pairs[ki[1]].ref_time or "", ki[0]))
+    return picked, reasons
+
+
+def analysed_window(analyses) -> dict:
+    """The time span the verdict REALLY looked at: earliest reference .. latest secondary over the analysed pairs.
+    -> {"first": iso|None, "last": iso|None, "days": float|None, "n_pairs": int, "longest_pair_days": float|None}."""
+    from datetime import datetime
+
+    def _t(v):
+        try:
+            return datetime.fromisoformat(str(v).replace("Z", "+00:00"))
+        except (TypeError, ValueError):
+            return None
+    refs = [_t(a.ref_time) for a in analyses]
+    secs = [_t(a.sec_time) for a in analyses]
+    refs, secs = [r for r in refs if r], [s for s in secs if s]
+    spans = [(_t(a.sec_time) - _t(a.ref_time)).total_seconds() / 86400.0
+             for a in analyses if _t(a.ref_time) and _t(a.sec_time)]
+    first = min(refs) if refs else None
+    last = max(secs) if secs else None
+    return {"first": first.strftime("%Y-%m-%d") if first else None,
+            "last": last.strftime("%Y-%m-%d") if last else None,
+            "days": round((last - first).total_seconds() / 86400.0, 1) if first and last else None,
+            "n_pairs": len(analyses),
+            "longest_pair_days": round(max(spans), 1) if spans else None}
+
+
+def window_phrase(win: dict) -> str:
+    """Plain words for the analysed window, e.g. '2026-07-25 .. 2026-08-06 (12 days, 1 interferogram)'."""
+    if not win.get("first") or not win.get("last"):
+        return "the analysed interferogram window (dates unknown)"
+    n = win["n_pairs"]
+    return (f"{win['first']} .. {win['last']} ({win['days']:g} days, {n} interferogram{'s' if n != 1 else ''})")
+
+
+def signal_edge_contact(detected, reference_mask, valid_mask, warn_fraction: float, coverage_fraction: float) -> dict:
+    """A8: does the detected signal touch the band whose median was subtracted (or fill most of the tile)?
+    `detected` (>0 = detected), `reference_mask`, `valid_mask` are same-shape arrays on the core grid.
+    -> {"in_reference_fraction", "coverage_fraction", "touches_edge", "warn": bool, "reasons": [str]}."""
+    det = np.asarray(detected) > 0
+    ref = np.asarray(reference_mask, dtype=bool)
+    valid = np.asarray(valid_mask, dtype=bool)
+    n_det = int(det.sum())
+    out = {"in_reference_fraction": 0.0, "coverage_fraction": 0.0, "touches_edge": False, "warn": False, "reasons": []}
+    if n_det == 0:
+        return out
+    ring = np.zeros_like(det)
+    ring[0, :] = ring[-1, :] = ring[:, 0] = ring[:, -1] = True
+    out["in_reference_fraction"] = round(float((det & ref).sum()) / n_det, 4)
+    out["coverage_fraction"] = round(n_det / max(1, int(valid.sum())), 4)
+    out["touches_edge"] = bool((det & ring).any())
+    if out["in_reference_fraction"] >= warn_fraction:
+        out["reasons"].append(f"{out['in_reference_fraction'] * 100:.0f}% of the detected pixels lie inside the reference band "
+                              "(the median of that band was subtracted, so real signal there is removed)")
+    if out["coverage_fraction"] >= coverage_fraction:
+        out["reasons"].append(f"detections cover {out['coverage_fraction'] * 100:.0f}% of the valid tile, so the referencing "
+                              "median itself is probably signal")
+    if out["touches_edge"] and not out["reasons"]:
+        out["reasons"].append("the detected signal reaches the tile edge, so it may continue beyond the tile and the referencing may have absorbed part of it")
+    out["warn"] = bool(out["reasons"])
+    return out
 
 
 def analyse_pair(bundle, stack, pair_index: int, params: EqParams) -> tuple[PairAnalysis | None, str | None]:

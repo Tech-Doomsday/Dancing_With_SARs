@@ -22,6 +22,7 @@ interface Manifest {
   totals?: { bytes_planned?: number; bytes_done?: number; stored?: number; granules?: number; failed?: number };
   net?: { bytes_fetched?: number; bytes_useful?: number; requests?: number; retries?: number };
   caps?: { max_gcov_epochs?: number; max_gunw_pairs?: number }; seconds?: number;
+  window?: { lookback_days?: number } | null;
 }
 interface ClipRow { granule_id: string; product: string; grid: string; layer: string; shape: number[]; dtype: string; bytes: number }
 interface Stats { valid: number; total: number; min?: number; max?: number; mean?: number; std?: number; hist?: { counts: number[]; edges: number[] }; note?: string }
@@ -56,7 +57,13 @@ export default function RetrievalPanel({ lon, lat, levels, foundCount }: { lon: 
   const [m, setM] = useState<Manifest | null>(null);
   const [err, setErr] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
-  const [lookback, setLookback] = useState("60");
+  // "" = not touched: the engine uses its own configured value (config/common.yaml window.*), shown as the placeholder
+  const [lookback, setLookback] = useState("");
+  const [defaults, setDefaults] = useState<{ lookback_days: number; max_gcov_epochs: number; max_gunw_pairs: number } | null>(null);
+  useEffect(() => {
+    engineJson<{ defaults?: { lookback_days: number; max_gcov_epochs: number; max_gunw_pairs: number } | null }>("/api/health")
+      .then((h) => setDefaults(h.defaults ?? null)).catch(() => setDefaults(null));
+  }, []);
   const [maxGcov, setMaxGcov] = useState("");
   const [maxGunw, setMaxGunw] = useState("");
   const [mbps, setMbps] = useState<number | null>(null);
@@ -75,7 +82,8 @@ export default function RetrievalPanel({ lon, lat, levels, foundCount }: { lon: 
     if (lon == null || lat == null) { setErr("Search a box first — the retrieval needs the tile's location."); return; }
     setErr(null); setBusy(true); setClips(null); setSel(null); setImg(null); setStats(null); setRunId(null); last.current = null;
     try {
-      const body: Record<string, unknown> = { lon, lat, mode, lookback_days: Number(lookback) || 60, products: levels.filter((l) => l === "GUNW" || l === "GCOV") };
+      const body: Record<string, unknown> = { lon, lat, mode, products: levels.filter((l) => l === "GUNW" || l === "GCOV") };
+      if (lookback.trim() && Number(lookback) > 0) body.lookback_days = Number(lookback);
       if (maxGcov) body.max_gcov_epochs = Number(maxGcov);
       if (maxGunw) body.max_gunw_pairs = Number(maxGunw);
       const r = await engineJson<{ id: string }>("/api/retrievals", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
@@ -168,11 +176,11 @@ export default function RetrievalPanel({ lon, lat, levels, foundCount }: { lon: 
 
       <div className="flex flex-wrap items-end gap-3">
         <label className="flex flex-col gap-0.5">lookback (days)
-          <input value={lookback} onChange={(e) => setLookback(e.target.value)} className="w-20 rounded border border-[#2a313c] bg-[#0e1116] px-1 py-0.5" /></label>
+          <input value={lookback} placeholder={defaults ? String(defaults.lookback_days) : "—"} onChange={(e) => setLookback(e.target.value)} className="w-20 rounded border border-[#2a313c] bg-[#0e1116] px-1 py-0.5" /></label>
         <label className="flex flex-col gap-0.5">max GCOV epochs
-          <input value={maxGcov} placeholder="default" onChange={(e) => setMaxGcov(e.target.value)} className="w-24 rounded border border-[#2a313c] bg-[#0e1116] px-1 py-0.5" /></label>
+          <input value={maxGcov} placeholder={defaults ? String(defaults.max_gcov_epochs) : "—"} onChange={(e) => setMaxGcov(e.target.value)} className="w-24 rounded border border-[#2a313c] bg-[#0e1116] px-1 py-0.5" /></label>
         <label className="flex flex-col gap-0.5">max GUNW pairs
-          <input value={maxGunw} placeholder="default" onChange={(e) => setMaxGunw(e.target.value)} className="w-24 rounded border border-[#2a313c] bg-[#0e1116] px-1 py-0.5" /></label>
+          <input value={maxGunw} placeholder={defaults ? String(defaults.max_gunw_pairs) : "—"} onChange={(e) => setMaxGunw(e.target.value)} className="w-24 rounded border border-[#2a313c] bg-[#0e1116] px-1 py-0.5" /></label>
         <button type="button" disabled={busy || running} onClick={() => start("plan")} className="rounded border border-[#3fb6c9] px-2 py-1 disabled:opacity-50">Plan (no download)</button>
         <button type="button" disabled={busy || running} onClick={() => start("retrieve")} className="rounded bg-[#1f6f7c] px-2 py-1 text-white disabled:opacity-50">Plan + download</button>
         {running && <button type="button" onClick={cancel} className="rounded border border-[#c97a7a] px-2 py-1 text-[#e6a0a0]">Cancel</button>}
@@ -188,11 +196,23 @@ export default function RetrievalPanel({ lon, lat, levels, foundCount }: { lon: 
           <p role="status">
             <b>{m.status}</b>
             {m.tile ? ` · tile ${m.tile}` : ""}
-            {m.stage === "download" || m.status === "done" || m.status === "cancelled" ? ` · granule ${done}/${m.granules.length} · ${mb(m.totals?.bytes_done)} of ${mb(m.totals?.bytes_planned)}` : ""}
+            {m.stage === "download" || m.status === "done" || m.status === "cancelled"
+              ? ` · granule ${done}/${m.granules.length} · ${(m.totals?.bytes_done ?? 0) === 0 && done > 0 && done === m.granules.length
+                  ? `nothing downloaded: all ${done} came from the local cache (${mb(m.totals?.bytes_planned)} planned)`
+                  : `${mb(m.totals?.bytes_done)} of ${mb(m.totals?.bytes_planned)}`}` : ""}
             {m.net?.bytes_fetched != null ? ` · ${mb(m.net.bytes_fetched)} on wire (${mb(m.net.bytes_useful)} useful)` : ""}
           </p>
           {running && <p className="text-[#e6c977]">{slowLine(m, mbps)}</p>}
           {m.error && <p role="alert" className="text-[#f0a0a0]">What failed: {m.error}. What to do: fix the cause named above and press Resume — stored granules are kept.</p>}
+          {m.caps && (
+            <p className="text-[#8b949e]" data-testid="retrieval-caps">
+              kept the newest {m.caps.max_gcov_epochs ?? "—"} GCOV epochs and {m.caps.max_gunw_pairs ?? "—"} GUNW pairs per stack
+              {m.window?.lookback_days != null ? ` within the last ${m.window.lookback_days} days` : ""}.
+            </p>
+          )}
+          {m.flags.filter((f) => /_truncated$/.test(f.code)).map((f, i) => (
+            <p key={`t${i}`} className="text-[#e6c977]" data-testid="retrieval-cut">✂ granules were cut by the cap: {f.message}</p>
+          ))}
           {m.flags.filter((f) => f.severity !== "info").map((f, i) => (
             <p key={i} className="text-[#f0b36a]">⚠ {f.message}{/search_incomplete/.test(f.code) ? " — re-run the search from the box above (Retry)." : ""}</p>
           ))}
@@ -212,7 +232,7 @@ export default function RetrievalPanel({ lon, lat, levels, foundCount }: { lon: 
           <details open>
             <summary className="cursor-pointer">Per granule ({m.granules.length})</summary>
             <div className="max-h-56 overflow-auto"><table className="mt-1 w-full text-left">
-              <thead className="text-[#8b949e]"><tr><th>granule</th><th>state</th><th>MB done / planned</th><th>s</th><th>note</th></tr></thead>
+              <thead className="text-[#8b949e]"><tr><th>granule</th><th>state</th><th>MB done / planned</th><th title="seconds spent on this granule">time (s)</th><th>note</th></tr></thead>
               <tbody>{m.granules.map((g) => (
                 <tr key={g.granule_id}><td title={g.granule_id}>{g.product} …{g.granule_id.slice(-24)}</td>
                   <td className={g.state === "failed" ? "text-[#f0a0a0]" : g.state === "stored" ? "text-[#7ec8d3]" : ""}>{g.state}{g.source ? ` (${g.source})` : ""}</td>

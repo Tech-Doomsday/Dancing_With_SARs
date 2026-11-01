@@ -1,4 +1,6 @@
-# NISAR Hazard Engine — Architecture & Vision
+# Speckle (NISAR Hazard Engine) — Architecture & Vision
+
+> The product is named **Speckle**. Python package, repo and folder names (`nisar-hazard-engine`, `engine/`) are unchanged on purpose so nothing breaks.
 
 Status: planning document, derived from `nisar_hazard_engine.json` (spec export of `flow.py` / `SARs_full_workflow.html`) plus a current-data reality check (Oct 2026). Builds on the prototype work in `Tech-Doomsday/nisar-data_analysis`.
 

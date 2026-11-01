@@ -96,6 +96,13 @@ def create_app() -> FastAPI:
     app.include_router(background_router)
     app.include_router(retrievals_router)
 
+    def _defaults() -> dict | None:
+        try:
+            from engine.common.defaults import public_defaults
+            return public_defaults()
+        except Exception:      # a config problem must not take health down; the UI then shows "—"
+            return None
+
     @app.get("/api/health")
     def health():
         data_dir = data_root()
@@ -137,6 +144,7 @@ def create_app() -> FastAPI:
             "cache_write": {"status": "enabled" if cache_enabled else "disabled",
                             "reason": cache_reason},
             "granule_search": granule_search,
+            "defaults": _defaults(),
             "note": "presence-only health; it never implies verdicts",
         }
 

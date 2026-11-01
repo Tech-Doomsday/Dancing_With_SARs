@@ -402,16 +402,29 @@ class SceneBundle:
     def has(self, capability: str) -> bool:
         return capability in self.capabilities
 
+    @staticmethod
+    def _stack_score(s) -> tuple:
+        """(usable interferograms, backscatter epochs): GUNW quality first, GCOV epochs only break a tie —
+        a stack with many GCOV epochs but few interferograms must not outrank the one with the pairs."""
+        npairs = sum(1 for p in s.interferometric.pairs if p.times_resolved) if s.interferometric else 0
+        return (npairs, len(s.backscatter.epochs) if s.backscatter else 0)
+
     @property
     def primary_key(self) -> str | None:
-        """The stack with the most data (pairs + epochs)."""
-        best, score = None, -1
+        """The stack with the most usable interferograms (GCOV epochs only break ties)."""
+        best, score = None, (-1, -1)
         for k, s in self.stacks.items():
-            n = (len(s.interferometric.pairs) if s.interferometric else 0) + \
-                (len(s.backscatter.epochs) if s.backscatter else 0)
-            if n > score:
-                best, score = k, n
+            sc = self._stack_score(s)
+            if sc > score:
+                best, score = k, sc
         return best
+
+    def interferometric_stack_keys(self) -> list:
+        """Keys of EVERY stack that holds at least one interferogram, best first. A pipeline that needs
+        interferograms analyses all of them (ascending and descending are never merged)."""
+        have = [(k, self._stack_score(s)) for k, s in self.stacks.items()
+                if s.interferometric is not None and s.interferometric.pairs]
+        return [k for k, _ in sorted(have, key=lambda kv: (-kv[1][0], -kv[1][1], kv[0]))]
 
     def stack(self, key: str | None = None) -> StackBundle | None:
         key = key or self.primary_key

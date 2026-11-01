@@ -41,3 +41,13 @@ registry:
   start_method: spawn           # never fork (retrieval client owns threads and an event loop)
   run_unknown: false            # skip pipelines whose applicability could not be evaluated (reported, never silent)
   gate_min_epochs: true         # answer INSUFFICIENT_EVIDENCE for min_epochs pipelines without launching a worker
+
+earthquake:                     # earthquake_coseismic defaults (a per-request eq_params override still wins)
+  scan_max_pairs: 8             # scan mode (no event window): newest N interferograms analysed per stack (8 x 12 d ~ the 120-day lookback)
+  detection_floor_mm: 10        # fixed detection floor; motion slower than floor / pair-length per day is invisible to one pair
+  significance_k: 3.0
+  coherence_threshold: 0.5
+  reference_strategy: farField  # farField | fullFrameMedian
+  far_field_margin: 0.12        # edge band (fraction of the tile) whose median is subtracted
+  edge_signal_warn_fraction: 0.10
+  coverage_warn_fraction: 0.50

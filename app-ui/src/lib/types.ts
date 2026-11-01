@@ -14,6 +14,11 @@ export interface Health {
   earthdata_credentials?: "present" | "absent";
   cache_write?: { status: "enabled" | "disabled"; reason: string | null };
   granule_search?: { status: "enabled" | "disabled"; reason: string | null };
+  /** the engine's configured defaults (config/common.yaml, config/retrieval.yaml); null if unreadable */
+  defaults?: {
+    lookback_days: number; max_gcov_epochs: number; max_gunw_pairs: number; scan_max_pairs: number;
+    detection_floor_mm: number; poll_lookback_days: number | null;
+  } | null;
 }
 
 /** §5.2: the engine's answer for the MGRS tile that contains a point. */
@@ -305,6 +310,8 @@ export interface GranuleExplorerResponse {
   n_total: number;
   truncated: boolean;
   degraded: boolean;
+  /** product levels (GUNW / GCOV) whose listing came back short */
+  search_incomplete_levels?: string[];
   /** ASF/CMR reported an incomplete result — the list may miss granules and was NOT cached */
   search_incomplete?: boolean;
   search_warnings?: string[];

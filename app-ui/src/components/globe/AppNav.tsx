@@ -44,8 +44,7 @@ export default function AppNav({ active, dark = false }: { active: AppNavItem | 
         href="/"
         className={`text-sm font-semibold tracking-tight ${dark ? "text-[#f2efe9]" : "text-[#1c1a17]"}`}
       >
-        Dancing with SARs
-        <span className={`hidden sm:inline ${dark ? "text-[#8a837b]" : "text-[#8a837b]"}`}> · nisar-hazard-engine</span>
+        Speckle
       </Link>
       <span aria-hidden className={dark ? "text-[#3a4150]" : "text-[#e7e2da]"}>|</span>
       <ul className="flex items-center gap-3 text-xs">

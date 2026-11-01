@@ -102,6 +102,7 @@ class NisarClient:
         self.disk = DiskChunkCache(self.cfg.chunks_dir, int(float(c["disk_chunks_gb"]) * (1 << 30)))
         self.clips = ClipStore(self.cfg.clips_dir, c["ttl_s"].get("granule_clip"))
         self.searches = SearchCache(self.cfg.search_dir, c["ttl_s"].get("search"))
+        self._partial: dict = {}      # search key -> {granule_id: ref} accumulated over incomplete (never cached) pages
         self.pool = ThreadPoolExecutor(int(self.cfg.decode["threads"]), thread_name_prefix="decode")
         self.blocking = ThreadPoolExecutor(8, thread_name_prefix="blocking")  # index build, fallback, clip IO
         self._indexes: dict[str, GranuleIndex] = {}
@@ -195,7 +196,14 @@ class NisarClient:
                 self.last_search_truncated = False
             if not keep_all:
                 refs, _ = drop_older_versions(refs)
-            if not self.last_search_incomplete:          # never keep a short listing for the whole TTL
+            if self.last_search_incomplete:
+                # a short page is never cached for the TTL (the next call must retry), but what earlier short pages of
+                # THIS query returned is kept in memory: the list only grows between retries instead of changing at random
+                seen = self._partial.setdefault(k, {})
+                seen.update({r.granule_id: r for r in refs})
+                refs = sorted(seen.values(), key=lambda r: (r.start or "", r.granule_id))
+            else:
+                self._partial.pop(k, None)
                 self.searches.put(k, [r.to_dict() for r in refs])
             return refs, False
         except Exception:

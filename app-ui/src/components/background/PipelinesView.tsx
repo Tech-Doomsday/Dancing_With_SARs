@@ -236,7 +236,7 @@ export function PipelineDetailView({ name, initialRun }: { name: string; initial
             <h2 className="text-xs font-semibold text-[#f2efe9]">Output</h2>
             <p className="mt-1 text-[10px] text-[#8b949e]">
               tier and tier label come from the engine (the UI never re-derives them); the rank
-              score is a within-tier rank, NOT a probability.
+              score is a within-tier rank, NOT a probability. SUPPORTED means two screening checks passed (amplitude ratio, pattern correlation), nothing more.
             </p>
             <div className="mt-2 rounded-md">
               <VerdictCard result={r} />

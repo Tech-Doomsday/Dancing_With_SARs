@@ -37,6 +37,11 @@ export function VerdictCard({ result }: { result: PipelineResult }) {
     <section className="rounded-lg border border-[#e7e2da] bg-white p-5 text-[#1c1a17]">
       <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
         <StatusBadge status={result.status} />
+        {result.status === "NOT_MODELLED" && (
+          <span className="text-[11px] text-[#8a837b]" data-testid="not-modelled-note">
+            no analysis code exists for this pipeline yet — it can give no verdict on any tile (Background → Pipelines lists which are built)
+          </span>
+        )}
         <span className="mono text-xs text-[#8a837b]">
           {result.pipeline} · tile {result.tile}
           {result.epoch ? ` · epoch ${result.epoch}` : ""} · {result.runtime_s.toFixed(1)} s
@@ -61,7 +66,7 @@ export function VerdictCard({ result }: { result: PipelineResult }) {
           </div>
           <p className="mt-1 text-[11px] text-[#8a837b]">
             A within-tier rank score — NOT a percentage and not a calibrated probability (calibration lands with
-            verdict stage 4.2).
+            verdict stage 4.2). SUPPORTED only means two screening checks passed (amplitude ratio and pattern correlation against a catalogued event) — see the evidence line “decision.meaning”.
           </p>
         </div>
       )}

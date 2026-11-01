@@ -403,7 +403,9 @@ export default function ExplorerApp() {
       {data?.search_incomplete && (
         <p role="alert" className="flex flex-wrap items-center gap-3 border-b border-[#5a3a1f] bg-[#2e1f12] px-4 py-2 text-xs text-[#f0b36a]">
           <span>
-            ASF returned an incomplete listing — this list may be missing granules, and the result was not cached.
+            ASF returned an incomplete {data.search_incomplete_levels?.length ? data.search_incomplete_levels.join(" and ") : ""} listing —
+            {" "}{data.n_total} granules are shown but the real count is higher; ASF does not say which granules are missing. The result was not cached;
+            re-asking only adds what it returns, it never removes granules already seen.
             {data.search_warnings?.[0] ? ` (${data.search_warnings[0]})` : ""}
           </span>
           <button

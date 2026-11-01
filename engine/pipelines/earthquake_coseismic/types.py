@@ -34,6 +34,9 @@ class EqParams:
     forward_top_events: int = 3
     credible_pixel_factor: int = 4
     cycle_jump_fraction: float = 0.5              # |los| > fraction * lambda  =>  suspect
+    scan_max_pairs: int = 8                       # scan mode: newest N pairs analysed per stack (config: earthquake.scan_max_pairs)
+    edge_signal_warn_fraction: float = 0.10       # share of detections inside the reference band that triggers a warning
+    coverage_warn_fraction: float = 0.50          # share of the valid tile covered by detections that triggers a warning
     # uncatalogued-source branch (docs 8.6; module uncatalogued.py) — optimizer budget + rule
     uncat_max_points: int = 500                   # quadtree leaves fed to the optimizer
     uncat_scan_strikes: int = 12                  # coarse circular strike grid (every 15 deg)
@@ -46,10 +49,24 @@ class EqParams:
     uncat_seed: int = 20261021                    # replaced by the bundle-content seed at run time
 
     @classmethod
+    def _config_defaults(cls) -> dict:
+        """config/common.yaml `earthquake:` (or NISAR_COMMON_EARTHQUAKE_*), the one place these defaults are set."""
+        try:
+            from engine.common.config import load_common_config
+            q = load_common_config().earthquake
+        except Exception:        # config unreadable: the dataclass defaults stand (same numbers)
+            return {}
+        return {"scan_max_pairs": q.scan_max_pairs, "detection_floor_m": q.detection_floor_mm / 1000.0,
+                "significance_k": q.significance_k, "coherence_threshold": q.coherence_threshold,
+                "reference_strategy": q.reference_strategy, "far_field_margin": q.far_field_margin,
+                "edge_signal_warn_fraction": q.edge_signal_warn_fraction,
+                "coverage_warn_fraction": q.coverage_warn_fraction}
+
+    @classmethod
     def from_triggers(cls, triggers) -> "EqParams":
         """Merge UI/API overrides carried on the bundle build request."""
         import math
-        overrides = {}
+        overrides = cls._config_defaults()
         try:
             raw = dict(triggers or {}).get("eq_params") or {}
         except TypeError:
@@ -59,6 +76,8 @@ class EqParams:
             if k in fields and v is not None:
                 overrides[k] = v
         # bound the overrides the way the reference API did (zod ranges)
+        if "scan_max_pairs" in overrides:
+            overrides["scan_max_pairs"] = min(60, max(1, int(overrides["scan_max_pairs"])))
         if "coherence_threshold" in overrides:
             overrides["coherence_threshold"] = min(1.0, max(0.0, float(overrides["coherence_threshold"])))
         if "far_field_margin" in overrides:
