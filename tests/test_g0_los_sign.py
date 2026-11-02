@@ -110,7 +110,7 @@ def _scene(tmp_path_factory):
     tr = Transformer.from_crs(tile.epsg, 4326, always_xy=True)
     lon, lat = tr.transform(tile.e0 + 1000.0, tile.n0 + 2500.0)
     event = {"id": "eq-fixture-001", "magnitude": 5.6, "place": "fixture", "time": "2026-08-01T00:00:00Z",
-             "lat": lat, "lon": lon, "depth_km": 5.0, "url": None, "nodal_planes": ((90.0, 40.0, -90.0),)}
+             "lat": lat, "lon": lon, "depth_km": 5.0, "url": None, "nodal_planes": ((60.0, 40.0, 90.0),)}
     eq_fetch.set_event_provider(lambda bbox, t0, t1: {"source": "fixture", "events": [event],
                                                       "degraded": False, "error": None})
     yield bundle
