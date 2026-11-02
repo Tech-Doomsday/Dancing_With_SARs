@@ -684,6 +684,7 @@ export default function GlobeApp() {
               selectPoint(lat, lon, { zoom: 11.5, panel: "pin" });
             }
           }}
+          onSelectPoint={(lat, lon, zoom) => selectPoint(lat, lon, { zoom, panel: "pin" })}
         />
       )}
       {panel === "pin" && (

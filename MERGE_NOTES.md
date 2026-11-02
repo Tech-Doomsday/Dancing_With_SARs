@@ -53,3 +53,13 @@ Identical to the first audit drop (37 files already merged) plus five changes, a
 `earthquake_coseismic/tests/fixtures_eq.py` (synthetic event is now a REVERSE/thrust 60/40/+90, placed 3 days before the window end),
 `earthquake_coseismic/tests/test_sign_convention.py` (new), `tests/test_api.py` and `tests/test_g0_los_sign.py` (nodal plane 60/40/+90), `tools/debug_hub/pipelines.py`.
 Test files only plus the debug hub; no engine logic changed. The new sign-convention test is skipped here (needs pyproj/h5py); nothing else changed in pass/fail.
+
+# Explore > Events (2026-11-03)
+`disasters_after_nisar_launch.csv` (74 events) now fills the Map's Explore panel as a new, default **Events** tab (before Featured / Cached).
+- Data: `python tools/build_disasters_json.py` -> `app-ui/src/data/disasters.json` (CSV stays the source; `--check` verifies sync; `tests/test_disasters_data.py`).
+- Ranking: `app-ui/src/lib/events.ts` (pure). Order = location trust first (A exact +30, B approx +12, regional centroid, no point -60), then how much SAR can say
+  (category, "PRIORITY" flag, measurable terms, Mw / depth for quakes, "limited/offshore/deep" penalty), then freshness (computed from today's date at render time).
+  Each row has "why #N" listing every point added or removed. Tiers: SAR-ready / maybe / limited / no point.
+- Click an event -> fly there (zoom by location quality) and open the Pin panel. The heatwave row has no coordinates and cannot be placed.
+- Checked here: Python sync tests; the ranking logic via node (same asserts as the new block in tests-e2e/unit.spec.ts); no-science guard. NOT run: tsc / Playwright / browser.
+- Not done: event markers on the globe itself (list + fly-to only).
