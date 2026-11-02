@@ -5,7 +5,7 @@ overrides them section by section; `NISAR_COMMON_<SECTION>_<KEY>` environment va
 (same convention as the retrieval layer's `NISAR_<SECTION>_<KEY>`).
 
 `CommonConfig.chain_params()` is what gets hashed into the bundle id (P13): every field that can change
-the *content* of a bundle is in there; the registry/process-pool and earthquake (pipeline defaults) sections are not.
+the *content* of a bundle is in there, the registry/process-pool section is not.
 """
 from __future__ import annotations
 
@@ -153,6 +153,20 @@ class ProvenanceCfg:
 
 
 @dataclass(frozen=True)
+class EarthquakeCfg:
+    """earthquake_coseismic parameters. These steer the PIPELINE, not the bundle, so they are not part of the bundle
+    hash (see CommonConfig.chain_params). A caller can still override per request via triggers["eq_params"]."""
+    coherence_threshold: float = 0.5
+    reference_strategy: str = "farField"       # "farField" (edge-margin median) | "fullFrameMedian" (all valid pixels)
+    far_field_margin: float = 0.12             # share of the tile edge used as the reference ring
+    detection_floor_m: float = 0.01            # absolute floor of the detection threshold max(k*sigma, floor, iono)
+    significance_k: float = 3.0
+    edge_touch_max_fraction: float = 0.05      # warn when more than this share of the reference ring is itself "detected"
+    scan_pairs_per_stack: int = 4              # scan mode (no event window): newest N interferograms of EACH stack; 1 = newest only
+    analyse_all_stacks: bool = True            # analyse every ascending/descending stack, not only one "primary" stack
+
+
+@dataclass(frozen=True)
 class RegistryCfg:
     max_workers: int | None = None   # None -> min(cpu_count - 1, 8), at least 1
     task_timeout_s: float = 900.0
@@ -162,27 +176,14 @@ class RegistryCfg:
     persist_bundles: bool = True     # content-addressed copy under <data>/bundles so workers can mmap it
     max_attempts: int = 2            # re-run a task that was only collateral damage of a pool recycle
     min_epochs_metric: dict = field(default_factory=lambda: {"land_subsidence": "pairs_connected"})
-
-
-@dataclass(frozen=True)
-class EarthquakeCfg:
-    """Defaults of the earthquake_coseismic pipeline (a per-request `eq_params` override still wins).
-    Not part of the bundle id: these change what the PIPELINE concludes, never what the bundle contains."""
-    scan_max_pairs: int = 8             # scan mode (no event window): newest N interferograms analysed PER STACK
-    detection_floor_mm: float = 10.0    # a pixel needs |d| above max(k*sigma, this floor, ionosphere floor)
-    significance_k: float = 3.0
-    coherence_threshold: float = 0.5
-    reference_strategy: str = "farField"   # "farField" (median of the tile's edge band) | "fullFrameMedian"
-    far_field_margin: float = 0.12         # edge band width as a fraction of the tile (farField only)
-    edge_signal_warn_fraction: float = 0.10  # warn when >= this share of detected pixels lies in the reference band
-    coverage_warn_fraction: float = 0.50     # ... or when detections cover >= this share of the valid tile
+    fetch_for_unmodelled: bool = False  # False: only pipelines that have a run() decide which products are fetched / which steps run
 
 
 _SECTIONS: dict[str, type] = {
     "grids": GridsCfg, "window": WindowCfg, "products": ProductsCfg, "clip": ClipCfg, "radar": RadarCfg,
     "decode": DecodeCfg, "geometry": GeometryCfg, "terrain": TerrainCfg, "temporal": TemporalCfg,
-    "stable": StableCfg, "routing": RoutingCfg, "provenance": ProvenanceCfg, "registry": RegistryCfg,
-    "earthquake": EarthquakeCfg,
+    "stable": StableCfg, "routing": RoutingCfg, "provenance": ProvenanceCfg, "earthquake": EarthquakeCfg,
+    "registry": RegistryCfg,
 }
 
 
@@ -200,14 +201,14 @@ class CommonConfig:
     stable: StableCfg = field(default_factory=StableCfg)
     routing: RoutingCfg = field(default_factory=RoutingCfg)
     provenance: ProvenanceCfg = field(default_factory=ProvenanceCfg)
-    registry: RegistryCfg = field(default_factory=RegistryCfg)
     earthquake: EarthquakeCfg = field(default_factory=EarthquakeCfg)
+    registry: RegistryCfg = field(default_factory=RegistryCfg)
 
     def chain_params(self) -> dict:
         """Everything that can change bundle content (registry/pool settings excluded)."""
         d = dataclasses.asdict(self)
         d.pop("registry", None)
-        d.pop("earthquake", None)      # pipeline defaults: they never change a bundle's content
+        d.pop("earthquake", None)          # pipeline parameters: they do not change what a bundle contains
         return d
 
     def chain_params_json(self) -> str:

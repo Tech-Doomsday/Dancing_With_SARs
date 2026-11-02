@@ -262,6 +262,13 @@ class RetrievalManager:
             p01.run(ctx)
             for f in ctx.flags:
                 self._flag(job, f.code, f.severity, f.message)
+            # B3/B4: what the caps cut, and what ASF said, as numbers (not only prose in a flag)
+            job.update(cuts=[{"code": f.code, **{k: v for k, v in dict(f.detail).items()
+                                                 if k in ("stack", "product", "kept", "found", "cap")}}
+                             for f in ctx.flags if f.code in ("epochs_truncated", "pairs_truncated")],
+                       listing=[{"code": f.code, **{k: v for k, v in dict(f.detail).items()
+                                                    if k in ("product", "expected", "got", "missing")}, "message": f.message}
+                                for f in ctx.flags if f.code in ("search_incomplete", "search_error", "search_degraded")])
             res = ctx.resolved
             names = {"GUNW": cfg.products.gunw, "GCOV": cfg.products.gcov, "GOFF": cfg.products.goff}
             want = [p.upper() for p in (rq.get("products") or [])]
@@ -364,7 +371,10 @@ class RetrievalManager:
                  bytes_done=sum(g["bytes_done"] or 0 for g in gs),
                  stored=sum(1 for g in gs if g["state"] == "stored"),
                  failed=sum(1 for g in gs if g["state"] == "failed"),
-                 skipped=sum(1 for g in gs if g["state"] in ("skipped", "cancelled")))
+                 skipped=sum(1 for g in gs if g["state"] in ("skipped", "cancelled")),
+                 # B5: bytes_done counts bytes fetched NOW; a granule served from the local cache costs 0 bytes and says so
+                 stored_from_cache=sum(1 for g in gs if g["state"] == "stored" and g.get("source") not in (None, "network")),
+                 stored_from_network=sum(1 for g in gs if g["state"] == "stored" and g.get("source") == "network"))
 
     @staticmethod
     def _apply_plan(job: dict) -> None:

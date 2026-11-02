@@ -36,18 +36,20 @@ stable:
   slope_max_deg: 10
   nochange_k: 3.0
 
+earthquake:                     # earthquake_coseismic (per-request override: triggers.eq_params)
+  detection_floor_m: 0.01       # detection threshold = max(significance_k * sigma, this, ionosphere floor). 10 mm over one ~12-day pair
+                                # cannot see slow movement (a swelling volcano is a few cm per YEAR): lower it, or read the rate in the result
+  significance_k: 3.0
+  coherence_threshold: 0.5
+  reference_strategy: farField  # farField = median of the tile's edge ring | fullFrameMedian = median of every valid pixel
+  far_field_margin: 0.12        # edge ring width as a share of the tile. If the real movement is bigger than the tile it leaks into this ring
+  edge_touch_max_fraction: 0.05 # warn when more than this share of the reference ring is itself detected as movement
+  scan_pairs_per_stack: 4       # scan mode (no event window): analyse the newest N interferograms of every stack (1 = newest only)
+  analyse_all_stacks: true      # analyse every ascending / descending stack instead of one "primary" stack
+
 registry:
+  fetch_for_unmodelled: false   # false: products are fetched / steps run only for pipelines that really have a run()
   task_timeout_s: 900
   start_method: spawn           # never fork (retrieval client owns threads and an event loop)
   run_unknown: false            # skip pipelines whose applicability could not be evaluated (reported, never silent)
   gate_min_epochs: true         # answer INSUFFICIENT_EVIDENCE for min_epochs pipelines without launching a worker
-
-earthquake:                     # earthquake_coseismic defaults (a per-request eq_params override still wins)
-  scan_max_pairs: 8             # scan mode (no event window): newest N interferograms analysed per stack (8 x 12 d ~ the 120-day lookback)
-  detection_floor_mm: 10        # fixed detection floor; motion slower than floor / pair-length per day is invisible to one pair
-  significance_k: 3.0
-  coherence_threshold: 0.5
-  reference_strategy: farField  # farField | fullFrameMedian
-  far_field_margin: 0.12        # edge band (fraction of the tile) whose median is subtracted
-  edge_signal_warn_fraction: 0.10
-  coverage_warn_fraction: 0.50

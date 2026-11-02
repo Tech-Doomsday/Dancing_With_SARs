@@ -148,7 +148,7 @@ code { font-family: ui-monospace, Menlo, Consolas, monospace; font-size: 12px; }
 
         <h2 style="margin-top:18px">What to download</h2>
         <label for="look">History (days back from now)</label>
-        <input id="look" type="number" min="1" max="3650" value="60">
+        <input id="look" type="number" min="1" max="3650" placeholder="engine default">
         <div class="chips" id="prod-chips"></div>
         <div class="row2">
           <div><label for="maxe">Max GCOV epochs</label><input id="maxe" type="number" min="1" max="500" placeholder="engine default"></div>
@@ -707,10 +707,15 @@ $("#b-plan").onclick = () => startBatch("plan");
 $("#b-get").onclick = () => startBatch("retrieve");
 
 (async function init() {
-  const f = recall("form", {lat: "23.748", lon: "90.41849", size: "30", snap: false, look: "60", maxe: "", maxp: ""});
+  const f = recall("form", {lat: "23.748", lon: "90.41849", size: "30", snap: false, look: "", maxe: "", maxp: ""});
   $("#lat").value = f.lat; $("#lon").value = f.lon; $("#size").value = f.size; $("#snap").checked = !!f.snap;
   $("#look").value = f.look; $("#maxe").value = f.maxe; $("#maxp").value = f.maxp;
   state.lastReq = recall("lastReq", null);
+  try {                                   // the engine's own numbers (config/common.yaml), never a copy kept in this page
+    const d = await api("/api/settings/defaults");
+    $("#look").placeholder = `${d.lookback_days} (engine default)`;
+    $("#maxe").placeholder = `${d.max_gcov_epochs} (engine default)`; $("#maxp").placeholder = `${d.max_gunw_pairs} (engine default)`;
+  } catch (e) { /* the placeholders keep saying "engine default" */ }
   renderChips(); syncButtons();
   await Promise.all([refreshHealth(), refreshDisk(), preview()]);
   try { state.batch = await api("/hub/api/batch"); if (state.batch.status === "running") pollBatch(); else if (state.batch.tiles && state.batch.tiles.length) { renderQueue(); renderCover(); } } catch (e) { /* idle */ }

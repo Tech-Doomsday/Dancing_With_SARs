@@ -22,3 +22,21 @@ test_corners_stride, test_preview_scale, test_retrieval_list, test_hub; the fail
 (missing fastapi/h5py). TypeScript was not compiled.
 Open items from speckle-fixes HANDOFF: no browser check of the corner-placed globe quad, Before/After and thumbnails; no HTTP test for lo/hi 400 cases;
 thumbqueue Playwright spec never run.
+
+# Second merge (2026-11-02): speckle-audit changes (diff + zip, made on the same base as step 2)
+The audit agent built its own versions of several things speckle-fixes also built. Overlapping features were NOT blended line by line;
+one coherent implementation was kept for each:
+- **Kept from audit (replaces speckle-fixes):** NO_SIGNAL ranking + quiet handling (`engine/verdict/select.py`), stack ranking (`scene_bundle.py`: `stack_keys_by_quality`),
+  the earthquake config block / `EqParams.defaults()` (`scan_pairs_per_stack`, `analyse_all_stacks`, `edge_touch_max_fraction`), `earthquake_coseismic/{prep,verdict,types,inputs}.py`,
+  `config/common.yaml`, the engine-defaults route `GET /api/settings/defaults` + `app-ui/src/lib/defaults.ts` + `RetrievalPanel.tsx`, the search-incomplete flag text in P01,
+  the partial-listing cache in `nisar_client.py`/`cache.py`, `main.py`.
+- **Removed (speckle-fixes versions of the same features):** `engine/common/defaults.py` and the `defaults` field on `/api/health` and in `types.ts`,
+  `tests/test_public_defaults.py`, `tests/test_eq_scan_selection.py`, `tests/test_select_no_signal.py` (their targets no longer exist; audit ships
+  `tests/test_verdict_select_quiet.py`, `tests/test_settings_defaults.py`, `earthquake_coseismic/tests/test_scan_inputs.py` for the same ground).
+  Not carried over from speckle-fixes: `analysed_window` / `signal_edge_contact` helpers and the "decision.meaning" evidence line.
+- **Kept from speckle-fixes (no audit equivalent):** the "Speckle" rename, SUPPORTED wording in the UI, NOT_MODELLED note in VerdictCard, baseline "context only" tag,
+  `search_incomplete_levels` + `incomplete_detail` on the granule-listing endpoint and its Explorer banner.
+- **Applied from audit as is:** `routes_settings.py`, `VerdictBasis.tsx`, Legend/TimelineCanvas/GlobeApp UI changes, `registry.py` / `chain.py` / `context.py`, `granule_poller.py`, `retrieval/settings.py`,
+  `config/retrieval.yaml`, `next.config.ts`, and its four new tests.
+Verified here: all Python compiles; the audit's new tests and every test file that can run without fastapi/h5py/aiohttp/pyproj pass (7 passed, 4 skipped).
+Not run: full pytest, TypeScript typecheck/lint, any browser.

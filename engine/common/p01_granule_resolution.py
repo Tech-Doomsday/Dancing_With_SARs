@@ -141,12 +141,16 @@ def resolve(ctx: BuildContext, products: list[str]) -> Resolved:
         if getattr(rtv, "last_search_incomplete", False) is True:       # ASF/CMR served a short page, even after a retry
             res.search_incomplete = True
             warns = getattr(rtv, "last_search_warnings", None)
-            raw = str(warns[0]) if isinstance(warns, list) and warns else ""
+            short = getattr(rtv, "last_search_shortfalls", None) or []
+            exp, got = sum(s["expected"] for s in short), sum(s["got"] for s in short)
+            counts = f"expected {exp}, got {got}: {exp - got} {prod} granule(s) missing, " if short else ""
             ctx.flag("search_incomplete", "warn", "P01",
-                     f"{prod} listing may be missing granules (ASF/CMR reported an incomplete result"
-                     + (f": {incomplete_detail(raw)}" if raw else "")
-                     + f"; which {prod} granules are missing is not reported by ASF, so this list is partial and not cached)",
-                     product=prod, listed=len(refs), detail_raw=raw[:300])
+                     f"{prod} listing is incomplete: ASF/CMR returned a short result ({counts}"
+                     "which granules is not reported by ASF"
+                     + (f"; its message: {str(warns[0])[:140]}" if isinstance(warns, list) and warns else "") + "). "
+                     f"Only the {prod} granules listed here are used; the headline count is a lower bound",
+                     product=prod, expected=exp or None, got=got or None, missing=(exp - got) if short else None,
+                     warnings=list(warns or [])[:3])
         refs = [r for r in refs if (r.product or name) == name]
         refs, dropped = _drop_older(refs)
         res.dropped_older += dropped
@@ -208,7 +212,10 @@ def _group_epochs(ctx, res: Resolved, metas: list, merge: float, as_of) -> None:
         groups = [EpochGroup(key, g[0].times[0], g) for g in _cluster(ms, lambda m: m.times[0], merge)]
         keep = groups[-ctx.cfg.window.max_gcov_epochs:]
         if len(groups) > len(keep):
-            ctx.flag("epochs_truncated", "info", "P01", f"stack {key}: kept newest {len(keep)} of {len(groups)} epochs", stack=key)
+            ctx.flag("epochs_truncated", "info", "P01",
+                     f"stack {key}: GCOV cut to the newest {len(keep)} of {len(groups)} epochs (max_gcov_epochs="
+                     f"{ctx.cfg.window.max_gcov_epochs}, config/common.yaml window); {len(groups) - len(keep)} older epoch(s) not used",
+                     stack=key, product="GCOV", kept=len(keep), found=len(groups), cap=ctx.cfg.window.max_gcov_epochs)
         res.gcov[key] = keep
 
 
@@ -252,7 +259,10 @@ def _group_pairs(ctx, res: Resolved, metas: list, prod: str, merge: float, as_of
         merged.sort(key=lambda g: (g.sec_time, g.ref_time))
         keep = merged[-ctx.cfg.window.max_gunw_pairs:]
         if len(merged) > len(keep):
-            ctx.flag("pairs_truncated", "info", "P01", f"stack {key}: kept newest {len(keep)} of {len(merged)} pairs", stack=key)
+            ctx.flag("pairs_truncated", "info", "P01",
+                     f"stack {key}: {prod} cut to the newest {len(keep)} of {len(merged)} pairs (max_gunw_pairs="
+                     f"{ctx.cfg.window.max_gunw_pairs}, config/common.yaml window); {len(merged) - len(keep)} older pair(s) not used",
+                     stack=key, product=prod, kept=len(keep), found=len(merged), cap=ctx.cfg.window.max_gunw_pairs)
         target[key] = keep + [x[1] for x in unresolved]
 
 

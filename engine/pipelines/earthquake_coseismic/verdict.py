@@ -17,6 +17,7 @@ import numpy as np
 from engine.common.result import EvidenceItem, LayerRef, PipelineResult, Source
 
 from . import detection as det
+from . import inputs
 from . import model
 from . import prep
 from . import uncatalogued
@@ -30,7 +31,7 @@ REFERENCES_USED = [
     "Wells & Coppersmith (1994) rupture-area scaling (all slip types)",
     "Rodriguez & Martin (1992) coherence–phase Cramér-Rao sigma (via P06 sigma_m)",
 ]
-PIPELINE_VERSION = "1.2.0"          # final-prompt fixes: events_unscreenable split, dip-90 okada fix,
+PIPELINE_VERSION = "1.3.0"          # final-prompt fixes: events_unscreenable split, dip-90 okada fix,
 #                                   # stable evidence ids, layer bounds_lonlat, R2 coverage check
 
 
@@ -77,16 +78,19 @@ def run(bundle, providers: dict | None = None) -> PipelineResult:
     # engine flags that matter for LOS honesty (surfaced into evidence)
     flag_notes = [
         f"{f.code}: {f.message}" for f in bundle.flags
-        if f.code in ("los_convention_suspect", "pairs_flipped", "fetch_error", "search_incomplete")
+        if f.code in ("los_convention_suspect", "pairs_flipped", "fetch_error")
     ]
-    gunw_incomplete = gunw_listing_incomplete(bundle)
+    # A4: a short / failed ASF listing means "the newest pair" may not be the newest one that exists
+    listing = inputs.completeness(bundle.flags)
+    flag_notes += listing["notes"]
+    scan_mode = not bundle.request.event_window
 
-    if not bundle.interferometric_stack_keys():
+    if not bundle.stack_keys_by_quality():
         return _insufficient(["no usable NISAR data (M1 interferograms) for this tile/window"],
                              flag_notes, bundle.tile.id, bundle.epoch, bundle.bundle_id, params=params)
 
     # ---- 1. pair selection -------------------------------------------------
-    indices, reasons = prep.select_pairs(bundle, params)      # [(stack_key, pair_index)] over EVERY stack with interferograms
+    indices, reasons = prep.select_pairs(bundle, params)
     if not indices:
         return _insufficient(reasons, flag_notes, bundle.tile.id, bundle.epoch, bundle.bundle_id,
                              params=params)
@@ -94,11 +98,11 @@ def run(bundle, providers: dict | None = None) -> PipelineResult:
     # ---- 2-3. per-pair prep + detection -------------------------------------
     analyses = []
     pair_records = []
-    for stack_key, idx in indices:
-        stack = bundle.stack(stack_key)
+    for key, idx in indices:
+        stack = bundle.stacks[key]
         analysis, reason = prep.analyse_pair(bundle, stack, idx, params)
         if analysis is None:
-            pair_records.append({"stack_key": stack_key, "pair_index": idx, "skipped": True, "reason": reason})
+            pair_records.append({"stack_key": key, "pair_index": idx, "skipped": True, "reason": reason})
             continue
         summary, grids = det.detection_pass(
             analysis.disp, analysis.sigma_eff, analysis.mask,
@@ -114,10 +118,21 @@ def run(bundle, providers: dict | None = None) -> PipelineResult:
         )
         analysis.summary = summary          # type: ignore[attr-defined]
         analysis.grids = grids              # type: ignore[attr-defined]
+        # A8: referencing removes the median of the tile's edge ring. If the ring itself holds detected movement, the
+        # real signal is bigger than the tile and the reference removed part of it.
+        edge_touch = _edge_touch(analysis, grids, params)
+        analysis.edge_touch = edge_touch    # type: ignore[attr-defined]
+        if edge_touch is not None and edge_touch > params.edge_touch_max_fraction:
+            analysis.warnings.append(
+                f"stack {key}: {edge_touch:.0%} of the reference ring is itself detected as movement (limit "
+                f"{params.edge_touch_max_fraction:.0%}) — the signal touches the tile edge, so far-field referencing "
+                f"({params.far_field_margin:.0%} margin, median {analysis.ref_offset_m * 1000:.1f} mm removed) may have "
+                "removed real signal. Try reference_strategy=fullFrameMedian or a larger area.")
         analyses.append(analysis)
         warnings.extend(analysis.warnings)
         pair_records.append({
-            "stack_key": stack_key, "pair_index": idx,
+            "stack_key": key, "pair_index": idx,
+            "reference_strategy": params.reference_strategy, "edge_touch_fraction": edge_touch,
             "granule_ids": list(analysis.granule_ids),
             "ref_time": analysis.ref_time, "sec_time": analysis.sec_time,
             "valid_pixels": summary.valid_pixels,
@@ -135,17 +150,20 @@ def run(bundle, providers: dict | None = None) -> PipelineResult:
             flag_notes + warnings, bundle.tile.id, bundle.epoch, bundle.bundle_id, params=params)
 
     # best pair = largest affected area (tie-break: more valid pixels), deterministic
-    best = max(analyses, key=lambda a: (a.summary.affected_area_km2, a.summary.valid_pixels, -a.pair_index))
+    analyses.sort(key=lambda a: (a.stack_key, a.pair_index))        # max() keeps the first maximum: stable across runs
+    best = max(analyses, key=lambda a: (a.summary.affected_area_km2, a.summary.valid_pixels))
     for rec in pair_records:
-        rec["selected"] = (rec.get("granule_ids") == list(best.granule_ids) and rec.get("stack_key") == best.stack_key)
-
-    window = prep.analysed_window(analyses)
-    window_text = prep.window_phrase(window)
-    stacks_analysed = sorted({a.stack_key for a in analyses})
+        rec["selected"] = (rec.get("granule_ids") == list(best.granule_ids))
+    window = inputs.window_summary(pair_records, bundle.request)
+    stacks_info = inputs.stack_summary(bundle, {a.stack_key for a in analyses}, best.stack_key)
 
     # ---- 4. events (fetch failure => INSUFFICIENT_EVIDENCE, never "no event")
     bbox = tuple(bundle.tile.bbox_lonlat)  # (W, S, E, N)
-    events_res = fetch_events(bbox, best.ref_time, best.sec_time, params, providers=providers)
+    q_ref, q_sec = best.ref_time, best.sec_time
+    if scan_mode and len(analyses) > 1:                    # "no event" must hold for every analysed window
+        q_ref = min(a.ref_time for a in analyses if a.ref_time)
+        q_sec = max(a.sec_time for a in analyses if a.sec_time)
+    events_res = fetch_events(bbox, q_ref, q_sec, params, providers=providers)
     provenance: list[Source] = list(getattr(events_res, "provenance", ()) or ())
     if events_res.error or events_res.degraded:
         reason = events_res.error or "event provider reported degraded results"
@@ -165,6 +183,10 @@ def run(bundle, providers: dict | None = None) -> PipelineResult:
             screens.append(model.forward_screen(best, ev, bundle.tile.epsg, params, plane_index=plane))
     for item in selection.excluded[:20]:
         warnings.append(f"event {item['id']} not considered: {item['reason']}")
+    n_events_for_decision = len(selection.ranked)
+    if best.summary.detected_pixels == 0 and (q_ref, q_sec) != (best.ref_time, best.sec_time):
+        wide = model.rank_events(events, q_ref, q_sec, tuple(bundle.tile.center_lonlat), params)
+        n_events_for_decision = max(n_events_for_decision, len(wide.ranked))
 
     # ---- 5b. uncatalogued branch: detection present, GENUINELY no catalog event
     # (an in-window event without a mechanism is a data gap -> events_unscreenable,
@@ -182,18 +204,12 @@ def run(bundle, providers: dict | None = None) -> PipelineResult:
     # ---- 6. decision ---------------------------------------------------------
     status, raw_p, rule, extra = model.decide(
         best.summary, screens, events_known=True, params=params,
-        uncatalogued=uncatalogued_fit, n_events_in_window=len(selection.ranked))
-    extra["window_text"] = window_text
-    extra["analysed_window"] = window
-    extra["stack_used"] = best.stack_key
-    extra["stacks_analysed"] = stacks_analysed
-    if status == "NO_SIGNAL" and gunw_incomplete:
-        # absence of signal cannot be claimed when the interferogram listing itself may be missing pairs
-        return _insufficient(
-            [f"the GUNW search was incomplete (ASF/CMR served a short page), so the analysed pairs ({window_text}) "
-             "may not include the newest or other interferograms; 'no signal' cannot be claimed"],
-            flag_notes + warnings + pair_note_lines(pair_records),
-            bundle.tile.id, bundle.epoch, bundle.bundle_id, params=params)
+        uncatalogued=uncatalogued_fit, n_events_in_window=n_events_for_decision
+        if best.summary.detected_pixels == 0 else len(selection.ranked))
+    # A4: a quiet / negative answer built on a short listing is not an answer
+    if not listing["complete"] and status in ("NO_SIGNAL", "NOT_SUPPORTED"):
+        extra = {**extra, "downgraded_from": status, "downgraded_because": "search_incomplete"}
+        status, raw_p, rule = "INSUFFICIENT_EVIDENCE", None, "search_incomplete"
     if rule == "events_unscreenable":
         in_window = ", ".join(ev.id for ev, _ in selection.ranked[:3])
         warnings.append(
@@ -229,7 +245,7 @@ def run(bundle, providers: dict | None = None) -> PipelineResult:
     layers["detected"] = encode_layer(
         "detected", best.grids["detected"],
         units="1 = toward sensor, 2 = away, 0 = not detected",
-        colormap="binary", note=f"detection rule |d| > max(k·σ, {params.detection_floor_m * 1000:g} mm, iono floor)")
+        colormap="binary", note="detection rule |d| > max(k·σ, 10 mm, iono floor)")
     # §5.1 item 1: the UI renders categorical swatches from the engine's labels — the value
     # meanings come from this layer's own units text (1 = toward, 2 = away; verified above).
     layers["detected"]["categories"] = [
@@ -250,8 +266,7 @@ def run(bundle, providers: dict | None = None) -> PipelineResult:
 
     data_used = [
         f"M1 GUNW los/sigma/coherence/conn_comp/iono_floor — pair {best.ref_time}..{best.sec_time} "
-        f"(stack {best.stack_key}, granules {', '.join(best.granule_ids)}); "
-        f"{len(analyses)} pair(s) analysed over {', '.join(stacks_analysed)}, the pair above has the largest detected area",
+        f"(stack {best.stack_key}, granules {', '.join(best.granule_ids)})",
         f"R1 ComCat events ({len(events)} in query window, source {events_res.source})",
     ]
     if best.los_enu is not None:
@@ -307,25 +322,6 @@ def run(bundle, providers: dict | None = None) -> PipelineResult:
                 f"The affected area is below the credible area ({credible:.2f} km² = max(1, 4 pixels)) — "
                 "isolated stray pixels are not evidence of deformation.",
                 level="caveat"))
-    evidence.append(_evidence("detection.floor", "detection_limit", floor_caveat(params, window), level="caveat"))
-    edge = prep.signal_edge_contact(best.grids["detected"], getattr(best, "reference_mask", best.mask), best.mask,
-                                    params.edge_signal_warn_fraction, params.coverage_warn_fraction)
-    if edge["warn"]:
-        msg = ("Signal touches the referencing band: " + "; ".join(edge["reasons"])
-               + f". Reference method: {params.reference_strategy}"
-               + (f" (edge band {params.far_field_margin * 100:.0f}% of the tile)" if params.reference_strategy == "farField" else "")
-               + ". Displacements may be biased toward zero; a larger tile is needed to separate signal from reference.")
-        evidence.append(_evidence("referencing.edge_signal", "referencing", msg, support=edge, level="caveat"))
-        warnings.append(msg)
-    if gunw_incomplete:
-        evidence.append(_evidence(
-            "search.incomplete", "data_gap",
-            f"The GUNW listing from ASF/CMR was incomplete, so the pairs analysed ({window_text}) may not be all that exist; "
-            "a newer or older interferogram may be missing. Positive findings stand; an absence of signal is not claimed.",
-            level="caveat"))
-    evidence.append(_evidence("assumptions.radar", "assumption", radar_assumptions_text(), level="caveat"))
-    if best_screen is not None and status in ("SUPPORTED", "NOT_SUPPORTED") and rule in ("screen_pass", "screen_fail"):
-        evidence.append(_evidence("decision.meaning", "decision_basis", supported_meaning(best_screen, status), level="decision"))
     if s.null_screen:
         evidence.append(_evidence("detection.null_screen", "null_screen", s.null_screen.get("note", ""),
                                   support={k: v for k, v in s.null_screen.items() if k != "note"},
@@ -354,10 +350,10 @@ def run(bundle, providers: dict | None = None) -> PipelineResult:
     if status == "NO_SIGNAL":
         evidence.append(_evidence(
             "signal.none", "null_result",
-            (f"No catalog event (M >= 4, within {params.max_event_distance_km:.0f} km, inside the pair "
-             f"window) and no coherent cluster above the detection threshold in the interferogram window actually "
-             f"analysed: {window_text}. Nothing above the detection floor was seen in that window only — not in the "
-             "whole lookback, and not slow motion below the floor. A quiet outcome, NOT a tested-and-rejected quake."),
+            (f"No catalog event (M >= 4, within {params.max_event_distance_km:.0f} km) inside the analysed "
+             f"interferogram window(s) and no coherent cluster above the detection threshold. Window actually "
+             f"analysed: {window['text']}. Nothing is claimed about the rest of the lookback, nor about slow "
+             "movement below the detection floor. This is a quiet outcome, NOT a tested-and-rejected quake."),
             level="decision", source_ref=f"bundle:{best.stack_key}"))
     if rule == "events_unscreenable":
         in_window = ", ".join(f"{ev.id} (M{ev.magnitude if ev.magnitude is not None else '?'})"
@@ -409,6 +405,50 @@ def run(bundle, providers: dict | None = None) -> PipelineResult:
             (f"Isolated or sub-credible signal; no catalog event within "
              f"{params.max_event_distance_km:.0f} km in the window."),
             level="caveat"))
+    # ---- what the verdict really used (A1/A2/A3/B9), the floor (A7), assumptions (A10), listing (A4), edge (A8)
+    sel_days = None
+    a_, b_ = inputs.parse_iso(best.ref_time), inputs.parse_iso(best.sec_time)
+    if a_ and b_:
+        sel_days = round((b_ - a_).total_seconds() / 86400.0, 1)
+    others = [f"{r.get('stack_key')} {str(r.get('ref_time'))[:10]}..{str(r.get('sec_time'))[:10]}"
+              for r in pair_records if not r.get("skipped") and not r.get("selected")]
+    evidence.append(_evidence(
+        "inputs.used", "inputs",
+        (f"The verdict is based on stack {best.stack_key}, pair {str(best.ref_time)[:10]}..{str(best.sec_time)[:10]}"
+         f"{f' ({sel_days:g} days)' if sel_days else ''}. Analysed: {window['text']}"
+         + (f"; the other analysed pairs were {', '.join(others[:6])}" if others else "") + ". "
+         f"Only these interferograms enter the verdict: gaps shown between acquisitions on a timeline are display "
+         f"values, not inputs. " + stacks_info["note"]),
+        support={"selected": {"stack": best.stack_key, "ref_time": best.ref_time, "sec_time": best.sec_time,
+                              "days": sel_days, "granule_ids": list(best.granule_ids)},
+                 "analysed_stacks": stacks_info["analysed"], "n_pairs": window["n_pairs"],
+                 "covered_days": window["covered_days"], "search_days": window["search_days"],
+                 "scan_pairs_per_stack": params.scan_pairs_per_stack if scan_mode else None},
+        level="info", source_ref=f"bundle:{best.stack_key}"))
+    floor_claim, floor_support = inputs.floor_statement(s, params, best.ref_time, best.sec_time)
+    evidence.append(_evidence("detection.floor", "detection_floor", floor_claim, support=floor_support, level="caveat"))
+    from engine.common.config import load_common_config
+    radar_claim, radar_support = inputs.radar_assumptions(bundle, load_common_config().radar)
+    evidence.append(_evidence("assumptions.radar", "assumptions", radar_claim, support=radar_support, level="caveat"))
+    if not listing["complete"]:
+        evidence.append(_evidence("input.listing_incomplete", "insufficient", inputs.incomplete_claim(listing, scan_mode),
+                                  support={"listing_flags": listing["listing_flags"]}, level="caveat"))
+    edge = getattr(best, "edge_touch", None)
+    if edge is not None and edge > params.edge_touch_max_fraction:
+        evidence.append(_evidence(
+            "reference.edge_signal", "reference",
+            (f"{edge:.0%} of the reference ring (the {params.far_field_margin:.0%} edge margin whose median was "
+             f"subtracted, {best.ref_offset_m * 1000:.1f} mm) is itself detected as movement. The signal is larger "
+             "than this tile, so referencing may have removed part of it: treat amplitudes as lower bounds."),
+            support={"edge_touch_fraction": round(edge, 3), "limit": params.edge_touch_max_fraction,
+                     "reference_strategy": params.reference_strategy, "ref_offset_mm": round(best.ref_offset_m * 1000, 2)},
+            level="caveat"))
+    if rule == "search_incomplete":
+        evidence.append(_evidence(
+            "decision.search_incomplete", "insufficient",
+            (f"Without the listing problem this tile would read {extra.get('downgraded_from')}: nothing was detected in "
+             "the pairs that were found, but pairs that were not listed may contain the movement."),
+            level="decision"))
     for note in flag_notes:
         # Stable content-derived id (final-prompt fix): Python hash() is salted per
         # process, so ids would differ between runs of the same bundle.
@@ -486,9 +526,21 @@ def run(bundle, providers: dict | None = None) -> PipelineResult:
         "uncatalogued": ({k: v for k, v in uncatalogued_fit.items() if k != "_prediction"}
                          if uncatalogued_fit is not None else None),
         "layers": {name: layer for name, layer in layers.items()},
-        "narrative": _narrative(status, s, extra, best_screen, params, rule=rule),
+        "narrative": _narrative(status, s, extra, best_screen, params, rule=rule, window=window["text"]),
         "detections": detections,
         "detections_truncated": detections_truncated,
+        # what the verdict really used, in one place the UI can show next to the verdict card (B9, A1-A4, A7, A10, A11)
+        "inputs": {
+            "mode": "scan" if scan_mode else "event",
+            "selected_pair": {"stack": best.stack_key, "pair_index": best.pair_index, "ref_time": best.ref_time,
+                              "sec_time": best.sec_time, "granule_ids": list(best.granule_ids)},
+            "window": window, "stacks": stacks_info, "listing": listing,
+            "assumptions": radar_support, "floor": floor_support,
+            "reference": {"strategy": params.reference_strategy, "far_field_margin": params.far_field_margin,
+                          "edge_touch_fraction": edge, "edge_touch_limit": params.edge_touch_max_fraction},
+        },
+        "status_meaning": _status_meaning(status, rule),
+        "raw_p_meaning": "raw_p is a within-tier rank score between 0 and 1. It is NOT a probability and is not calibrated.",
     }
 
     layer_refs = [LayerRef(name=name, kind="raster", crs=f"EPSG:{bundle.tile.epsg}",
@@ -496,7 +548,8 @@ def run(bundle, providers: dict | None = None) -> PipelineResult:
 
     return PipelineResult(
         pipeline="earthquake_coseismic", tile=bundle.tile.id, epoch=bundle.epoch,
-        status=status, summary=_headline(status, s, extra, params.detection_floor_m * 1000.0, rule=rule),
+        status=status, summary=_headline(status, s, extra, params.detection_floor_m * 1000.0, rule=rule,
+                                         window=window["text"]),
         raw_p=raw_p, confidence=None,
         evidence=evidence, layers=layer_refs, provenance=provenance,
         data_used=data_used, references_used=REFERENCES_USED,
@@ -508,7 +561,35 @@ def run(bundle, providers: dict | None = None) -> PipelineResult:
     )
 
 
-def _headline(status: str, s, extra: dict, floor_mm: float = 10.0, rule: str | None = None) -> str:
+def _edge_touch(analysis, grids, params) -> float | None:
+    """Share of the far-field reference ring that is itself 'detected' (None when no ring was used)."""
+    if params.reference_strategy != "farField":
+        return None
+    ref, hit = getattr(analysis, "reference_mask", None), grids.get("detected")
+    if ref is None or hit is None or not np.asarray(ref).any():
+        return None
+    return float((np.asarray(hit)[np.asarray(ref)] != 0).mean())
+
+
+def _status_meaning(status: str, rule: str | None) -> str:
+    """What a status MEANS here, in words (A11). Thresholds come from the constants the screen really uses."""
+    from .types import AMPLITUDE_RATIO_FACTOR, PATTERN_CORRELATION_MIN
+    return {
+        "SUPPORTED": (f"Two screens passed, nothing more: the predicted and measured peak amplitudes agree within a factor of "
+                      f"{AMPLITUDE_RATIO_FACTOR:g}, and the pattern correlation is at least {PATTERN_CORRELATION_MIN}. "
+                      "It is not a probability that an earthquake caused the signal."),
+        "UNCATALOGUED_CANDIDATE": "A coherent signal with no catalogued event and a converged source fit. A candidate, not a detection.",
+        "NOT_SUPPORTED": "A signal or an event exists but the consistency screens did not pass; the earthquake hypothesis is not supported.",
+        "NO_SIGNAL": "Nothing crossed the detection threshold in the analysed window(s) and no catalogued event fell inside them.",
+        "INSUFFICIENT_EVIDENCE": ("The data could not decide (rule: %s)." % (rule or "insufficient_evidence")),
+    }.get(status, status)
+
+
+def _headline(status: str, s, extra: dict, floor_mm: float = 10.0, rule: str | None = None,
+              window: str | None = None) -> str:
+    if status == "INSUFFICIENT_EVIDENCE" and rule == "search_incomplete":
+        return ("The ASF granule listing was incomplete, so a quiet result cannot be trusted "
+                f"(it would have read {extra.get('downgraded_from')}).")
     largest = max(abs(s.max_toward_m), abs(s.max_away_m)) * 1000.0
     if status == "SUPPORTED":
         return (f"Possible coseismic signal — up to {largest:.0f} mm across {s.affected_area_km2:.1f} km², "
@@ -517,8 +598,8 @@ def _headline(status: str, s, extra: dict, floor_mm: float = 10.0, rule: str | N
         return (f"Coherent {largest:.0f} mm signal over {s.affected_area_km2:.1f} km² with no catalog "
                 "event in the acquisition window — candidate uncatalogued source.")
     if status == "NO_SIGNAL":
-        return (f"Nothing above threshold in the analysed window ({extra.get('window_text') or 'dates unknown'}): "
-                "no catalog event and no coherent signal there.")
+        return ("Nothing above threshold in the analysed window"
+                + (f" ({window})" if window else "") + ": no catalog event in it and no coherent signal.")
     if status == "INSUFFICIENT_EVIDENCE":
         if rule == "events_unscreenable":
             n = extra.get("n_events_in_window") or 0
@@ -532,7 +613,8 @@ def _headline(status: str, s, extra: dict, floor_mm: float = 10.0, rule: str | N
             "does not support a coseismic cause.")
 
 
-def _narrative(status: str, s, extra: dict, best_screen, params: EqParams, rule: str | None = None) -> dict:
+def _narrative(status: str, s, extra: dict, best_screen, params: EqParams, rule: str | None = None,
+               window: str | None = None) -> dict:
     floor_mm = params.detection_floor_m * 1000.0
     largest = max(abs(s.max_toward_m), abs(s.max_away_m)) * 1000.0
     if status == "SUPPORTED":
@@ -542,8 +624,11 @@ def _narrative(status: str, s, extra: dict, best_screen, params: EqParams, rule:
         headline = (f"Coherent {largest:.0f} mm signal over {s.affected_area_km2:.1f} km² with no "
                     "catalog event in the acquisition window — candidate uncatalogued source.")
     elif status == "NO_SIGNAL":
-        headline = (f"Nothing above threshold in the analysed window ({extra.get('window_text') or 'dates unknown'}): "
-                    "no catalog event and no coherent signal there.")
+        headline = ("Nothing above threshold in the analysed window" + (f" ({window})" if window else "")
+                    + ": no catalog event in it and no coherent signal.")
+    elif status == "INSUFFICIENT_EVIDENCE" and rule == "search_incomplete":
+        headline = ("The ASF granule listing was incomplete, so a quiet result cannot be trusted "
+                    f"(it would have read {extra.get('downgraded_from')}).")
     elif status == "INSUFFICIENT_EVIDENCE":
         if rule == "events_unscreenable":
             n = extra.get("n_events_in_window") or 0
@@ -565,55 +650,8 @@ def _narrative(status: str, s, extra: dict, best_screen, params: EqParams, rule:
     return {
         "headline": headline,
         "reliability": reliability,
-        "note": "raw_p is a within-tier rank score, not a calibrated probability (calibration lands with verdict 4.2).",
+        "note": "raw_p is a within-tier rank score, not a probability. SUPPORTED means two screens passed (amplitude ratio and pattern correlation).",
     }
-
-
-def supported_meaning(screen: dict, status: str) -> str:
-    """What the label rests on, in plain words, with the thresholds the model actually used (never a probability)."""
-    from .model import AMPLITUDE_RATIO_FACTOR as F, PATTERN_CORRELATION_MIN as C
-    ratio, corr = screen.get("amplitude_ratio"), screen.get("pattern_correlation")
-    verdict = "passed both" if status == "SUPPORTED" else "did not pass both"
-    return (f"{status} here means the measured field {verdict} of two checks against catalogued event {screen.get('event_id')}: "
-            f"amplitude ratio {ratio:.2f} inside (1/{F:g}, {F:g}) and pattern correlation {corr:.2f} above {C:g}. "
-            "It is not a probability that the event caused the signal, and the rank score only orders findings inside one tier.")
-
-
-def gunw_listing_incomplete(bundle) -> bool:
-    """True when P01 flagged an incomplete ASF/CMR listing for the GUNW product."""
-    for f in getattr(bundle, "flags", ()) or ():
-        if getattr(f, "code", None) == "search_incomplete":
-            prod = dict(getattr(f, "detail", {}) or {}).get("product")
-            if prod in (None, "GUNW"):
-                return True
-    return False
-
-
-def floor_caveat(params, window: dict) -> str:
-    """What the fixed detection floor can and cannot see, in the analysed pair length."""
-    floor_mm = params.detection_floor_m * 1000.0
-    d = window.get("longest_pair_days")
-    base = (f"Detection floor: a pixel must move more than max({params.significance_k:g}·σ, {floor_mm:g} mm, "
-            "ionosphere floor) within ONE interferogram")
-    if d:
-        rate = floor_mm / d
-        return (base + f" (longest pair here {d:g} days). Line-of-sight motion slower than about {rate:.2f} mm/day "
-                f"(~{rate * 365:.0f} mm/yr) stays under the floor, so slow deformation such as volcano inflation or creep "
-                "is not excluded by this result. The floor is set by config/common.yaml earthquake.detection_floor_mm.")
-    return base + ". Slow deformation below that floor is not excluded by this result."
-
-
-def radar_assumptions_text() -> str:
-    """The radar values the clip does not carry, as they are configured (config/common.yaml radar:)."""
-    try:
-        from engine.common.config import load_common_config
-        r = load_common_config().radar
-    except Exception:
-        return "Radar conventions could not be read from config; treat the LOS sign and σ as unverified."
-    return (f"Assumed, not measured: phase sign {r.phase_sign:+d} (no ground-truth check) sets the toward/away sign "
-            f"used by the Okada comparison; effective looks {r.gunw_effective_looks:g} sets σ; wavelength {r.wavelength_m} m is fixed; "
-            f"look side {r.look_side or 'unknown'}"
-            + (" — a flipped line-of-sight convention cannot be caught" if not r.look_side else "") + ".")
 
 
 def pair_note_lines(pair_records: list) -> list[str]:

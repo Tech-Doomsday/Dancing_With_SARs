@@ -42,6 +42,7 @@ from .routes_events import router as events_router
 from .routes_jobs import router as jobs_router
 from .routes_pipelines import router as pipelines_router
 from .routes_retrievals import router as retrievals_router
+from .routes_settings import router as settings_router
 from .routes_runs import router as runs_router
 from .routes_scanner import router as scanner_router
 from .routes_tiles import router as tiles_router
@@ -95,13 +96,7 @@ def create_app() -> FastAPI:
     app.include_router(scanner_router)
     app.include_router(background_router)
     app.include_router(retrievals_router)
-
-    def _defaults() -> dict | None:
-        try:
-            from engine.common.defaults import public_defaults
-            return public_defaults()
-        except Exception:      # a config problem must not take health down; the UI then shows "—"
-            return None
+    app.include_router(settings_router)
 
     @app.get("/api/health")
     def health():
@@ -144,7 +139,6 @@ def create_app() -> FastAPI:
             "cache_write": {"status": "enabled" if cache_enabled else "disabled",
                             "reason": cache_reason},
             "granule_search": granule_search,
-            "defaults": _defaults(),
             "note": "presence-only health; it never implies verdicts",
         }
 

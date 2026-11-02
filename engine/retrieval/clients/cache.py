@@ -190,6 +190,11 @@ class SearchCache:
                    maturity, keep_all)
 
     def get(self, k: str, allow_stale: bool = False):
+        d = self.get_entry(k, allow_stale)
+        return None if d is None else (d["items"], d["fresh"])
+
+    def get_entry(self, k: str, allow_stale: bool = False):
+        """-> {"items", "fresh", "meta"} or None. `meta` carries what the caller stored beside the list."""
         p = self.root / f"{k}.json"
         try:
             d = json.loads(p.read_text())
@@ -198,11 +203,11 @@ class SearchCache:
         fresh = self.ttl is None or time.time() - d["created"] < self.ttl
         if not fresh and not allow_stale:
             return None
-        return d["items"], fresh
+        return {"items": d["items"], "fresh": fresh, "meta": d.get("meta") or {}}
 
-    def put(self, k: str, items: list[dict]):
+    def put(self, k: str, items: list[dict], meta: dict | None = None):
         self.root.mkdir(parents=True, exist_ok=True)
         p = self.root / f"{k}.json"
         tmp = p.with_suffix(f".{os.getpid()}.{threading.get_ident()}.tmp")
-        tmp.write_text(json.dumps({"created": time.time(), "items": items}))
+        tmp.write_text(json.dumps({"created": time.time(), "items": items, "meta": meta or {}}))
         replace_file(tmp, p)

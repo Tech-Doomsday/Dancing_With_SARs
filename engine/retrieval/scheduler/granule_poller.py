@@ -19,6 +19,15 @@ from ..clients.types import GranuleRef
 from ..state import State
 
 
+def poll_lookback_days(cfg) -> float:
+    """poll.lookback_days when set; otherwise the same window.lookback_days (config/common.yaml) every other path uses."""
+    v = cfg.poll.get("lookback_days")
+    if v is None:
+        from engine.common.config import load_common_config
+        v = load_common_config().window.lookback_days
+    return float(v)
+
+
 @dataclass
 class PollResult:
     new: list[GranuleRef] = field(default_factory=list)
@@ -55,7 +64,7 @@ class GranulePoller:
 
     def poll(self, now: datetime | None = None) -> PollResult:
         now = now or datetime.now(timezone.utc)
-        t0 = (now - timedelta(days=float(self.cfg.poll["lookback_days"]))).strftime("%Y-%m-%dT%H:%M:%SZ")
+        t0 = (now - timedelta(days=poll_lookback_days(self.cfg))).strftime("%Y-%m-%dT%H:%M:%SZ")
         t1 = now.strftime("%Y-%m-%dT%H:%M:%SZ")
         region = self.cfg.poll.get("region")
         res = PollResult()

@@ -403,28 +403,30 @@ class SceneBundle:
         return capability in self.capabilities
 
     @staticmethod
-    def _stack_score(s) -> tuple:
-        """(usable interferograms, backscatter epochs): GUNW quality first, GCOV epochs only break a tie —
-        a stack with many GCOV epochs but few interferograms must not outrank the one with the pairs."""
-        npairs = sum(1 for p in s.interferometric.pairs if p.times_resolved) if s.interferometric else 0
-        return (npairs, len(s.backscatter.epochs) if s.backscatter else 0)
+    def _ifg_rank(s) -> tuple:
+        """How good a stack is for INTERFEROMETRIC work (higher = better). GUNW quality decides; backscatter epochs only
+        break exact ties (they used to be added to the pair count, so a stack with many GCOV epochs but weak GUNW won)."""
+        ifg = s.interferometric
+        resolved = [p for p in ifg.pairs if p.times_resolved] if ifg else []
+        q = s.quality
+        return (bool(resolved),
+                round(float(q.valid_fraction_g80 or 0.0), 3) if q else 0.0,      # finite LOS in the newest pair
+                round(float(q.mean_coherence), 3) if q and q.mean_coherence is not None else -1.0,
+                len(resolved),
+                max((p.sec_time or "" for p in resolved), default=""),
+                len(s.backscatter.epochs) if s.backscatter else 0)
+
+    def stack_keys_by_quality(self, interferometric_only: bool = True) -> list:
+        """Stack keys, best GUNW quality first. `interferometric_only` drops stacks without a usable pair."""
+        ranked = sorted(self.stacks.items(), key=lambda kv: (self._ifg_rank(kv[1]), kv[0]), reverse=True)
+        return [k for k, s in ranked if not interferometric_only or self._ifg_rank(s)[0]]
 
     @property
     def primary_key(self) -> str | None:
-        """The stack with the most usable interferograms (GCOV epochs only break ties)."""
-        best, score = None, (-1, -1)
-        for k, s in self.stacks.items():
-            sc = self._stack_score(s)
-            if sc > score:
-                best, score = k, sc
-        return best
-
-    def interferometric_stack_keys(self) -> list:
-        """Keys of EVERY stack that holds at least one interferogram, best first. A pipeline that needs
-        interferograms analyses all of them (ascending and descending are never merged)."""
-        have = [(k, self._stack_score(s)) for k, s in self.stacks.items()
-                if s.interferometric is not None and s.interferometric.pairs]
-        return [k for k, _ in sorted(have, key=lambda kv: (-kv[1][0], -kv[1][1], kv[0]))]
+        """The stack with the best interferometric quality (see _ifg_rank). Consumers that can use several stacks
+        should take `stack_keys_by_quality()` instead of only this one."""
+        keys = self.stack_keys_by_quality(interferometric_only=False)
+        return keys[0] if keys else None
 
     def stack(self, key: str | None = None) -> StackBundle | None:
         key = key or self.primary_key

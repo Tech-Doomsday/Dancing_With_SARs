@@ -5,6 +5,17 @@
 import type { LayerPayload } from "@/lib/types";
 import { legendStops } from "@/lib/raster";
 
+/** What the map symbols mean (the pins used to appear with no explanation). */
+export function MapKey() {
+  return (
+    <ul aria-label="map key" className="pointer-events-auto rounded-lg border border-[#262c36] bg-[#0e1116]/90 px-2 py-1 text-[10px] text-[#c9d1d9]">
+      <li><span aria-hidden className="mr-1 inline-block h-2 w-2 rounded-full bg-[#ffffff] ring-1 ring-[#8a837b]" />your pin (where you clicked or searched)</li>
+      <li><span aria-hidden className="mr-1 inline-block h-2 w-2 rounded-full bg-[#9e3b2c] ring-2 ring-white" />a tile that already has a verdict (colour = verdict tier)</li>
+      <li><span aria-hidden className="mr-1 inline-block h-2 w-2 border border-[#ffd166]" />granule footprint · <span className="text-[#e07856]">dashed red</span> = detection outline</li>
+    </ul>
+  );
+}
+
 export default function Legend({ layer, opacity }: { layer: LayerPayload | null; opacity: number }) {
   if (!layer) return null;
   const legend = legendStops(layer);

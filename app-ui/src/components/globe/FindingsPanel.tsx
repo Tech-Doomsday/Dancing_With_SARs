@@ -7,6 +7,7 @@ import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import StatusBadge from "@/components/StatusBadge";
 import { EvidenceList, WarningsPanel } from "@/components/VerdictCard";
+import VerdictBasis, { ModelledBanner } from "./VerdictBasis";
 import { fmtUtc, timeAgo } from "@/lib/format";
 import type { PipelineResult, LayerPayload } from "@/lib/types";
 
@@ -91,6 +92,7 @@ export default function FindingsPanel(props: FindingsPanelProps) {
         )}
       </div>
 
+      <ModelledBanner results={props.results} />
       {TIER_ORDER.filter((t) => grouped.main[t]?.length).map((tier) => (
         <section key={tier}>
           <h4 className="mb-1 text-[11px] font-semibold uppercase tracking-wide text-[#8a837b]">{tier}</h4>
@@ -164,6 +166,7 @@ function FindingCard(props: FindingsPanelProps & { result: PipelineResult }) {
           </p>
         </div>
       )}
+      <VerdictBasis result={r} />
       {/* layer chips from result.layers (kind raster shown; vector noted, not displayable) */}
       {rasterLayers.length > 0 && (
         <div className="mt-2 flex flex-wrap gap-1">

@@ -29,6 +29,7 @@ cache:
   ttl_s:                     # null = immutable (keyed by processing version, never expires)
     granule_clip: null
     search: 21600            # 6 h, same cadence as the granule poller
+    search_incomplete: 600   # a SHORT listing (ASF/CMR page error) is remembered this long, still flagged short, so reloads agree; 0 = never
     layout_index: null
   stale_on_error: true       # serve an expired clip + degraded flag if the network is down
 
@@ -40,7 +41,7 @@ search:
 
 poll:
   products: [GCOV, GUNW]     # processing levels the granule poller watches
-  lookback_days: 45          # search window on acquisition time (late-processed granules inside it are still caught)
+  lookback_days: null        # null = the same window.lookback_days as everything else (config/common.yaml); a number overrides for the poller only
   max_results: 2000
   interval_hours: 6
   region: null               # [W, S, E, N] to restrict the poller to an area of interest; null = global

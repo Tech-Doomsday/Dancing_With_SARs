@@ -28,8 +28,8 @@ const STACK_HEADER_H = 20;
 const LANE_H = 22;
 const BRUSH_H = 56;
 
+import { DIRECTION_COLORS } from "@/lib/status";   // ONE colour per direction across Map and Background (A teal, D terracotta)
 const CYAN = "#3fb6c9";
-const VIOLET = "#b39ce8";
 const AMBER = "#e6c977";
 const GRID = "#1c222b";
 const GRID_MAJOR = "#2a323e";
@@ -206,9 +206,9 @@ export default function TimelineCanvas(props: Props) {
     return () => obs.disconnect();
   }, []);
 
-  // keep the window inside bounds when the data changes
+  // a new searched window opens FITTED to all of it (it used to keep the previous, narrower span and open as solid bars)
   useEffect(() => {
-    setScale((s) => clamp({ ...s }, bounds));
+    setScale((s) => ({ t0: bounds.min, t1: bounds.max, widthPx: s.widthPx }));
   }, [bounds]);
 
   // report the visible window upward (for "only in view")
@@ -335,7 +335,7 @@ export default function TimelineCanvas(props: Props) {
 
         for (const group of layout.groups) {
           const { stack, rows, yTop, height } = group;
-          const color = stack.direction === "D" ? VIOLET : stack.direction === "A" ? CYAN : MUTED;
+          const color = DIRECTION_COLORS[stack.direction ?? ""] ?? MUTED;
           // stack band
           ctx.fillStyle = "#12161d";
           ctx.fillRect(0, yTop, w, height);
@@ -398,10 +398,13 @@ export default function TimelineCanvas(props: Props) {
                 ctx.closePath();
                 ctx.strokeStyle = color; ctx.lineWidth = 1.4; ctx.stroke(); ctx.lineWidth = 1;
               } else if (bar.kind === "gcov") {
-                // a dot/tick at its time (minimum visible width)
+                // GCOV epoch = a RING (hollow dot) at its time; GUNW pair = a filled bar between its two dates
                 ctx.beginPath();
                 ctx.arc(x1 + 1.5, yBar + LANE_H / 2 - 5, 3.5, 0, Math.PI * 2);
+                ctx.fillStyle = "#12161d";
                 ctx.fill();
+                ctx.strokeStyle = color; ctx.lineWidth = 1.8; ctx.stroke(); ctx.lineWidth = 1;
+                ctx.fillStyle = color;
               } else {
                 const yH = LANE_H - 12;
                 ctx.fillRect(x1, yBar, Math.max(2, x2 - x1), yH);
@@ -712,7 +715,8 @@ export default function TimelineCanvas(props: Props) {
         bar = pair: two dates, one dot per end (click a dot to compare that date) · dot = single
         date · hollow diamond = unknown layout (raw) · ×N = engine-grouped variants · drag to pan ·
         wheel to zoom at the cursor · double-click a bar to zoom to it · ←/→ pan · +/− zoom ·
-        ↑/↓ move between granules · Home fits the searched window · all times UTC
+        ↑/↓ move between granules · Home fits the searched window · all times UTC ·
+        colour = direction (teal ascending, terracotta descending) · filled bar = GUNW pair · ring = GCOV epoch
         {" · "}{flatBars.length} bars
       </p>
     </div>

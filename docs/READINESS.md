@@ -3,6 +3,20 @@
 Source of every statement below: `python tools/hub.py` (HEALTH + DATA PROCESSING tabs) run on the checkout dated 2026-10-25,
 plus reading the code. Re-run the hub to refresh; this file is a snapshot, the hub is the truth.
 
+> **Status update 2026-11-02 (checked by `tests/test_pipeline_status.py`, which fails if this drifts).**
+> There are **17** pipeline manifests (`config/explain.yaml` lists the same 17; earlier text here said 16 and is superseded).
+> **2 of 17 define `run()`**: `earthquake_coseismic` and `tsunami_ocean_evidence`. The other **15 return `NOT_MODELLED`**:
+> coastal_erosion, deforestation, flood_inundation, glacier_ice_flow, iceberg_calving_drift, land_subsidence, landslide, oil_spill,
+> permafrost_thaw, river_erosion, tropical_cyclone, tsunami_inundation, urban_damage, volcanic_deformation, wildfire_burn_scar.
+> `volcanic_deformation/verdict.py` is two comment lines, so a volcano tile cannot get a volcano verdict yet. What building it needs:
+> (1) `verdict.py: run(bundle, providers)` with the manifest's method (Mogi / sill / dike inversion by BIC, atmospheric veto from the
+> elevation correlation) and its `own_prep` (topography-correlated phase regression, ramp removal, asc/desc combination into vertical +
+> east-west: **asc/desc are not combined anywhere today**); (2) the **S7 volcano list** in the ancillary folder
+> (`S7_volcanoes.geojson` or a `facts.json` with `volcano_distance_km`), because routing says `unknown` without it and `registry.run_unknown: false`
+> then skips the pipeline; (3) a **DEM** (the manifest's `uses`), for the topography terms; (4) an `R1` low-magnitude seismicity adapter
+> (`engine/retrieval/clients/adapters/` are stubs). The scan no longer downloads GCOV or runs P08/P11 for these 15 pipelines
+> (`registry.fetch_for_unmodelled: false` in `config/common.yaml`).
+
 **Verdict: the measurement path (retrieval -> P01..P13 -> SceneBundle) is built and contract-clean; the pipelines are not
 yet implementable end to end, because of five gaps that sit upstream of the pipelines, not inside them.**
 
@@ -14,7 +28,7 @@ yet implementable end to end, because of five gaps that sit upstream of the pipe
 > * `volcanic_deformation` is a scaffold (about 11 lines, no `run()`): it needs (1) the S7 volcano list as `S7_volcanoes.geojson` (or `facts.json`) plus a DEM in the
 >   ancillary directory so routing (P12) stops answering `unknown`, (2) ascending + descending LOS combined into vertical / east-west, (3) topography-correlated atmosphere
 >   removal, (4) a Mogi / sill source inversion with model choice, (5) its own R1 low-magnitude seismicity fetch. Gap 2 below (nothing writes ancillary layers) is still true.
-> * `earthquake_coseismic` now analyses every stack and the newest `earthquake.scan_max_pairs` pairs per stack in scan mode (`config/common.yaml`).
+> * `earthquake_coseismic` now analyses every stack and the newest `earthquake.scan_pairs_per_stack` pairs per stack in scan mode (`config/common.yaml`).
 
 ## What works
 
@@ -48,7 +62,7 @@ Points to settle when writing the first `fetch.py`:
 
 **2. Static ancillary layers are readable but never produced.**
 `DirectoryAncillary` reads `data/ancillary/<name>/*.npz|tif`; nothing in the repo writes them. Effect, measured on a complete
-synthetic NISAR scene (3 GUNW pairs, 6 GCOV epochs) with no ancillary: **8 of 16 pipelines are `BLOCKED`** (routing `unknown`, not launched):
+synthetic NISAR scene (3 GUNW pairs, 6 GCOV epochs) with no ancillary: **8 of the then-16 (now 17) pipelines are `BLOCKED`** (routing `unknown`, not launched):
 volcanic_deformation, landslide, glacier_ice_flow, permafrost_thaw, deforestation, wildfire_burn_scar, river_erosion, urban_damage.
 DEM (needed for slope/aspect/HAND and the P09 terrain products), WorldCover, JRC water occurrence, tree cover, built-up, permafrost,
 glacier, river buffer, shoreline distance and volcano distance all have a bundle channel. **S5 (faults), S6 (basins), S13 (platforms)
@@ -59,8 +73,8 @@ M4 soil moisture (landslide, permafrost_thaw, flood_inundation, wildfire_burn_sc
 (flood_inundation, urban_damage): not defined anywhere in retrieval. M6 Sentinel-1 (tropical_cyclone, oil_spill, iceberg_calving_drift):
 `sentinel1_client.py` is a stub. Decide per code: build, or remove from `uses_codes`/mark optional in the manifest.
 
-**4. The 16 pipelines are comment-only.**
-0 of 16 define `run()`; the registry's entry point is `engine/pipelines/<name>/verdict.py: run(bundle)`. That is by design for now, but nothing
+**4. Most pipelines are comment-only (snapshot of 2026-10-25: 0 defined `run()`; today 2 of 17 do, see the update above).**
+The registry's entry point is `engine/pipelines/<name>/verdict.py: run(bundle)`. That is by design for now, but nothing
 exercises the contract yet. First implementation target should be a pipeline whose inputs are already supplied: of the synthetic run,
 only `earthquake_coseismic` was `READY` (needs M1 only), `flood_inundation` launched with gaps (M4, S3 absent).
 

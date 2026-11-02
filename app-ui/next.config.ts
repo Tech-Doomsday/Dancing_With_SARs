@@ -13,6 +13,8 @@ const legacyMapRedirects = LEGACY_MAP_KEYS.map((key) => ({
 }));
 
 const nextConfig: NextConfig = {
+  /* The landing page uses next/image with quality 78 and 82; Next 16 requires every quality to be listed. */
+  images: { qualities: [75, 78, 82] },
   /* The engine API base URL (FastAPI). Overridable via env. */
   env: {
     NEXT_PUBLIC_ENGINE_API: process.env.NEXT_PUBLIC_ENGINE_API ?? "http://127.0.0.1:8900",

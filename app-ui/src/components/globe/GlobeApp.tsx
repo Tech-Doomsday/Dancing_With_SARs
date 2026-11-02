@@ -27,7 +27,7 @@ import type {
 import { timeAgo } from "@/lib/format";
 import SearchBar from "./SearchBar";
 import AppNav from "./AppNav";
-import Legend from "./Legend";
+import Legend, { MapKey } from "./Legend";
 import AreasPanel from "./AreasPanel";
 import ScanPanel from "./ScanPanel";
 import FindingsPanel, { type LayerSource } from "./FindingsPanel";
@@ -40,7 +40,7 @@ const GlobeMap = dynamic(() => import("./GlobeMap"), {
   loading: () => <div className="flex h-full w-full items-center justify-center bg-[#0b0d12]"><p className="text-xs text-[#8a837b]">loading the globe…</p></div>,
 });
 
-const DEFAULT_LOOKBACK_DAYS = 120; // the engine's own default window (U8: common.yaml window.lookback_days)
+// The scan window is NOT chosen here: the engine uses window.lookback_days from config/common.yaml (shown by GET /api/settings/defaults).
 
 interface LayerCacheEntry {
   dataUrl: string;
@@ -525,7 +525,7 @@ export default function GlobeApp() {
       setRunError(null);
       setBusyRunId(null);
       api
-        .startScan(lon, lat, { lookback_days: DEFAULT_LOOKBACK_DAYS })
+        .startScan(lon, lat)
         .then((r) => {
           setScanRunId(r.run_id);
           setPanel("pin");
@@ -859,7 +859,7 @@ export default function GlobeApp() {
           rangeNote={rangeBad
             ? "Range must be 1–200 km, with the box inside ±84° latitude."
             : customBox
-              ? `Box ${rangeInput} × ${rangeInput} km is drawn and used by Data retrieval. A scan still covers the engine's tile${tile ? ` ${tile.id}` : ""}.`
+              ? `The ${rangeInput} × ${rangeInput} km box is only drawn here. Data retrieval, Background and scans always work on the engine's whole ${tile ? `tile ${tile.id}` : "10 km tile"} (its centre, not your pin).`
               : null}
           lat={latInput}
           lon={lonInput}
@@ -909,6 +909,7 @@ export default function GlobeApp() {
       {/* legend (bottom-left) */}
       <div className="pointer-events-none absolute bottom-3 left-3 z-30 hidden md:block">
         <Legend layer={activeOverlayLegend?.layer ?? null} opacity={activeOverlayLegend?.opacity ?? 0.8} />
+        <div className="pointer-events-none absolute bottom-2 right-2 z-10"><MapKey /></div>
       </div>
 
       {/* attribution/scale bottom-right is part of maplibre; nothing else needed */}

@@ -262,6 +262,7 @@ class Step:
     name: str
     run: Callable[[BuildContext], None]
     needs: tuple = ()          # ctx attributes that must be non-empty for the step to make sense; otherwise it is skipped
+    any_code: tuple = ()       # when the request names its active measurement codes: skipped unless one of these is among them
 
 
 class ChainError(RuntimeError):

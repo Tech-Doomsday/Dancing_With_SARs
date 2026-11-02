@@ -66,7 +66,7 @@ export function VerdictCard({ result }: { result: PipelineResult }) {
           </div>
           <p className="mt-1 text-[11px] text-[#8a837b]">
             A within-tier rank score — NOT a percentage and not a calibrated probability (calibration lands with
-            verdict stage 4.2). SUPPORTED only means two screening checks passed (amplitude ratio and pattern correlation against a catalogued event) — see the evidence line “decision.meaning”.
+            verdict stage 4.2). SUPPORTED only means two screening checks passed (amplitude ratio and pattern correlation against a catalogued event).
           </p>
         </div>
       )}

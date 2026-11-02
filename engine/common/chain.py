@@ -41,16 +41,24 @@ STEPS: tuple = (
     Step("P05", "geometry", p05.run, ("harm_geometry",)),
     Step("P06", "phase_to_los", p06.run, ("harm_pairs",)),
     Step("P07", "correction_audit", p07.run, ("ifg",)),
-    Step("P08", "backscatter_prep", p08.run, ("harm_epochs",)),
+    Step("P08", "backscatter_prep", p08.run, ("harm_epochs",), ("M2",)),
     Step("P09", "ancillary_align", p09.run),
     Step("P10", "temporal_stack", p10.run, ("ifg", "cov")),
-    Step("P11", "stable_mask", p11.run, ("ifg", "cov")),
+    Step("P11", "stable_mask", p11.run, ("ifg", "cov"), ("M2", "P11")),
     Step("P12", "tile_routing", p12.run),
     Step("P13", "provenance", p13.run),
 )
 
 
+def _codes_exclude(ctx, step: Step) -> bool:
+    """True when the request names its active measurement codes and none of the step's codes is among them."""
+    codes = getattr(getattr(ctx, "request", None), "active_codes", None)
+    return codes is not None and not (set(step.any_code) & set(codes))
+
+
 def _needs_met(ctx: BuildContext, step: Step) -> bool:
+    if step.any_code and _codes_exclude(ctx, step):
+        return False                       # no active pipeline asked for what this step produces
     if not step.needs:
         return True
     for a in step.needs:
@@ -72,7 +80,8 @@ def run_steps(ctx: BuildContext, observer=None, on_start=None) -> None:
             except Exception:                                                # progress plumbing only
                 pass
         if not _needs_met(ctx, step):
-            ctx.steps.append(StepRecord(step.code, step.name, "skipped", 0.0, "nothing to work on"))
+            why = "no active pipeline needs it" if step.any_code and _codes_exclude(ctx, step) else "nothing to work on"
+            ctx.steps.append(StepRecord(step.code, step.name, "skipped", 0.0, why))
             if observer is not None:
                 observer(step, ctx, ctx.steps[-1])
             continue

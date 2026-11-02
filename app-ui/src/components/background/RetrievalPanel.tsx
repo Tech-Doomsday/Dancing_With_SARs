@@ -8,6 +8,7 @@ import Link from "next/link";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { engineJson, EngineError } from "@/lib/engineFetch";
 import { bgFetch } from "@/lib/bgApi";
+import { useEngineDefaults } from "@/lib/defaults";
 
 interface PlanRow { granule_id: string; product: string; grid?: string; layer?: string; chunks?: number; bytes?: number | null; error?: string; note?: string }
 interface GRow {
@@ -19,15 +20,31 @@ interface Flag { code: string; severity: string; message: string }
 interface Manifest {
   id: string; status: string; stage: string; mode: string; error: string | null; tile: string | null;
   granules: GRow[]; plan: PlanRow[]; flags: Flag[]; storage_note?: string;
-  totals?: { bytes_planned?: number; bytes_done?: number; stored?: number; granules?: number; failed?: number };
+  totals?: { bytes_planned?: number; bytes_done?: number; stored?: number; granules?: number; failed?: number;
+             stored_from_cache?: number; stored_from_network?: number };
+  window?: { lookback_days?: number; t0?: string; t1?: string };
+  cuts?: { code: string; stack?: string; product?: string; kept?: number; found?: number; cap?: number }[];
+  listing?: { code: string; product?: string; expected?: number | null; got?: number | null; missing?: number | null; message: string }[];
   net?: { bytes_fetched?: number; bytes_useful?: number; requests?: number; retries?: number };
   caps?: { max_gcov_epochs?: number; max_gunw_pairs?: number }; seconds?: number;
-  window?: { lookback_days?: number } | null;
 }
 interface ClipRow { granule_id: string; product: string; grid: string; layer: string; shape: number[]; dtype: string; bytes: number }
 interface Stats { valid: number; total: number; min?: number; max?: number; mean?: number; std?: number; hist?: { counts: number[]; edges: number[] }; note?: string }
 
+const STAGE_HELP = [
+  "search ASF for the granules over this tile", "exact bytes per granule, nothing downloaded", "fetch only this tile's pixels",
+  "look at every stored layer", "run P01–P13 from the store, no network (needs stored data)", "run the pipelines on the preprocessed bundle (after Preprocess)",
+];
 const STAGES = ["Find granules", "Plan download", "Download", "Inspect", "Preprocess", "Pipelines"] as const;
+/** "0.00 MB of 2009.8 MB" would read as "nothing worked"; say what happened: cache hits cost no bytes. */
+function cacheLine(m: { totals?: { bytes_done?: number; bytes_planned?: number; stored?: number; stored_from_cache?: number; stored_from_network?: number } }): string {
+  const t = m.totals ?? {};
+  const fromCache = t.stored_from_cache ?? 0, fromNet = t.stored_from_network ?? 0;
+  if (fromCache > 0 && (t.bytes_done ?? 0) === 0)
+    return `all ${fromCache} stored granule${fromCache === 1 ? "" : "s"} came from the local cache: nothing was downloaded this time (${mb(t.bytes_planned)} is what they weigh)`;
+  return `downloaded now ${mb(t.bytes_done)} of ${mb(t.bytes_planned)} planned` +
+    (fromCache ? ` · ${fromCache} granule${fromCache === 1 ? "" : "s"} from the local cache (0 bytes)` : "") + (fromNet ? ` · ${fromNet} over the network` : "");
+}
 const mb = (b?: number | null) => (b == null ? "—" : `${(b / 1e6).toFixed(b < 1e7 ? 2 : 1)} MB`);
 const RUNNING = ["queued", "running", "cancelling"];
 
@@ -57,13 +74,8 @@ export default function RetrievalPanel({ lon, lat, levels, foundCount }: { lon: 
   const [m, setM] = useState<Manifest | null>(null);
   const [err, setErr] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
-  // "" = not touched: the engine uses its own configured value (config/common.yaml window.*), shown as the placeholder
-  const [lookback, setLookback] = useState("");
-  const [defaults, setDefaults] = useState<{ lookback_days: number; max_gcov_epochs: number; max_gunw_pairs: number } | null>(null);
-  useEffect(() => {
-    engineJson<{ defaults?: { lookback_days: number; max_gcov_epochs: number; max_gunw_pairs: number } | null }>("/api/health")
-      .then((h) => setDefaults(h.defaults ?? null)).catch(() => setDefaults(null));
-  }, []);
+  const defaults = useEngineDefaults();
+  const [lookback, setLookback] = useState("");          // empty = the engine's configured window (shown as the placeholder)
   const [maxGcov, setMaxGcov] = useState("");
   const [maxGunw, setMaxGunw] = useState("");
   const [mbps, setMbps] = useState<number | null>(null);
@@ -83,7 +95,7 @@ export default function RetrievalPanel({ lon, lat, levels, foundCount }: { lon: 
     setErr(null); setBusy(true); setClips(null); setSel(null); setImg(null); setStats(null); setRunId(null); last.current = null;
     try {
       const body: Record<string, unknown> = { lon, lat, mode, products: levels.filter((l) => l === "GUNW" || l === "GCOV") };
-      if (lookback.trim() && Number(lookback) > 0) body.lookback_days = Number(lookback);
+      if (Number(lookback) > 0) body.lookback_days = Number(lookback);
       if (maxGcov) body.max_gcov_epochs = Number(maxGcov);
       if (maxGunw) body.max_gunw_pairs = Number(maxGunw);
       const r = await engineJson<{ id: string }>("/api/retrievals", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
@@ -167,7 +179,7 @@ export default function RetrievalPanel({ lon, lat, levels, foundCount }: { lon: 
     <section aria-label="retrieval stages" className="border-b border-[#2a313c] bg-[#10141a] px-4 py-3 text-xs text-[#c9d1d9]">
       <ol className="mb-3 flex flex-wrap gap-1" aria-label="stages">
         {STAGES.map((s, i) => (
-          <li key={s} aria-current={i === active ? "step" : undefined}
+          <li key={s} title={STAGE_HELP[i]} aria-current={i === active ? "step" : undefined}
               className={`rounded px-2 py-0.5 ${i === active ? "bg-[#1f6f7c] text-white" : i < active ? "bg-[#1b2a2e] text-[#7ec8d3]" : "bg-[#1a1f27] text-[#6b7480]"}`}>
             {i + 1} {s}
           </li>
@@ -175,19 +187,27 @@ export default function RetrievalPanel({ lon, lat, levels, foundCount }: { lon: 
       </ol>
 
       <div className="flex flex-wrap items-end gap-3">
-        <label className="flex flex-col gap-0.5">lookback (days)
-          <input value={lookback} placeholder={defaults ? String(defaults.lookback_days) : "—"} onChange={(e) => setLookback(e.target.value)} className="w-20 rounded border border-[#2a313c] bg-[#0e1116] px-1 py-0.5" /></label>
+        <label className="flex flex-col gap-0.5" title={defaults?.sources.lookback_days}>search window (days)
+          <input value={lookback} placeholder={defaults ? String(defaults.lookback_days) : "…"} onChange={(e) => setLookback(e.target.value)} className="w-20 rounded border border-[#2a313c] bg-[#0e1116] px-1 py-0.5" /></label>
         <label className="flex flex-col gap-0.5">max GCOV epochs
-          <input value={maxGcov} placeholder={defaults ? String(defaults.max_gcov_epochs) : "—"} onChange={(e) => setMaxGcov(e.target.value)} className="w-24 rounded border border-[#2a313c] bg-[#0e1116] px-1 py-0.5" /></label>
+          <input value={maxGcov} placeholder={defaults ? String(defaults.max_gcov_epochs) : "…"} onChange={(e) => setMaxGcov(e.target.value)} className="w-24 rounded border border-[#2a313c] bg-[#0e1116] px-1 py-0.5" /></label>
         <label className="flex flex-col gap-0.5">max GUNW pairs
-          <input value={maxGunw} placeholder={defaults ? String(defaults.max_gunw_pairs) : "—"} onChange={(e) => setMaxGunw(e.target.value)} className="w-24 rounded border border-[#2a313c] bg-[#0e1116] px-1 py-0.5" /></label>
+          <input value={maxGunw} placeholder={defaults ? String(defaults.max_gunw_pairs) : "…"} onChange={(e) => setMaxGunw(e.target.value)} className="w-24 rounded border border-[#2a313c] bg-[#0e1116] px-1 py-0.5" /></label>
         <button type="button" disabled={busy || running} onClick={() => start("plan")} className="rounded border border-[#3fb6c9] px-2 py-1 disabled:opacity-50">Plan (no download)</button>
         <button type="button" disabled={busy || running} onClick={() => start("retrieve")} className="rounded bg-[#1f6f7c] px-2 py-1 text-white disabled:opacity-50">Plan + download</button>
         {running && <button type="button" onClick={cancel} className="rounded border border-[#c97a7a] px-2 py-1 text-[#e6a0a0]">Cancel</button>}
         {m && !running && m.status !== "planned" && (m.totals?.stored ?? 0) < (m.totals?.granules ?? 0) &&
           <button type="button" onClick={() => start("retrieve")} className="rounded border border-[#3fb6c9] px-2 py-1">Resume (re-run; stored granules are skipped)</button>}
       </div>
-      <p className="mt-1 text-[#8b949e]">Caps decide how many granules are asked for. Nothing is downloaded until you press “Plan + download”.</p>
+      <p className="mt-1 text-[#e6c977]" role="status">
+        {(m?.totals?.stored ?? 0) > 0
+          ? "Next: press “Preprocess from this retrieval” below (steps 5 → 6 stay grey until you do), then open Pipelines to get the verdict."
+          : "Path to a verdict: 1–3 get the data → 4 inspect → 5 Preprocess → 6 Pipelines. Steps 5 and 6 unlock when something is stored."}
+      </p>
+      <p className="mt-1 text-[#8b949e]">
+        Window and caps decide how many granules are asked for; left empty they are the engine&apos;s configured values
+        ({defaults ? `${defaults.lookback_days} days, newest ${defaults.max_gcov_epochs} GCOV epochs and ${defaults.max_gunw_pairs} GUNW pairs per stack` : "loading…"},
+        config/common.yaml). Nothing is downloaded until you press “Plan + download”.</p>
 
       {err && <p role="alert" className="mt-2 rounded border border-[#6b2f2f] bg-[#2a1515] px-2 py-1 text-[#f0a0a0]">{err}</p>}
 
@@ -196,22 +216,19 @@ export default function RetrievalPanel({ lon, lat, levels, foundCount }: { lon: 
           <p role="status">
             <b>{m.status}</b>
             {m.tile ? ` · tile ${m.tile}` : ""}
-            {m.stage === "download" || m.status === "done" || m.status === "cancelled"
-              ? ` · granule ${done}/${m.granules.length} · ${(m.totals?.bytes_done ?? 0) === 0 && done > 0 && done === m.granules.length
-                  ? `nothing downloaded: all ${done} came from the local cache (${mb(m.totals?.bytes_planned)} planned)`
-                  : `${mb(m.totals?.bytes_done)} of ${mb(m.totals?.bytes_planned)}`}` : ""}
+            {m.stage === "download" || m.status === "done" || m.status === "cancelled" ? ` · granule ${done}/${m.granules.length} · ${cacheLine(m)}` : ""}
             {m.net?.bytes_fetched != null ? ` · ${mb(m.net.bytes_fetched)} on wire (${mb(m.net.bytes_useful)} useful)` : ""}
           </p>
           {running && <p className="text-[#e6c977]">{slowLine(m, mbps)}</p>}
           {m.error && <p role="alert" className="text-[#f0a0a0]">What failed: {m.error}. What to do: fix the cause named above and press Resume — stored granules are kept.</p>}
-          {m.caps && (
-            <p className="text-[#8b949e]" data-testid="retrieval-caps">
-              kept the newest {m.caps.max_gcov_epochs ?? "—"} GCOV epochs and {m.caps.max_gunw_pairs ?? "—"} GUNW pairs per stack
-              {m.window?.lookback_days != null ? ` within the last ${m.window.lookback_days} days` : ""}.
-            </p>
+          {m.window?.lookback_days != null && (
+            <p className="text-[#8b949e]">Search window: {m.window.lookback_days} days{m.window.t0 ? ` (${m.window.t0.slice(0, 10)} → ${m.window.t1?.slice(0, 10)})` : ""} · caps: newest {m.caps?.max_gcov_epochs} GCOV epochs, {m.caps?.max_gunw_pairs} GUNW pairs per stack.</p>
           )}
-          {m.flags.filter((f) => /_truncated$/.test(f.code)).map((f, i) => (
-            <p key={`t${i}`} className="text-[#e6c977]" data-testid="retrieval-cut">✂ granules were cut by the cap: {f.message}</p>
+          {(m.cuts ?? []).map((c, i) => (
+            <p key={`cut${i}`} className="text-[#f0b36a]">✂ {c.product} on stack {c.stack}: {c.kept} of {c.found} found were kept (cap {c.cap}); {Number(c.found) - Number(c.kept)} older not used. Raise the cap above to include them.</p>
+          ))}
+          {(m.listing ?? []).filter((l) => l.code === "search_incomplete").map((l, i) => (
+            <p key={`ls${i}`} role="alert" className="text-[#f0b36a]">⚠ {l.product} listing incomplete{l.expected != null ? `: ASF said ${l.expected}, returned ${l.got}` : ""}{l.missing ? ` (${l.missing} missing)` : ""}. ASF does not say which granules are missing, so the counts on this page are lower bounds, and the same short list is shown again for a few minutes. Re-run later to retry.</p>
           ))}
           {m.flags.filter((f) => f.severity !== "info").map((f, i) => (
             <p key={i} className="text-[#f0b36a]">⚠ {f.message}{/search_incomplete/.test(f.code) ? " — re-run the search from the box above (Retry)." : ""}</p>
@@ -232,7 +249,7 @@ export default function RetrievalPanel({ lon, lat, levels, foundCount }: { lon: 
           <details open>
             <summary className="cursor-pointer">Per granule ({m.granules.length})</summary>
             <div className="max-h-56 overflow-auto"><table className="mt-1 w-full text-left">
-              <thead className="text-[#8b949e]"><tr><th>granule</th><th>state</th><th>MB done / planned</th><th title="seconds spent on this granule">time (s)</th><th>note</th></tr></thead>
+              <thead className="text-[#8b949e]"><tr><th>granule</th><th>state</th><th title="bytes fetched now / planned; a cache hit fetches 0">MB fetched now / planned</th><th title="time spent on this granule">time (s)</th><th>note</th></tr></thead>
               <tbody>{m.granules.map((g) => (
                 <tr key={g.granule_id}><td title={g.granule_id}>{g.product} …{g.granule_id.slice(-24)}</td>
                   <td className={g.state === "failed" ? "text-[#f0a0a0]" : g.state === "stored" ? "text-[#7ec8d3]" : ""}>{g.state}{g.source ? ` (${g.source})` : ""}</td>

@@ -16,6 +16,7 @@ import time
 from collections import OrderedDict
 from concurrent.futures import ThreadPoolExecutor
 from functools import lru_cache
+from pathlib import Path
 from itertools import product as iproduct
 
 import numpy as np
@@ -91,6 +92,24 @@ class RetrievalCancelled(Exception):
 
 
 # ------------------------------------------------------------------ client
+_SHORT = re.compile(r"Expected\s+(\d+)\s+results?,?\s+got\s+(\d+)", re.I)
+
+
+def clean_warning(msg) -> str:
+    """asf_search logs 'incomplete results.Expected 17 results, got 15.' (no space after the full stop)."""
+    return re.sub(r"([.!?])(?=[A-Z])", r"\1 ", str(msg)).strip()
+
+
+def parse_shortfalls(warns) -> list:
+    """[{'expected': 17, 'got': 15}, ...] from asf_search's own wording; entries it cannot parse are simply absent."""
+    out = []
+    for w in warns or []:
+        m = _SHORT.search(str(w))
+        if m:
+            out.append({"expected": int(m.group(1)), "got": int(m.group(2))})
+    return out
+
+
 class NisarClient:
     def __init__(self, settings: Settings | None = None, auth: EarthdataAuth | None = None):
         _check_deps()
@@ -102,13 +121,16 @@ class NisarClient:
         self.disk = DiskChunkCache(self.cfg.chunks_dir, int(float(c["disk_chunks_gb"]) * (1 << 30)))
         self.clips = ClipStore(self.cfg.clips_dir, c["ttl_s"].get("granule_clip"))
         self.searches = SearchCache(self.cfg.search_dir, c["ttl_s"].get("search"))
-        self._partial: dict = {}      # search key -> {granule_id: ref} accumulated over incomplete (never cached) pages
         self.pool = ThreadPoolExecutor(int(self.cfg.decode["threads"]), thread_name_prefix="decode")
         self.blocking = ThreadPoolExecutor(8, thread_name_prefix="blocking")  # index build, fallback, clip IO
         self._indexes: dict[str, GranuleIndex] = {}
         self.last_search_truncated = False   # set by search(): the result list hit maxResults
         self.last_search_incomplete = False  # set by search(): ASF/CMR reported a short or failed page (not cached)
         self.last_search_warnings: list = []
+        self.last_search_shortfalls: list = []   # [{"expected": N, "got": M}] parsed from the warnings
+        # a short listing is remembered briefly (config cache.ttl_s.search_incomplete) so a reload shows the SAME list
+        # and the SAME warning instead of a different one each time; 0 / null = never remember it
+        self.partial = SearchCache(Path(self.cfg.search_dir) / "partial", c["ttl_s"].get("search_incomplete"))
         self._prog_lock = threading.Lock()
         self.progress = {"product": "", "total": 0, "done": 0, "failed": 0, "skipped": 0, "cached": 0,
                          "started": 0.0, "active": {}, "cum_done": 0, "cum_total": 0, "recent": []}
@@ -142,7 +164,15 @@ class NisarClient:
             self.last_search_truncated = False
             self.last_search_incomplete = False
             self.last_search_warnings = []
+            self.last_search_shortfalls = []
             return [GranuleRef(**d) for d in hit[0]], False
+        part = None if fresh or not self.partial.ttl else self.partial.get_entry(k)
+        if part:                                   # the same short listing as a moment ago, still flagged as short
+            self.last_search_truncated = False
+            self.last_search_incomplete = True
+            self.last_search_warnings = list(part["meta"].get("warnings") or [])
+            self.last_search_shortfalls = list(part["meta"].get("shortfalls") or [])
+            return [GranuleRef(**d) for d in part["items"]], False
         try:
             import asf_search as asf
             kw = {"dataset": "NISAR", "maxResults": int(max_results or self.cfg.search["max_results"])}
@@ -166,8 +196,10 @@ class NisarClient:
                 time.sleep(2.0)
                 warns = []
                 found = self._asf_search_bounded(asf, kw, tmo, warns)
+            warns = [clean_warning(w) for w in warns]
             self.last_search_incomplete = bool(warns)
             self.last_search_warnings = list(warns)
+            self.last_search_shortfalls = parse_shortfalls(warns)
             if warns:
                 _slog.warning("ASF search still INCOMPLETE after retry (%s) — listing used but NOT cached", warns[0][:160])
             _slog.info("ASF search done: %d result(s) in %.1fs%s", len(found), time.monotonic() - t_search,
@@ -196,15 +228,11 @@ class NisarClient:
                 self.last_search_truncated = False
             if not keep_all:
                 refs, _ = drop_older_versions(refs)
-            if self.last_search_incomplete:
-                # a short page is never cached for the TTL (the next call must retry), but what earlier short pages of
-                # THIS query returned is kept in memory: the list only grows between retries instead of changing at random
-                seen = self._partial.setdefault(k, {})
-                seen.update({r.granule_id: r for r in refs})
-                refs = sorted(seen.values(), key=lambda r: (r.start or "", r.granule_id))
-            else:
-                self._partial.pop(k, None)
+            if not self.last_search_incomplete:          # never keep a short listing for the whole TTL
                 self.searches.put(k, [r.to_dict() for r in refs])
+            elif self.partial.ttl:                       # ...but remember it briefly, with its warning
+                self.partial.put(k, [r.to_dict() for r in refs], {"warnings": self.last_search_warnings,
+                                                                    "shortfalls": self.last_search_shortfalls})
             return refs, False
         except Exception:
             stale = self.searches.get(k, allow_stale=True)

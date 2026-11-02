@@ -301,7 +301,11 @@ class Registry:
                 for m in self.manifests]
 
     def active_codes(self, names: list | None = None) -> set:
+        """Measurement codes the build must provide. A pipeline without a run() (NOT_MODELLED) cannot use any data, so
+        by default it does not make the chain fetch GCOV or run P08/P11 (registry.fetch_for_unmodelled turns that back on)."""
         sel = [m for m in self.manifests if names is None or m.name in names]
+        if not self.cfg.registry.fetch_for_unmodelled:
+            sel = [m for m in sel if self.is_modelled(m.name)]
         return {c for m in sel for c in m.measurement_codes}
 
     @property
