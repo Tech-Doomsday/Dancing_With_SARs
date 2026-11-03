@@ -25,6 +25,7 @@ import { parseExplorerState, writeExplorerState, type ExplorerUrlState } from "@
 import { createUrlWriter, RETRIEVAL_PATH_PREFIX, type UrlWriter } from "@/lib/urlSync";
 import { fmtUtc } from "@/lib/format";
 import { loadQueryContext, saveQueryContext, toDateOnly } from "@/lib/queryContext";
+import AppNav from "../AppNav";
 import ExplorerFiltersRow from "./ExplorerFiltersRow";
 import ExplorerSummary from "./ExplorerSummary";
 import ExplorerDetail from "./ExplorerDetail";
@@ -303,9 +304,10 @@ export default function ExplorerApp() {
   }, [west, south, east, north]);
 
   return (
-    <div className="explorer-root flex min-h-0 min-w-0 flex-1 flex-col bg-[#0e1116] text-[#d9dee4]">
+    <div className="explorer-root fixed inset-0 flex flex-col bg-[#0e1116] text-[#d9dee4]">
       {/* ---- top bar ---- */}
       <header className="flex flex-wrap items-center gap-x-4 gap-y-2 border-b border-[#262c36] px-4 py-2.5">
+        <AppNav active="background" dark />
         <div className="ml-auto flex flex-wrap items-center gap-2 text-xs">
           <LabeledInput label="Lat" value={latC} onChange={(v) => applyCenter(v, lonC, rangeKm)} placeholder="23.7141" width="w-20" />
           <LabeledInput label="Lon" value={lonC} onChange={(v) => applyCenter(latC, v, rangeKm)} placeholder="90.4009" width="w-24" />
@@ -444,8 +446,8 @@ export default function ExplorerApp() {
       </details>
 
       {/* ---- main area: timeline | detail ---- */}
-      <div className="flex min-h-0 min-w-0 flex-1 flex-col lg:flex-row">
-        <section className="flex min-h-0 min-w-0 flex-1 flex-col" aria-label="granule timeline">
+      <div className="flex min-h-0 flex-1 flex-col lg:flex-row">
+        <section className="flex min-h-0 flex-1 flex-col" aria-label="granule timeline">
           {!data && !loading && !error && (
             <div className="flex flex-1 items-center justify-center p-8 text-center text-xs text-[#8b949e]">
               enter a box and press Search — the engine answers how many NISAR granules exist
@@ -468,7 +470,7 @@ export default function ExplorerApp() {
             </div>
           )}
           {data && !loading && visible.length > 0 && (
-            <div className="flex min-h-0 min-w-0 flex-1 flex-col p-2">
+            <div className="flex min-h-0 flex-1 flex-col p-2">
               <div className="mb-1 flex items-center justify-between px-1 text-[11px] text-[#8b949e]">
                 <label className="flex items-center gap-1.5">
                   <input suppressHydrationWarning type="checkbox" checked={onlyInView} onChange={(e) => setOnlyInView(e.target.checked)} />

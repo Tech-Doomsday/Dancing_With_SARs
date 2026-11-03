@@ -45,7 +45,7 @@ def selftest_event_provider(tile):
     """Dict events provider shaped like the R1 adapter output (fetch._normalize_provider_out accepts it).
 
     The event is the repo's fixture recipe (engine/pipelines/earthquake_coseismic/tests/fixtures_eq.py:
-    Mw 5.6 REVERSE faulting, strike 60 / dip 40 / rake +90, depth 5 km (a thrust uplifts = toward the sensor, like the bowl)), placed exactly like the
+    Mw 5.6 normal faulting, strike 90 / dip 40 / rake -90, depth 5 km), placed exactly like the
     acceptance tests place it (test_pipeline._event_lonlat): 3 km west / 3 km south of the
     deformation truth-bowl centre — which the selftest scene bakes into the newest GUNW pair at
     (e0 + 4 km, n0 + 5.5 km). Time is derived from the fetch window the pipeline itself passes in,
@@ -63,10 +63,9 @@ def selftest_event_provider(tile):
     def provider(bbox, t0, t1):                                  # bbox = (W, S, E, N); t0/t1 = window
         import datetime as _dt
         W, S, E, N = bbox
-        # The scene bakes the bowl into the NEWEST pair, and a scan now asks the catalog about the union of several analysed
-        # pairs: the window's midpoint can fall in an older pair. Place the event 3 days before the window's end (which is
-        # the newest pair's end plus the catalog buffer), i.e. inside the newest pair.
-        mid = _dt.datetime.fromisoformat(t1.replace("Z", "+00:00")) - _dt.timedelta(days=3)
+        mid = _dt.datetime.fromisoformat(t0.replace("Z", "+00:00")) + \
+            (_dt.datetime.fromisoformat(t1.replace("Z", "+00:00")) -
+             _dt.datetime.fromisoformat(t0.replace("Z", "+00:00"))) / 2
         lat, lon = epicentre if epicentre else ((S + N) / 2 - 0.027, (W + E) / 2 - 0.033)
         return {
             "source": "hub-selftest-fixture",
@@ -80,7 +79,7 @@ def selftest_event_provider(tile):
                 "lon": lon,
                 "depth_km": 5.0,
                 "url": None,
-                "nodal_planes": [[60.0, 40.0, 90.0]],
+                "nodal_planes": [[90.0, 40.0, -90.0]],
             }],
         }
     return provider

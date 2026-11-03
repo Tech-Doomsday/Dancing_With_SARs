@@ -10,7 +10,7 @@ export default function RetrievalPage() {
   return (
     <Suspense
       fallback={
-        <div className="flex flex-1 items-center justify-center bg-[#0e1116]">
+        <div className="fixed inset-0 flex items-center justify-center bg-[#0e1116]">
           <p className="text-xs text-[#8a837b]">loading data retrieval…</p>
         </div>
       }

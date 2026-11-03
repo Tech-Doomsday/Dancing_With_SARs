@@ -14,8 +14,6 @@ import { groupTimes, groupKindLabel, variantFactsLabel, compareEnds, zoomBox, pa
 import { ticks as ticksForExplorer } from "../src/lib/timescale";
 import { mapHref, retrievalHref, sanitize, toDateOnly } from "../src/lib/queryContext";
 import { normalizeEngineUrl } from "../src/lib/engineUrl";
-import { lastIsoDate, locationQuality, rankEvents, type DisasterEvent } from "../src/lib/events";
-import disasterRows from "../src/data/disasters.json";
 
 /** §8.2 pure-logic tests — no browser needed. Playwright transpiles the TS imports directly. */
 
@@ -591,59 +589,5 @@ test.describe("map camera memory", () => {
     expect(sanitizeCamera({ center: [1, 2], zoom: NaN })).toBeNull();
     expect(sanitizeCamera("x")).toBeNull();
     expect(sanitizeCamera({ center: [1, 2], zoom: 3 })?.projection).toBe("globe");
-  });
-});
-
-/* ---- Explore > Events ranking ---------------------------------------------------------------- */
-const EV = (o: Partial<DisasterEvent>): DisasterEvent => ({
-  id: "x", category: "Earthquake", event: "x", date_text: "2026-01-01", region: "", lat: 1, lon: 1, coord_conf: "B",
-  size: "", deaths: null, facts: "", sar_angle: "", sources: "", ...o,
-});
-
-test.describe("events ranking", () => {
-  const NOW = Date.parse("2026-11-03T00:00:00Z");
-
-  test("lastIsoDate takes the last real date and ignores seasons", () => {
-    expect(lastIsoDate("2025-08-12 to 2025-08-14")).toBe("2025-08-14");
-    expect(lastIsoDate("2026-06-07 23:37")).toBe("2026-06-07");
-    expect(lastIsoDate("2026-02 to 2026-05")).toBe("2026-05-31");
-    expect(lastIsoDate("2025-11-25 and ongoing")).toBe("2025-11-25");
-    expect(lastIsoDate("2025-26 rainy season")).toBeNull();
-    expect(lastIsoDate("2026 (May–Sep)")).toBeNull();
-  });
-
-  test("location: A is exact, B approximate, regional wording and missing coordinates are told apart", () => {
-    expect(locationQuality(EV({ coord_conf: "A" }))).toBe("exact");
-    expect(locationQuality(EV({ coord_conf: "B" }))).toBe("approximate");
-    expect(locationQuality(EV({ sar_angle: "Flood extent (regional centroid)" }))).toBe("regional");
-    expect(locationQuality(EV({ lat: null, lon: null, coord_conf: null }))).toBe("none");
-  });
-
-  test("an exact, fresh, shallow, large quake outranks a loose offshore one; no-point events go last", () => {
-    const good = EV({ id: "good", coord_conf: "A", date_text: "2026-10-22 14:33", size: "Mw 7.0, depth 18 km", sar_angle: "PRIORITY: coseismic InSAR" });
-    const offshore = EV({ id: "off", coord_conf: "B", date_text: "2026-04-01", size: "M7.4, depth 35 km", sar_angle: "Offshore - limited" });
-    const heat = EV({ id: "heat", category: "Heat", lat: null, lon: null, coord_conf: null, date_text: "2026-05 to 2026-08" });
-    const r = rankEvents([heat, offshore, good], NOW);
-    expect(r.map((e) => e.id)).toEqual(["good", "off", "heat"]);
-    expect(r[0].sar).toBe("high");
-    expect(r[2].sar).toBe("none");
-    expect(r.map((e) => e.rank)).toEqual([1, 2, 3]);
-  });
-
-  test("a deep earthquake loses to a shallow one of the same size", () => {
-    const shallow = EV({ id: "s", size: "Mw 6.0, depth 8 km" });
-    const deep = EV({ id: "d", size: "Mw 6.0, depth 186 km" });
-    expect(rankEvents([deep, shallow], NOW)[0].id).toBe("s");
-  });
-
-  test("every point is explained and the real list ranks coherently", () => {
-    const r = rankEvents(disasterRows as unknown as DisasterEvent[], NOW);
-    expect(r.length).toBe(disasterRows.length);
-    for (const e of r) expect(e.reasons.length).toBeGreaterThan(0);
-    expect(new Set(r.map((e) => e.id)).size).toBe(r.length);          // ids unique
-    expect(r[r.length - 1].location).toBe("none");                     // the heatwave has no point
-    const top = r.slice(0, 5);
-    expect(top.every((e) => e.location !== "regional" && e.location !== "none")).toBe(true);
-    expect(top.some((e) => e.category === "Earthquake")).toBe(true);
   });
 });

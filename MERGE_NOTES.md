@@ -40,26 +40,3 @@ one coherent implementation was kept for each:
   `config/retrieval.yaml`, `next.config.ts`, and its four new tests.
 Verified here: all Python compiles; the audit's new tests and every test file that can run without fastapi/h5py/aiohttp/pyproj pass (7 passed, 4 skipped).
 Not run: full pytest, TypeScript typecheck/lint, any browser.
-
-# UI fixes (2026-11-03)
-- Data retrieval page lost the Background section tabs: `ExplorerApp` was `fixed inset-0` with its own AppNav, painted over the Background layout header
-  (Overview / Data retrieval / Preprocessing / Pipelines / Health). It is now an ordinary flex child of the layout (no fixed overlay, no second AppNav).
-- Timeline bars kept widening: the timeline's measured width fed back into its own container size (canvases have explicit px widths; the flex chain had no
-  `min-w-0` / overflow clip). Added `min-w-0` down the chain, `overflow-hidden` on the timeline wrapper, and the ResizeObserver no longer sets state when the width is unchanged.
-  NOT verified in a browser (no node_modules / npm reachable in the sandbox): please open Data retrieval, run a search, confirm the tabs show and the timeline holds still.
-
-# Third audit drop (2026-11-03): speckle-audit v2 (diff + zip, same base)
-Identical to the first audit drop (37 files already merged) plus five changes, all applied without conflicts:
-`earthquake_coseismic/tests/fixtures_eq.py` (synthetic event is now a REVERSE/thrust 60/40/+90, placed 3 days before the window end),
-`earthquake_coseismic/tests/test_sign_convention.py` (new), `tests/test_api.py` and `tests/test_g0_los_sign.py` (nodal plane 60/40/+90), `tools/debug_hub/pipelines.py`.
-Test files only plus the debug hub; no engine logic changed. The new sign-convention test is skipped here (needs pyproj/h5py); nothing else changed in pass/fail.
-
-# Explore > Events (2026-11-03)
-`disasters_after_nisar_launch.csv` (74 events) now fills the Map's Explore panel as a new, default **Events** tab (before Featured / Cached).
-- Data: `python tools/build_disasters_json.py` -> `app-ui/src/data/disasters.json` (CSV stays the source; `--check` verifies sync; `tests/test_disasters_data.py`).
-- Ranking: `app-ui/src/lib/events.ts` (pure). Order = location trust first (A exact +30, B approx +12, regional centroid, no point -60), then how much SAR can say
-  (category, "PRIORITY" flag, measurable terms, Mw / depth for quakes, "limited/offshore/deep" penalty), then freshness (computed from today's date at render time).
-  Each row has "why #N" listing every point added or removed. Tiers: SAR-ready / maybe / limited / no point.
-- Click an event -> fly there (zoom by location quality) and open the Pin panel. The heatwave row has no coordinates and cannot be placed.
-- Checked here: Python sync tests; the ranking logic via node (same asserts as the new block in tests-e2e/unit.spec.ts); no-science guard. NOT run: tsc / Playwright / browser.
-- Not done: event markers on the globe itself (list + fly-to only).

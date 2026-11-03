@@ -199,8 +199,8 @@ export default function TimelineCanvas(props: Props) {
     if (!el) return;
     const obs = new ResizeObserver((entries) => {
       const w = Math.max(320, Math.floor((entries[0]?.contentRect.width ?? 900)));
-      setWidth((cur) => (cur === w ? cur : w));                       // same width: no state change, no re-render
-      setScale((s) => (s.widthPx === w ? s : { ...s, widthPx: w }));
+      setWidth(w);
+      setScale((s) => ({ ...s, widthPx: w }));
     });
     obs.observe(el);
     return () => obs.disconnect();
@@ -668,7 +668,7 @@ export default function TimelineCanvas(props: Props) {
   }, [bounds, width]);
 
   return (
-    <div ref={wrapRef} className="flex min-h-0 min-w-0 w-full flex-1 flex-col overflow-hidden rounded-lg border border-[#262c36] bg-[#0e1116]">
+    <div ref={wrapRef} className="flex min-h-0 flex-1 flex-col rounded-lg border border-[#262c36] bg-[#0e1116]">
       <canvas ref={axisRef} aria-hidden className="block" />
       <div className="lanes-scroll min-h-0 flex-1 overflow-y-auto overflow-x-hidden">
         <canvas

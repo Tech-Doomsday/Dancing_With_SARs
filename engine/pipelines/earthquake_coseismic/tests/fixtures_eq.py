@@ -13,16 +13,15 @@ from engine.pipelines.earthquake_coseismic.types import EventRecord, EventsResul
 def make_event(event_id: str = "eq-fixture-001", magnitude: float = 5.6,
                lat: float = 34.0, lon: float = -118.5, depth_km: float = 5.0,
                time: str = "2026-07-24T00:00:00Z",
-               nodal_planes: tuple = ((60.0, 40.0, 90.0),)) -> EventRecord:
+               nodal_planes: tuple = ((90.0, 40.0, -90.0),)) -> EventRecord:
     """Fixture event calibrated against the engine's synthetic truth bowl.
 
-    Default source: REVERSE (thrust) faulting (rake +90), Mw 5.6, depth 5 km, strike 60 / dip 40. A thrust uplifts the
-    surface, i.e. moves it TOWARD the sensor, which is what the truth bowl is (peak +50 mm toward, sigma 1.5 km).
-    Grid-searched (strike 0-330 step 30, dip 30-60, rake +/-90, depth 3/5/8 km) under the engine's real conventions
-    (radar.phase_sign -1 per the ATBD, LOS unit vector ground->sensor): this mechanism gives pattern correlation ~ +0.58
-    and amplitude ratio ~ 1.06, inside the consistency screen (ratio in (1/3, 3), r > 0.25). The earlier default,
-    normal faulting (rake -90), SUBSIDES (away from the sensor) and so correlates NEGATIVELY (-0.36) with an uplift
-    bowl under that convention: it had been calibrated under a flipped sign. Place it ~3 km west/south of the bowl
+    Default source: normal faulting (rake -90), Mw 5.6, depth 5 km,
+    strike 90 / dip 40. Grid-searched over real Okada sources so its LOS
+    forward prediction matches the common_fixtures truth bowl (peak +50 mm
+    toward sensor, sigma 1.5 km) with pattern correlation ~ +0.78 and
+    amplitude ratio ~ 1.1 — comfortably inside the consistency screen
+    (ratio in (1/3, 3), r > 0.25). Place it ~3 km west/south of the bowl
     centre (see test_pipeline._event_lonlat).
     """
     return EventRecord(

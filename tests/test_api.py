@@ -56,7 +56,7 @@ def data_dir(tmp_path_factory):
         lon, lat = tr.transform(t.e0 + 4000.0 - 3000.0, t.n0 + 5500.0 - 3000.0)
         ev = {**EVENT, "magnitude": 5.6, "time": "2026-08-01T00:00:00Z",
               "lat": float(lat), "lon": float(lon), "depth_km": 5.0,
-              "nodal_planes": ((60.0, 40.0, 90.0),)}
+              "nodal_planes": ((90.0, 40.0, -90.0),)}
         return {"source": "fixture", "events": [ev], "degraded": False, "error": None}
     eq_fetch.set_event_provider(provider)
     yield tmp

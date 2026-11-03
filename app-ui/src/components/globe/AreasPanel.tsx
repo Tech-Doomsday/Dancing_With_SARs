@@ -1,7 +1,6 @@
 "use client";
 
-/** AreasPanel (Explore state) — Events | Featured | Cached tabs. Events = the post-launch disaster list, ranked by how
- *  trustworthy the map point is and how much SAR can say (src/lib/events.ts). Featured rows come from the owner's
+/** AreasPanel (Explore state) — Featured | Cached tabs. Featured rows come from the owner's
  *  featured_areas table (seeded EMPTY — the empty state says exactly that and how to fill it),
  *  joined to cached rows by tile. Cached rows are grouped by tile with the newest bundle current.
  *  Empty/unconfigured/error states are honest and specific. */
@@ -10,10 +9,6 @@ import Link from "next/link";
 import { timeAgo } from "@/lib/format";
 import { mostNotableTier, TIER_PIN_COLORS } from "@/lib/status";
 import type { CachedSummary, FeaturedArea } from "@/lib/types";
-import { rankEvents, type DisasterEvent, type RankedEvent } from "@/lib/events";
-import disasters from "@/data/disasters.json";
-
-const EVENTS = disasters as unknown as DisasterEvent[];
 
 export interface AreasPanelProps {
   featured: FeaturedArea[] | null;
@@ -24,8 +19,6 @@ export interface AreasPanelProps {
   onSelectTile: (tile: string, lon: number, lat: number, zoom?: number) => void;
   onOpenResult: (bundleId: string) => void;
   onScan: (tile: string, lon: number, lat: number) => void;
-  /** fly to a point and open the Pin panel there (Events tab) */
-  onSelectPoint: (lat: number, lon: number, zoom: number) => void;
   selectedTile: string | null;
 }
 
@@ -61,7 +54,7 @@ function groupByTile(rows: CachedSummary[]): TileGroup[] {
 }
 
 export default function AreasPanel(props: AreasPanelProps) {
-  const [tab, setTab] = useState<"events" | "featured" | "cached">("events");
+  const [tab, setTab] = useState<"featured" | "cached">("featured");
   const [filter, setFilter] = useState("");
   const [tierFilter, setTierFilter] = useState<string>("");
 
@@ -81,7 +74,7 @@ export default function AreasPanel(props: AreasPanelProps) {
   return (
     <div className="p-3">
       <div className="flex gap-1" role="tablist" aria-label="Explore lists">
-        {(["events", "featured", "cached"] as const).map((t) => (
+        {(["featured", "cached"] as const).map((t) => (
           <button
             key={t}
             role="tab"
@@ -95,8 +88,6 @@ export default function AreasPanel(props: AreasPanelProps) {
           </button>
         ))}
       </div>
-
-      {tab === "events" && <EventsList onSelectPoint={props.onSelectPoint} />}
 
       {tab === "featured" && (
         <div className="mt-3 space-y-2">
@@ -278,100 +269,6 @@ export default function AreasPanel(props: AreasPanelProps) {
           })}
         </div>
       )}
-    </div>
-  );
-}
-
-/* ------------------------------------------------------------------ */
-/* Events tab                                                          */
-/* ------------------------------------------------------------------ */
-
-const SAR_CHIP: Record<RankedEvent["sar"], { label: string; cls: string; title: string }> = {
-  high: { label: "SAR-ready", cls: "border-[#2c5f58] bg-[#eff5f3] text-[#2c5f58]", title: "Good point, and the list names something SAR can measure" },
-  medium: { label: "SAR: maybe", cls: "border-[#b08d57] bg-[#f7f2e7] text-[#7a6438]", title: "Usable, with a caveat (point, size, depth or age)" },
-  low: { label: "SAR: limited", cls: "border-[#e7e2da] bg-white text-[#8a837b]", title: "Little for SAR to add, or the point is loose" },
-  none: { label: "no point", cls: "border-[#e7e2da] bg-white text-[#8a837b]", title: "No coordinates: cannot be placed on the map" },
-};
-const LOC_LABEL: Record<RankedEvent["location"], string> = {
-  exact: "exact point", approximate: "approx. point", regional: "regional centroid", none: "no point",
-};
-
-function EventsList({ onSelectPoint }: { onSelectPoint: AreasPanelProps["onSelectPoint"] }) {
-  const [cat, setCat] = useState("");
-  const [q, setQ] = useState("");
-  const [showAll, setShowAll] = useState(false);
-  // ranked once per mount: freshness depends on today's date
-  const ranked = useMemo(() => rankEvents(EVENTS), []);
-  const cats = useMemo(() => Array.from(new Set(ranked.map((e) => e.category))), [ranked]);
-  const rows = ranked.filter(
-    (e) => (!cat || e.category === cat)
-      && (!q || `${e.event} ${e.region}`.toLowerCase().includes(q.toLowerCase())),
-  );
-  const shown = showAll || cat || q ? rows : rows.slice(0, 15);
-
-  return (
-    <div className="mt-3" data-testid="events-list">
-      <p className="mb-2 text-[11px] text-[#4a443c]">
-        {ranked.length} events since the NISAR launch. Ordered by <b>how sure the map point is</b>, then by <b>how much SAR can
-        measure</b> (size, depth, what the list says SAR sees) and <b>how fresh</b> the scenes are. A triage hint, not a verdict.
-      </p>
-      <div className="mb-2 flex flex-wrap items-center gap-1.5">
-        <input suppressHydrationWarning
-          value={q} onChange={(e) => setQ(e.target.value)} placeholder="search event or country"
-          aria-label="Search events"
-          className="w-40 rounded-md border border-[#e7e2da] px-2 py-1 text-[11px]" />
-        {cats.map((c) => (
-          <button key={c} onClick={() => setCat(cat === c ? "" : c)} aria-pressed={cat === c}
-            className={`rounded-full border px-2 py-0.5 text-[10px] ${cat === c ? "border-[#2c5f58] bg-[#eff5f3] text-[#2c5f58]" : "border-[#e7e2da] text-[#4a443c]"}`}>
-            {c}
-          </button>
-        ))}
-      </div>
-      <ol className="space-y-2">
-        {shown.map((e) => {
-          const chip = SAR_CHIP[e.sar];
-          const can = e.lat != null && e.lon != null;
-          return (
-            <li key={e.id} className="rounded-lg border border-[#e7e2da] bg-white p-2.5" data-testid="event-row">
-              <div className="flex items-start justify-between gap-2">
-                <button
-                  disabled={!can}
-                  onClick={() => can && onSelectPoint(e.lat as number, e.lon as number, e.zoom)}
-                  className="text-left text-sm font-semibold text-[#1c1a17] hover:text-[#2c5f58] disabled:cursor-default disabled:text-[#8a837b] disabled:hover:text-[#8a837b]"
-                  title={can ? "fly to this location and open the Pin panel" : "no coordinates in the list"}
-                >
-                  <span className="mono mr-1.5 text-[10px] font-normal text-[#8a837b]">#{e.rank}</span>{e.event}
-                </button>
-                <span title={chip.title} className={`shrink-0 rounded-full border px-2 py-0.5 text-[10px] ${chip.cls}`}>{chip.label}</span>
-              </div>
-              <p className="mt-0.5 text-[11px] text-[#4a443c]">
-                {e.category} · {e.date_text} · {e.region}
-              </p>
-              <p className="mt-0.5 text-[11px] text-[#8a837b]">
-                {LOC_LABEL[e.location]}
-                {can ? <span className="mono"> ({e.lat?.toFixed(2)}, {e.lon?.toFixed(2)})</span> : null}
-                {e.size ? ` · ${e.size}` : ""}
-                {e.deaths != null ? ` · ${e.deaths.toLocaleString("en")} reported deaths` : ""}
-              </p>
-              {e.sar_angle && <p className="mt-1 text-[11px] text-[#2c5f58]">SAR angle: {e.sar_angle}</p>}
-              <details className="mt-1">
-                <summary className="cursor-pointer text-[10px] text-[#8a837b]">why #{e.rank} (score {e.score})</summary>
-                <ul className="mono mt-1 space-y-0.5 text-[10px] text-[#4a443c]">
-                  {e.reasons.map((r, i) => <li key={i}>{r}</li>)}
-                </ul>
-                {e.facts && <p className="mt-1 text-[10px] text-[#8a837b]">{e.facts}</p>}
-                <p className="mt-0.5 text-[10px] text-[#8a837b]">source: {e.sources}</p>
-              </details>
-            </li>
-          );
-        })}
-      </ol>
-      {!showAll && !cat && !q && rows.length > shown.length && (
-        <button onClick={() => setShowAll(true)} className="mt-2 w-full rounded-md border border-[#e7e2da] py-1 text-[11px] text-[#2c5f58] hover:border-[#2c5f58]">
-          show all {rows.length}
-        </button>
-      )}
-      {rows.length === 0 && <p className="text-[11px] text-[#8a837b]">no event matches.</p>}
     </div>
   );
 }
