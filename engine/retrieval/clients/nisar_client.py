@@ -235,7 +235,10 @@ class NisarClient:
         provider has no such granule (a provider failure raises). The match is exact on the id."""
         import asf_search as asf
         names = [granule_id, f"{granule_id}.h5"]            # the UR may or may not carry the file extension
-        kw = {"dataset": "NISAR", "granule_list": names, "maxResults": 10}
+        # NO maxResults here: asf_search refuses it together with a non-wildcard granule_list
+        # ("ValueError: Cannot use maxResults with product_list or non-wildcard granule_list"), which made
+        # this by-name lookup fail every time. A name list is already bounded by the names asked for.
+        kw = {"dataset": "NISAR", "granule_list": names}
         found = self._asf_search_bounded(asf, kw, float(self.cfg.search.get("timeout_s", 90) or 0), [])
         for r in found:
             ref = self._ref_from_result(r)

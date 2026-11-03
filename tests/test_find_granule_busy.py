@@ -100,3 +100,32 @@ def test_unknown_layout_still_refused_with_decoder_text():
     with pytest.raises(BackgroundError) as ei:
         find_granule(BusyProvider(), "totally-unknown-id")
     assert ei.value.status == 404 and "no verified filename layout" in str(ei.value)
+
+
+def test_find_by_id_never_sends_maxresults_with_granule_list(monkeypatch):
+    """asf_search raises ValueError for maxResults + a non-wildcard granule_list; the by-name lookup must not send it."""
+    import types
+    from engine.retrieval.clients.nisar_client import NisarClient
+
+    seen = {}
+
+    def fake_search(**kw):
+        if kw.get("maxResults") is not None and kw.get("granule_list") and not any("*" in n for n in kw["granule_list"]):
+            raise ValueError("Cannot use maxResults with product_list or non-wildcard granule_list.")
+        seen.update(kw)
+        p = {"fileName": TARGET + ".h5", "fileID": TARGET + ".h5", "url": "https://example.invalid/x.h5",
+             "processingLevel": "GUNW", "startTime": "2026-09-10T23:20:58Z", "stopTime": "2026-09-22T23:21:32Z",
+             "pathNumber": 69, "frameNumber": 13, "flightDirection": "ASCENDING"}
+        return [types.SimpleNamespace(properties=p, geometry={"type": "Polygon", "coordinates": []})]
+
+    fake_asf = types.ModuleType("asf_search")
+    fake_asf.search = fake_search
+    monkeypatch.setitem(sys.modules, "asf_search", fake_asf)
+
+    client = NisarClient.__new__(NisarClient)            # no network / disk setup needed for this lookup
+    client.cfg = types.SimpleNamespace(search={"timeout_s": 0})
+    monkeypatch.setattr(NisarClient, "_ref_from_result",
+                        staticmethod(lambda r: _ref(TARGET, _t("2026-09-10T23:20:58Z"))))
+    ref = client.find_by_id(TARGET)
+    assert ref is not None and ref.granule_id == TARGET
+    assert "maxResults" not in seen and seen["granule_list"][0] == TARGET
