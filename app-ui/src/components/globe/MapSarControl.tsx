@@ -18,6 +18,18 @@ import ExplainLine from "@/components/background/ExplainLine";
 import type { OverlaySpec } from "./GlobeMap";
 import { useSarImage } from "./explorer/useSarImage";
 
+/** seconds since `active` became true (0 while inactive): the "still working" counter for a slow engine step */
+function useElapsed(active: boolean): number {
+  const [sec, setSec] = useState(0);
+  useEffect(() => {
+    if (!active) { setSec(0); return; }
+    const t0 = Date.now();
+    const id = setInterval(() => setSec(Math.floor((Date.now() - t0) / 1000)), 1000);
+    return () => clearInterval(id);
+  }, [active]);
+  return sec;
+}
+
 export default function MapSarControl({ granuleId, bbox, onOverlay }: {
   granuleId: string;
   bbox: [number, number, number, number] | null;
@@ -54,6 +66,9 @@ export default function MapSarControl({ granuleId, bbox, onOverlay }: {
   const effectiveKey = layers.some((l) => l.key === layerKey) ? layerKey : (layers[0]?.key ?? "");
   const img = useSarImage({ enabled: on && !!inventory, granuleId, layerKey: effectiveKey, bbox, scale, nonce });
   const gate = gateKind ?? img.gate;
+  // every silent wait gets a visible state: reading the layer list (engine finds the granule at NASA, then reads its HDF5 index)
+  const invWaiting = on && !inventory && !invError && !gate;
+  const waited = useElapsed(invWaiting || (on && img.busy));
 
   useEffect(() => {
     if (img.url && img.corners) {
@@ -89,6 +104,11 @@ export default function MapSarControl({ granuleId, bbox, onOverlay }: {
                   className="rounded border border-[#9e3b2c] px-1">retry</button>
         </p>
       )}
+      {invWaiting && (
+        <p role="status" className="mt-1 text-[10px] text-[#8a837b]" data-testid="map-sar-inventory-wait">
+          asking the engine for this granule&apos;s layer list… {waited}s (it finds the granule at NASA, then reads its file index: the first time can take a minute)
+        </p>
+      )}
       {on && invError && <p role="alert" className="mt-1 text-[10px] text-[#9e3b2c]">{invError}</p>}
       {on && inventory && !layers.length && (
         <p className="mt-1 text-[10px] text-[#8a837b]">no previewable layer in this granule&apos;s inventory — no SAR image to show.</p>
@@ -108,7 +128,11 @@ export default function MapSarControl({ granuleId, bbox, onOverlay }: {
           </label>
         </div>
       )}
-      {on && img.busy && <p role="status" className="mt-1 text-[10px] text-[#8a837b]">drawing…</p>}
+      {on && img.busy && (
+        <p role="status" className="mt-1 text-[10px] text-[#8a837b]">
+          drawing… {waited}s (the engine reads only this tile&apos;s pixels from NASA, then colours them)
+        </p>
+      )}
       {on && img.message && !gate && <p role="alert" className="mt-1 text-[10px] text-[#9e3b2c]">{img.message}</p>}
       {on && meta && !img.message && (
         <p className="mono mt-1 text-[10px] text-[#8a837b]" data-testid="map-sar-legend">

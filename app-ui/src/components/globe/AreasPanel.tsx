@@ -11,7 +11,7 @@ import { timeAgo } from "@/lib/format";
 import { mostNotableTier, TIER_PIN_COLORS } from "@/lib/status";
 import type { CachedSummary, FeaturedArea } from "@/lib/types";
 import { rankEvents, type DisasterEvent, type RankedEvent } from "@/lib/events";
-import disasters from "@/data/disasters.json";
+import disasters from "@/lib/disasters.json";
 
 const EVENTS = disasters as unknown as DisasterEvent[];
 

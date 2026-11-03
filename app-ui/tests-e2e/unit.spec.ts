@@ -16,7 +16,7 @@ import { ticks as ticksForExplorer } from "../src/lib/timescale";
 import { mapHref, retrievalHref, sanitize, toDateOnly } from "../src/lib/queryContext";
 import { normalizeEngineUrl } from "../src/lib/engineUrl";
 import { lastIsoDate, locationQuality, rankEvents, type DisasterEvent } from "../src/lib/events";
-import disasterRows from "../src/data/disasters.json";
+import disasterRows from "../src/lib/disasters.json";
 
 /** §8.2 pure-logic tests — no browser needed. Playwright transpiles the TS imports directly. */
 

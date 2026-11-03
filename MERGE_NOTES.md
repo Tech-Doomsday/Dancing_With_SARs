@@ -56,7 +56,7 @@ Test files only plus the debug hub; no engine logic changed. The new sign-conven
 
 # Explore > Events (2026-11-03)
 `disasters_after_nisar_launch.csv` (74 events) now fills the Map's Explore panel as a new, default **Events** tab (before Featured / Cached).
-- Data: `python tools/build_disasters_json.py` -> `app-ui/src/data/disasters.json` (CSV stays the source; `--check` verifies sync; `tests/test_disasters_data.py`).
+- Data: `python tools/build_disasters_json.py` -> `app-ui/src/lib/disasters.json` (CSV stays the source; `--check` verifies sync; `tests/test_disasters_data.py`).
 - Ranking: `app-ui/src/lib/events.ts` (pure). Order = location trust first (A exact +30, B approx +12, regional centroid, no point -60), then how much SAR can say
   (category, "PRIORITY" flag, measurable terms, Mw / depth for quakes, "limited/offshore/deep" penalty), then freshness (computed from today's date at render time).
   Each row has "why #N" listing every point added or removed. Tiers: SAR-ready / maybe / limited / no point.
@@ -83,3 +83,9 @@ The other agent's `granule-lookup-fix.zip` (narrow +/-3 min window -> provider l
 (box search, window around BOTH ref and sec time, by-name) fixed the same bug differently. Neither alone covered both causes (crowded/capped list; provider listing a pair
 under its secondary date). `find_granule` is now: narrow window around each of ref/sec -> `NisarClient.find_by_id` (their `granule_list=[id, id.h5]` version) -> box (when the caller has one)
 -> wide windows around ref/sec (cap 250). Their test file kept as `tests/test_find_granule_busy.py`; ours as `tests/test_find_granule.py` (11 tests pass). By-name still not exercised against live ASF.
+
+# Packaging + visibility fixes (2026-11-03)
+- `app-ui/src/data/disasters.json` lived in a folder matched by the repo's `data/` .gitignore rule, so any git-based zip (zip_repo.py) dropped it and Explore > Events failed to build.
+  Moved to `app-ui/src/lib/disasters.json`.
+- Stale files from older merges removed (still present if you unzip over an old folder): `engine/common/defaults.py`, `tests/test_public_defaults.py`, `tests/test_eq_scan_selection.py`, `tests/test_select_no_signal.py`.
+- MapSarControl: the silent states now say what they wait for ("asking the engine for this granule's layer list… Ns", "drawing… Ns"). Before, a pending layer-list request showed NOTHING under the checkbox.

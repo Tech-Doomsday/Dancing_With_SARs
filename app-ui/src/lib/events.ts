@@ -1,4 +1,4 @@
-/** Explore > Events: the post-launch disaster list (disasters_after_nisar_launch.csv -> src/data/disasters.json),
+/** Explore > Events: the post-launch disaster list (disasters_after_nisar_launch.csv -> src/lib/disasters.json),
  *  ranked so that the events where (1) the point on the map is trustworthy and (2) SAR can actually say something
  *  come first. Pure functions, no React: unit-tested in tests-e2e/unit.spec.ts.
  *

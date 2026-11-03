@@ -1,5 +1,5 @@
 #!/usr/bin/env python
-"""disasters_after_nisar_launch.csv -> app-ui/src/data/disasters.json  (the Map's Explore > Events list).
+"""disasters_after_nisar_launch.csv -> app-ui/src/lib/disasters.json  (the Map's Explore > Events list).
 
 The CSV stays the source of truth: edit it, run `python tools/build_disasters_json.py`, commit both.
 This script only parses and normalises; nothing is invented (empty cells stay null) and ranking is done in the UI
@@ -18,7 +18,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
 CSV_PATH = ROOT / "disasters_after_nisar_launch.csv"
-OUT_PATH = ROOT / "app-ui" / "src" / "data" / "disasters.json"
+OUT_PATH = ROOT / "app-ui" / "src" / "lib" / "disasters.json"
 
 
 def _num(v: str):
