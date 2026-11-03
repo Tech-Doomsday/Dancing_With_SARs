@@ -15,6 +15,8 @@ import MapSarControl from "./MapSarControl";
 import type { OverlaySpec } from "./GlobeMap";
 
 export interface DataPanelProps {
+  /** pairs the verdict analysed (★ = the one it is based on), drawn on the timeline */
+  verdictUse?: { stack: string; ref_time: string; sec_time: string; selected: boolean }[];
   tileId: string | null;
   /** the engine's bbox for the pinned tile (west, south, east, north) — the area this tab searches */
   tileBbox?: [number, number, number, number] | null;
@@ -254,6 +256,7 @@ export default function DataPanel(props: DataPanelProps) {
             </p>
           )}
           <GranuleTimeline
+            verdictUse={props.verdictUse}
             data={data}
             selection={selection}
             onSelect={(sel) => {

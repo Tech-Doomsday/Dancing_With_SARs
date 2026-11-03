@@ -4,7 +4,7 @@
  *  - real UTC scale: adaptive tick levels (years → months → weeks → days → 6 h/hours), major
  *    labels, vertical gridlines, a "now" marker, hover crosshair with the exact UTC timestamp;
  *  - one lane group per stack (direction + track; ascending first), ascending cyan, descending
- *    violet (AA on the dark background; text labels always accompany the colours);
+ *    terracotta for descending (the same DIRECTION_COLORS as the Map's Data tab; text labels always accompany the colours);
  *  - GUNW bars = reference → secondary with dots at both acquisitions; GCOV = a dot/tick at its
  *    time (minimum visible width); greedy-packed sub-lanes (deterministic, no overlap);
  *  - explicit day gaps: a thin bracket labelled "Nd" between consecutive engine epochs where
@@ -199,8 +199,8 @@ export default function TimelineCanvas(props: Props) {
     if (!el) return;
     const obs = new ResizeObserver((entries) => {
       const w = Math.max(320, Math.floor((entries[0]?.contentRect.width ?? 900)));
-      setWidth(w);
-      setScale((s) => ({ ...s, widthPx: w }));
+      setWidth((cur) => (cur === w ? cur : w));                       // same width: no state change, no re-render
+      setScale((s) => (s.widthPx === w ? s : { ...s, widthPx: w }));
     });
     obs.observe(el);
     return () => obs.disconnect();
@@ -668,7 +668,7 @@ export default function TimelineCanvas(props: Props) {
   }, [bounds, width]);
 
   return (
-    <div ref={wrapRef} className="flex min-h-0 flex-1 flex-col rounded-lg border border-[#262c36] bg-[#0e1116]">
+    <div ref={wrapRef} className="flex min-h-0 min-w-0 w-full flex-1 flex-col overflow-hidden rounded-lg border border-[#262c36] bg-[#0e1116]">
       <canvas ref={axisRef} aria-hidden className="block" />
       <div className="lanes-scroll min-h-0 flex-1 overflow-y-auto overflow-x-hidden">
         <canvas

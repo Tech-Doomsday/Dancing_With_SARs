@@ -6,6 +6,7 @@
 import { useMemo, useState } from "react";
 import type { ExplorerGranule, ExplorerStack } from "@/lib/types";
 
+import { DIRECTION_COLORS } from "@/lib/status";
 type SortKey = "id" | "stack" | "ref" | "sec" | "baseline" | "track";
 
 export default function ExplorerList({ granules, stacks, selectedIds, onSelect }: {
@@ -72,14 +73,14 @@ export default function ExplorerList({ granules, stacks, selectedIds, onSelect }
         <tbody>
           {rows.map((g) => {
             const sel = selectedIds.includes(g.id);
-            const color = g.direction === "D" ? "text-[#b39ce8]" : g.direction === "A" ? "text-[#3fb6c9]" : "text-[#8b949e]";
+            const dirColor = DIRECTION_COLORS[g.direction ?? ""] ?? "#8b949e";
             return (
               <tr
                 key={g.id}
                 onClick={(e) => onSelect(g.id, e.shiftKey || e.ctrlKey || e.metaKey)}
                 className={`cursor-pointer border-b border-[#1c222b] ${sel ? "bg-[#2a2416] outline outline-1 outline-[#e6c977]" : "hover:bg-[#161b22]"}`}
               >
-                <td className={`px-2 py-1 font-mono ${color}`}>{g.stack}</td>
+                <td className="px-2 py-1 font-mono" style={{ color: dirColor }}>{g.stack}</td>
                 <td className="px-2 py-1 font-mono text-[#aab3bd]">{g.track ?? "—"}</td>
                 <td className="px-2 py-1 font-mono text-[#aab3bd]">{g.ref_time ?? g.start ?? "—"}</td>
                 <td className="px-2 py-1 font-mono text-[#aab3bd]">{g.sec_time ?? "—"}</td>

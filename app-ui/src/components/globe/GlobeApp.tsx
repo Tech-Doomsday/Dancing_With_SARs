@@ -31,6 +31,7 @@ import Legend, { MapKey } from "./Legend";
 import AreasPanel from "./AreasPanel";
 import ScanPanel from "./ScanPanel";
 import FindingsPanel, { type LayerSource } from "./FindingsPanel";
+import { verdictUseFrom } from "@/lib/verdictUse";
 import DataPanel from "./DataPanel";
 import BottomSheet from "./BottomSheet";
 import type { OverlaySpec } from "./GlobeMap";
@@ -684,6 +685,7 @@ export default function GlobeApp() {
               selectPoint(lat, lon, { zoom: 11.5, panel: "pin" });
             }
           }}
+          onSelectPoint={(lat, lon, zoom) => selectPoint(lat, lon, { zoom, panel: "pin" })}
         />
       )}
       {panel === "pin" && (
@@ -789,6 +791,7 @@ export default function GlobeApp() {
       })()}
       {panel === "granules" && (
         <DataPanel
+          verdictUse={verdictUseFrom(results?.results ?? [])}
           tileId={tile?.id ?? selectedTile}
           tileBbox={tile?.bbox_lonlat ?? null}
           lon={pin ? pin[1] : null}

@@ -30,6 +30,7 @@ import type { SarOverlay } from "./FootprintMiniMap";
 import LayerThumb from "./LayerThumb";
 import BeforeAfter from "./BeforeAfter";
 
+import { DIRECTION_COLORS } from "@/lib/status";
 type Tab = "summary" | "layers" | "timeline" | "data";
 
 const TABS: { key: Tab; label: string }[] = [
@@ -168,12 +169,12 @@ export default function ExplorerDetail({ granule, group, stack, stackGranules, b
       });
   };
 
-  const stackColor = stack?.direction === "D" ? "#b39ce8" : "#3fb6c9";
+  const stackColor = DIRECTION_COLORS[stack?.direction ?? ""] ?? DIRECTION_COLORS.A;
   const dirChip = useMemo(() => {
     if (!granule) return null;
     const label = directionLabel(granule.direction);
     const cls = granule.direction === "D"
-      ? "border-[#b39ce8]/50 bg-[#241f33] text-[#cdbdf0]"
+      ? "border-[#9e3b2c]/70 bg-[#33201b] text-[#f0a794]"
       : granule.direction === "A"
         ? "border-[#3fb6c9]/50 bg-[#12262c] text-[#7fd8e6]"
         : "border-[#333b47] bg-[#161b22] text-[#8b949e]";
@@ -210,7 +211,7 @@ export default function ExplorerDetail({ granule, group, stack, stackGranules, b
     <div className="p-3 text-xs">
       <div className="mb-2 flex items-start justify-between gap-2">
         <div className="flex flex-wrap items-center gap-2">
-          <span className={`rounded border px-1.5 py-0.5 font-mono text-[10px] ${stackColor === "#3fb6c9" ? "border-[#3fb6c9]/50 bg-[#12262c] text-[#7fd8e6]" : "border-[#b39ce8]/50 bg-[#241f33] text-[#cdbdf0]"}`}>
+          <span className={`rounded border px-1.5 py-0.5 font-mono text-[10px] ${stackColor === DIRECTION_COLORS.A ? "border-[#3fb6c9]/50 bg-[#12262c] text-[#7fd8e6]" : "border-[#9e3b2c]/70 bg-[#33201b] text-[#f0a794]"}`}>
             {shown.stack}
           </span>
           {dirChip}

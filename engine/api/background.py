@@ -61,6 +61,14 @@ class NisarSource:
     def fetch(self, bbox, t0, t1, product, layers, granules):
         return self.client.fetch(bbox, t0, t1, product, layers, granules=granules)
 
+    @property
+    def last_search_truncated(self) -> bool:
+        return bool(getattr(self.client, "last_search_truncated", False))
+
+    def find_by_id(self, gid: str):
+        """Exact lookup of one granule by its id (the provider's own granule name); None when absent."""
+        return self.client.find_by_id(gid)
+
     def inventory(self, ref) -> dict:
         """The granule's layer inventory from its LAYOUT INDEX (metadata-only: shapes, dtypes,
         grids, axes — no data chunks). Reuses the client's cached/persisted index; builds one
@@ -121,30 +129,79 @@ def np_len(v) -> int:
 # --------------------------------------------------------------------------- #
 # shared helpers
 # --------------------------------------------------------------------------- #
-_FIND_WINDOW_MIN = 120          # the granule's own acquisition start +/- this window finds it
+_FIND_NARROW_MIN = 3            # first ask: an acquisition time +/- this (a ~35 s acquisition + margin)
+_FIND_WIDE_MIN = 120            # last resort: +/- 2 h
+_FIND_NARROW_MAX = 50
+_FIND_CAP_BOX = 200             # results asked for when the search is scoped to a box
+_FIND_WIDE_MAX = 250            # config/retrieval.yaml search.max_results
 _LAYER_CAP = 512                # hard cap on preview max_px (longest side)
 
 
-def find_granule(source, gid: str):
-    """One granule ref by id: search the provider in a narrow window around the id's own decoded
-    acquisition start (the id IS the search key). Unknown layout -> 404 with the decoder's text."""
+def _fmt_z(dt: datetime) -> str:
+    return dt.strftime("%Y-%m-%dT%H:%M:%SZ")
+
+
+def find_granule(source, gid: str, bbox=None):
+    """One granule ref by id; a hit must match the id EXACTLY. The provider's own start/stop for a PAIR product need not
+    be the reference acquisition (a GUNW can be listed under its secondary date, or over the whole ref..sec span), and a
+    world-wide window holds more granules than `max_results`, so a capped list silently drops the one asked for. In order,
+    cheapest and most direct first:
+
+      1. a tight world-wide window around EACH decoded acquisition time (reference and secondary);
+      2. the provider asked for that id by name (independent of window, footprint and result budget);
+      3. `bbox` (the box the caller is already looking at, when it has one) over the pair's whole span;
+      4. the wide (+/- 2 h) window around each acquisition time, with the full result budget.
+
+    Unknown layout -> 404 with the decoder's text. Not found -> 404 saying what was tried and whether a provider list was
+    cut off (a capped list is NOT proof the granule does not exist)."""
     dec = decode_granule_id(gid)
     product = dec["product_decoded"]
-    start_s = dec["ref_time"] or dec["start"]
-    if product is None or start_s is None:
+    times_s = [t for t in (dec["ref_time"], dec["sec_time"]) if t] or ([dec["start"]] if dec["start"] else [])
+    if product is None or not times_s:
         raise BackgroundError(404, f"granule {gid!r} matches no verified filename layout — "
                                    "the engine cannot search for it (undecoded: "
                                    + "; ".join(dec["undecoded"]) + ")")
-    start = datetime.strptime(start_s, "%Y-%m-%dT%H:%M:%SZ").replace(tzinfo=timezone.utc)
-    t0 = start - timedelta(minutes=_FIND_WINDOW_MIN)
-    t1 = start + timedelta(minutes=_FIND_WINDOW_MIN)
-    refs, _degraded = source.search(None, t0.strftime("%Y-%m-%dT%H:%M:%SZ"),
-                                    t1.strftime("%Y-%m-%dT%H:%M:%SZ"), product, max_results=50)
-    for r in refs:
-        if r.granule_id == gid:
-            return r, dec
-    raise BackgroundError(404, f"granule {gid!r} not found by the provider search "
-                               f"({product} in {t0.isoformat()} .. {t1.isoformat()} UTC)")
+    times = sorted({datetime.strptime(t, "%Y-%m-%dT%H:%M:%SZ").replace(tzinfo=timezone.utc) for t in times_s})
+    client = getattr(source, "client", None)
+    tried: list[str] = []
+    cut_off = False
+
+    def _scan(box, t0: datetime, t1: datetime, cap: int):
+        nonlocal cut_off
+        refs, _degraded = source.search(box, _fmt_z(t0), _fmt_z(t1), product, max_results=cap)
+        cut = bool(getattr(source, "last_search_truncated", False) or getattr(client, "last_search_truncated", False)) \
+            or len(refs) >= cap
+        cut_off = cut_off or cut
+        tried.append(f"{'box' if box else 'world'} {_fmt_z(t0)} .. {_fmt_z(t1)} "
+                     f"({len(refs)} result(s){', list truncated' if cut else ''})")
+        return next((r for r in refs if r.granule_id == gid), None)
+
+    narrow, wide = timedelta(minutes=_FIND_NARROW_MIN), timedelta(minutes=_FIND_WIDE_MIN)
+    for t in times:
+        hit = _scan(None, t - narrow, t + narrow, _FIND_NARROW_MAX)
+        if hit is not None:
+            return hit, dec
+    by_name = getattr(source, "find_by_id", None)
+    if by_name is not None:
+        try:
+            hit = by_name(gid)
+            tried.append("by granule name")
+        except Exception as ex:                          # an unusable name lookup never blocks the fallbacks
+            hit = None
+            tried.append(f"by granule name (unavailable: {type(ex).__name__}: {ex})")
+        if hit is not None:
+            return hit, dec
+    if bbox is not None:
+        hit = _scan(tuple(bbox), times[0] - wide, times[-1] + wide, _FIND_CAP_BOX)
+        if hit is not None:
+            return hit, dec
+    for t in times:
+        hit = _scan(None, t - wide, t + wide, _FIND_WIDE_MAX)
+        if hit is not None:
+            return hit, dec
+    raise BackgroundError(404, f"granule {gid!r} not found by the provider search (tried: {'; '.join(tried)})"
+                               + (" — a provider list was truncated at its result limit, so the granule may exist; "
+                                  "this is NOT proof it does not" if cut_off else ""))
 
 
 def _clip_of(source, ref, bbox, layer_key: str | None):
@@ -346,7 +403,7 @@ def preview(source, *, gid: str, layer: str, bbox: tuple, max_px: int, cmap: str
         import numpy as np
         from engine.common.grids import edge_corners_lonlat
         from engine.common.layers import parse_layer_key
-        ref, _dec = find_granule(source, gid)
+        ref, _dec = find_granule(source, gid, bbox)
         clip, grid, arr, fr = _clip_of(source, ref, bbox, layer)
         from . import background_img as bimg
         info = parse_layer_key(layer).info
@@ -409,8 +466,8 @@ def preview(source, *, gid: str, layer: str, bbox: tuple, max_px: int, cmap: str
 
 def probe(source, *, gid: str, layer: str, lon: float, lat: float) -> dict:
     """Value at one point (nearest pixel centre); the UI draws it, the engine reads it."""
-    ref, _dec = find_granule(source, gid)
     d = 0.05
+    ref, _dec = find_granule(source, gid, (lon - d, lat - d, lon + d, lat + d))
     clip, grid, arr, _fr = _clip_of(source, ref, (lon - d, lat - d, lon + d, lat + d), layer)
     if grid is None or arr is None:
         raise BackgroundError(404, f"layer {layer!r} not found in granule {gid}")

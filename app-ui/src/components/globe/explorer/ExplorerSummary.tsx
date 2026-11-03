@@ -8,6 +8,7 @@ import { useMemo } from "react";
 import type { GranuleExplorerResponse } from "@/lib/types";
 import { timeAgo } from "@/lib/format";
 
+import { DIRECTION_COLORS } from "@/lib/status";
 export default function ExplorerSummary({ data, visibleCount, keptCount, fetchedCount }: {
   data: GranuleExplorerResponse;
   visibleCount: number;
@@ -50,7 +51,7 @@ export default function ExplorerSummary({ data, visibleCount, keptCount, fetched
       <span className="ml-auto flex flex-wrap gap-x-3 gap-y-0.5">
         {data.stacks.map((s) => (
           <span key={s.key} className="text-[#8b949e]">
-            <span className={`font-mono ${s.direction === "A" ? "text-[#3fb6c9]" : "text-[#b39ce8]"}`}>{s.key}</span>
+            <span className="font-mono" style={{ color: DIRECTION_COLORS[s.direction ?? ""] ?? "#8b949e" }}>{s.key}</span>
             {" · "}{s.n_granules} granules · {s.n_epochs} epochs
             {s.median_gap_days != null
               ? ` · gap ${s.min_gap_days}/${s.median_gap_days}/${s.max_gap_days} d (min/med/max)`

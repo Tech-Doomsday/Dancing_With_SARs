@@ -9,7 +9,6 @@ import "maplibre-gl/dist/maplibre-gl.css";
 
 const AMBER = "#e6c977";
 const CYAN = "#3fb6c9";
-const VIOLET = "#b39ce8";
 
 export interface SarOverlay {
   url: string;

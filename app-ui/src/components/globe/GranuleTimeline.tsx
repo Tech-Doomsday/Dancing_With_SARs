@@ -25,6 +25,8 @@ const ROW_H = 26;
 const LABEL_W = 92;
 
 export interface GranuleTimelineProps {
+  /** pairs the verdict analysed / is based on (from the engine's result); marked on the bars (B9) */
+  verdictUse?: { stack: string; ref_time: string; sec_time: string; selected: boolean }[];
   data: GranuleSearchResponse;
   selection: TimelineSelection | null;
   onSelect: (sel: TimelineSelection | null) => void;
@@ -253,8 +255,18 @@ export default function GranuleTimeline(props: GranuleTimelineProps) {
                     && props.selection.index === b.index;
                   const x1 = px(b.start);
                   const x2 = Math.max(px(b.end), px(b.start) + 3);
+                  const used = (props.verdictUse ?? []).find((u) => u.stack === row.key
+                    && u.ref_time.slice(0, 10) === new Date(b.start).toISOString().slice(0, 10)
+                    && u.sec_time.slice(0, 10) === new Date(b.end).toISOString().slice(0, 10));
                   return (
                     <g key={`b-${b.index}`}>
+                      {used && (
+                        <text x={(x1 + x2) / 2} y={y - 1} fontSize={11} textAnchor="middle" fill={used.selected ? "#b8860b" : "#8a837b"}
+                              data-testid={used.selected ? "verdict-selected-pair" : "verdict-analysed-pair"}>
+                          <title>{used.selected ? "the pair the verdict is based on" : "analysed by the verdict, not the one it is based on"}</title>
+                          {used.selected ? "★" : "·"}
+                        </text>
+                      )}
                       <rect
                         x={x1} y={y + 2} width={Math.max(3, x2 - x1)} height={ROW_H - 8} rx={3}
                         fill={color} fillOpacity={selected ? 1 : 0.75}

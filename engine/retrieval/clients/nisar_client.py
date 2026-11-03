@@ -205,18 +205,7 @@ class NisarClient:
             _slog.info("ASF search done: %d result(s) in %.1fs%s", len(found), time.monotonic() - t_search,
                        " [INCOMPLETE]" if warns else "")
             for r in found:
-                p = r.properties
-                name = p.get("fileName") or str(p.get("url", "")).rsplit("/", 1)[-1]
-                gid = re.sub(r"\.h5$", "", str(p.get("fileID") or name))
-                # E8: provider-side facts pass through verbatim (granule Explorer enrichment);
-                # absent keys mean "the provider did not say" — the route never guesses them.
-                extra = {k: p.get(k) for k in ("collectionName", "crid", "orbitType",
-                                               "mainBandPolarization", "rangeBandwidth",
-                                               "processingDate", "productionConfiguration")
-                         if p.get(k) is not None}
-                refs.append(GranuleRef(gid, p.get("url"), p.get("processingLevel"), p.get("startTime"),
-                                       p.get("stopTime"), p.get("pathNumber"), p.get("frameNumber"),
-                                       p.get("flightDirection"), _size(p), _ring(r), extra))
+                refs.append(self._ref_from_result(r))
             budget = int(max_results or self.cfg.search["max_results"])
             truncated = len(refs) >= budget
             if truncated:
@@ -239,6 +228,36 @@ class NisarClient:
             if stale and self.cfg.cache["stale_on_error"]:
                 return [GranuleRef(**d) for d in stale[0]], True
             raise
+
+    def find_by_id(self, granule_id: str) -> "GranuleRef | None":
+        """The ONE granule whose id is `granule_id`, asked of the provider by name (CMR granule UR): independent of any
+        time window, footprint or result budget, so a busy window can never push it out of a truncated list. None when the
+        provider has no such granule (a provider failure raises). The match is exact on the id."""
+        import asf_search as asf
+        names = [granule_id, f"{granule_id}.h5"]            # the UR may or may not carry the file extension
+        kw = {"dataset": "NISAR", "granule_list": names, "maxResults": 10}
+        found = self._asf_search_bounded(asf, kw, float(self.cfg.search.get("timeout_s", 90) or 0), [])
+        for r in found:
+            ref = self._ref_from_result(r)
+            if ref.granule_id == granule_id:
+                return ref
+        return None
+
+    @staticmethod
+    def _ref_from_result(r) -> "GranuleRef":
+        """One asf_search result -> GranuleRef (shared by search() and the by-name lookup)."""
+        p = r.properties
+        name = p.get("fileName") or str(p.get("url", "")).rsplit("/", 1)[-1]
+        gid = re.sub(r"\.h5$", "", str(p.get("fileID") or name))
+        # E8: provider-side facts pass through verbatim (granule Explorer enrichment);
+        # absent keys mean "the provider did not say" — the route never guesses them.
+        extra = {k: p.get(k) for k in ("collectionName", "crid", "orbitType",
+                                       "mainBandPolarization", "rangeBandwidth",
+                                       "processingDate", "productionConfiguration")
+                 if p.get(k) is not None}
+        return GranuleRef(gid, p.get("url"), p.get("processingLevel"), p.get("startTime"),
+                          p.get("stopTime"), p.get("pathNumber"), p.get("frameNumber"),
+                          p.get("flightDirection"), _size(p), _ring(r), extra)
 
     @staticmethod
     def _asf_search_bounded(asf, kw: dict, timeout_s: float, warnings: list | None = None):

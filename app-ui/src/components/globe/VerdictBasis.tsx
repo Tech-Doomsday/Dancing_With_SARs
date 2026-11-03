@@ -5,6 +5,7 @@
  *  conventions that were assumed and any warning about incomplete input. Everything shown is read from the engine's
  *  result (detail.inputs / detail.status_meaning / evidence); nothing is computed or guessed here. */
 import type { PipelineResult } from "@/lib/types";
+export { verdictUseFrom, type VerdictUse } from "@/lib/verdictUse";
 
 interface Inputs {
   mode?: string;

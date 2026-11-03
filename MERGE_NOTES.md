@@ -40,3 +40,46 @@ one coherent implementation was kept for each:
   `config/retrieval.yaml`, `next.config.ts`, and its four new tests.
 Verified here: all Python compiles; the audit's new tests and every test file that can run without fastapi/h5py/aiohttp/pyproj pass (7 passed, 4 skipped).
 Not run: full pytest, TypeScript typecheck/lint, any browser.
+
+# UI fixes (2026-11-03)
+- Data retrieval page lost the Background section tabs: `ExplorerApp` was `fixed inset-0` with its own AppNav, painted over the Background layout header
+  (Overview / Data retrieval / Preprocessing / Pipelines / Health). It is now an ordinary flex child of the layout (no fixed overlay, no second AppNav).
+- Timeline bars kept widening: the timeline's measured width fed back into its own container size (canvases have explicit px widths; the flex chain had no
+  `min-w-0` / overflow clip). Added `min-w-0` down the chain, `overflow-hidden` on the timeline wrapper, and the ResizeObserver no longer sets state when the width is unchanged.
+  NOT verified in a browser (no node_modules / npm reachable in the sandbox): please open Data retrieval, run a search, confirm the tabs show and the timeline holds still.
+
+# Third audit drop (2026-11-03): speckle-audit v2 (diff + zip, same base)
+Identical to the first audit drop (37 files already merged) plus five changes, all applied without conflicts:
+`earthquake_coseismic/tests/fixtures_eq.py` (synthetic event is now a REVERSE/thrust 60/40/+90, placed 3 days before the window end),
+`earthquake_coseismic/tests/test_sign_convention.py` (new), `tests/test_api.py` and `tests/test_g0_los_sign.py` (nodal plane 60/40/+90), `tools/debug_hub/pipelines.py`.
+Test files only plus the debug hub; no engine logic changed. The new sign-convention test is skipped here (needs pyproj/h5py); nothing else changed in pass/fail.
+
+# Explore > Events (2026-11-03)
+`disasters_after_nisar_launch.csv` (74 events) now fills the Map's Explore panel as a new, default **Events** tab (before Featured / Cached).
+- Data: `python tools/build_disasters_json.py` -> `app-ui/src/data/disasters.json` (CSV stays the source; `--check` verifies sync; `tests/test_disasters_data.py`).
+- Ranking: `app-ui/src/lib/events.ts` (pure). Order = location trust first (A exact +30, B approx +12, regional centroid, no point -60), then how much SAR can say
+  (category, "PRIORITY" flag, measurable terms, Mw / depth for quakes, "limited/offshore/deep" penalty), then freshness (computed from today's date at render time).
+  Each row has "why #N" listing every point added or removed. Tiers: SAR-ready / maybe / limited / no point.
+- Click an event -> fly there (zoom by location quality) and open the Pin panel. The heatwave row has no coordinates and cannot be placed.
+- Checked here: Python sync tests; the ranking logic via node (same asserts as the new block in tests-e2e/unit.spec.ts); no-science guard. NOT run: tsc / Playwright / browser.
+- Not done: event markers on the globe itself (list + fly-to only).
+
+# Fix: "granule ... not found by the provider search" on the SAR layer (2026-11-03)
+Cause: `engine/api/background.py::find_granule` searched the WHOLE WORLD for a +/-2 h window around the id's REFERENCE time, 50 results max,
+and required the provider to list a pair granule under that date. A GUNW can be listed under its secondary date, or over its whole ref..sec span
+(then every pair spanning the date matches and the target falls past the 50 cap). Fix: box-scoped search first (preview/probe pass their box),
+then a window around EACH of ref and sec (cap 250), then asf_search by-name lookup (`NisarSource.find_by_id`, NOT exercised against the real ASF);
+a miss now lists what was tried and says when a search hit its cap. `NisarClient._ref_from_result` factored out of `search()`.
+tests/test_find_granule.py: 6 tests; 4 fail on the old code (same error text as the screenshot), all pass now. Not verified against live ASF.
+
+# Fourth audit drop (2026-11-03): speckle-audit v3 (diff + zip, same base)
+Same as v2 plus 13 files: `DataPanel`, `GlobeApp`, `GranuleTimeline`, `VerdictBasis` (updated), `ExplorerDetail`, `ExplorerList`, `ExplorerSummary`, `FootprintMiniMap`, `TimelineCanvas`, `lib/verdictUse.ts`,
+`tests/test_retrieval_cuts.py`, `tests/test_ui_consistency.py`, and a `verdictUseFrom` block in `tests-e2e/unit.spec.ts`. 3-way merged on the old base; kept our earlier edits
+(timeline width fix, Explore > Events wiring, baseline "context only" tag). `unit.spec.ts` was rebuilt from the audit file + our Events tests (the automatic merge unbalanced its braces).
+Ran: test_ui_consistency + all earlier Python tests (no regressions). `test_retrieval_cuts.py` needs pyproj/h5py (errors here, same as other retrieval tests). Not run: tsc / Playwright / browser.
+
+# Granule lookup: two independent fixes compared and combined (2026-11-03)
+The other agent's `granule-lookup-fix.zip` (narrow +/-3 min window -> provider lookup by name with and without ".h5" -> wide window) and our earlier fix
+(box search, window around BOTH ref and sec time, by-name) fixed the same bug differently. Neither alone covered both causes (crowded/capped list; provider listing a pair
+under its secondary date). `find_granule` is now: narrow window around each of ref/sec -> `NisarClient.find_by_id` (their `granule_list=[id, id.h5]` version) -> box (when the caller has one)
+-> wide windows around ref/sec (cap 250). Their test file kept as `tests/test_find_granule_busy.py`; ours as `tests/test_find_granule.py` (11 tests pass). By-name still not exercised against live ASF.
