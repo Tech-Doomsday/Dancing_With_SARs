@@ -12,6 +12,7 @@ import { useEffect, useRef, useState } from "react";
 import maplibregl, { type Map as MlMap, type StyleSpecification } from "maplibre-gl";
 import "maplibre-gl/dist/maplibre-gl.css";
 import { seamSplits } from "@/lib/raster";
+import { overlaySpecIdOfSource } from "@/lib/overlayIds";
 import { DEFAULT_CAMERA, initialCamera, loadCamera, saveCamera } from "@/lib/camera";
 import "./globe-overrides.css";
 
@@ -413,10 +414,11 @@ export default function GlobeMap(props: GlobeMapProps) {
       }
       if (cancelled) return;
       for (const id of Object.keys(map.getStyle().sources)) {
-        if (!id.startsWith("overlay:")) continue;
-        // source ids are `overlay:<overlayId>:<part>`; the overlayId may itself contain ':'
-        const rest = id.slice("overlay:".length);
-        const overlayId = rest.slice(0, rest.lastIndexOf(":"));
+        // source ids are `<spec id>:<part>` and the spec id already starts with "overlay:" and may contain ':'.
+        // (Stripping the prefix before this lookup made EVERY overlay look unwanted: each one was added and then
+        // removed in the same tick, so the legend filled in and the map stayed empty.)
+        const overlayId = overlaySpecIdOfSource(id);
+        if (overlayId === null) continue;
         if (!wanted.has(overlayId)) {
           if (map.getLayer(id)) map.removeLayer(id);
           map.removeSource(id);

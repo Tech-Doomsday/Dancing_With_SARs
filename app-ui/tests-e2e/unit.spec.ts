@@ -15,6 +15,7 @@ import { groupTimes, groupKindLabel, variantFactsLabel, compareEnds, zoomBox, pa
 import { ticks as ticksForExplorer } from "../src/lib/timescale";
 import { mapHref, retrievalHref, sanitize, toDateOnly } from "../src/lib/queryContext";
 import { normalizeEngineUrl } from "../src/lib/engineUrl";
+import { overlaySpecIdOfSource } from "../src/lib/overlayIds";
 import { lastIsoDate, locationQuality, rankEvents, type DisasterEvent } from "../src/lib/events";
 import disasterRows from "../src/lib/disasters.json";
 
@@ -665,5 +666,22 @@ test.describe("events ranking", () => {
     const top = r.slice(0, 5);
     expect(top.every((e) => e.location !== "regional" && e.location !== "none")).toBe(true);
     expect(top.some((e) => e.category === "Earthquake")).toBe(true);
+  });
+});
+
+
+test.describe("overlaySpecIdOfSource (the overlay cleanup lookup)", () => {
+  // regression: the cleanup stripped "overlay:" before looking the id up, so every overlay was removed right after
+  // it was added (legend filled in, map stayed empty)
+  const sar = "overlay:sar:NISAR_L2_PR_GUNW_030_069_A_013:science__LSAR__GUNW__grids__frequencyA__pixelOffsets__HH__alongTrackOffset:auto:1a2b3c4d5e6f";
+  test("a part's source id maps back to the spec id the app registered", () => {
+    expect(overlaySpecIdOfSource(`${sar}:0`)).toBe(sar);
+    expect(overlaySpecIdOfSource(`${sar}:1`)).toBe(sar);
+    expect(overlaySpecIdOfSource("overlay:earthquake_coseismic:unw_phase:0")).toBe("overlay:earthquake_coseismic:unw_phase");
+  });
+  test("sources that are not overlay parts are ignored", () => {
+    for (const id of ["esri", "pins", "tile-outline", "pair-footprint", "overlay:", "overlay:nopart"]) {
+      expect(overlaySpecIdOfSource(id)).toBeNull();
+    }
   });
 });

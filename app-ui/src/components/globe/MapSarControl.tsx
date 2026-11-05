@@ -139,12 +139,12 @@ export default function MapSarControl({ granuleId, bbox, onOverlay }: {
         </p>
       )}
       {on && img.message && !gate && <p role="alert" className="mt-1 text-[10px] text-[#9e3b2c]">{img.message}</p>}
-      {on && meta && !img.message && (
+      {on && meta && !img.message && !img.busy && (
         <p className="mono mt-1 text-[10px] text-[#8a837b]" data-testid="map-sar-legend">
           {previewLegend(meta)}{qualityLegend(meta.quality) ? ` · ${qualityLegend(meta.quality)}` : ""}
         </p>
       )}
-      {on && meta && !img.message && (meta.notes ?? []).map((n) => (
+      {on && meta && !img.message && !img.busy && (meta.notes ?? []).map((n) => (
         <p key={n} role="note" className="mt-1 text-[10px] text-[#8a6d1f]" data-testid="map-sar-note">{n}</p>
       ))}
       {on && chosen && <div className="mt-1"><ExplainLine role={chosen.role} whatItIs={chosen.what_it_is} /></div>}
