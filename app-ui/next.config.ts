@@ -13,6 +13,12 @@ const legacyMapRedirects = LEGACY_MAP_KEYS.map((key) => ({
 }));
 
 const nextConfig: NextConfig = {
+  /* The dev-only "N" badge (bottom-left by default) sat on top of the map panel's last controls — it covered the
+     "show a SAR layer" checkbox. Every corner of the map UI is in use (nav top-left, zoom top-right, attribution
+     bottom-right, the panel bottom-left), so the badge is OFF by default. It never exists in `next build`/`next start`.
+     Want it back while developing?  NEXT_DEV_INDICATOR=1 npm run dev  (parked bottom-right). Runtime error overlays
+     are not affected. */
+  devIndicators: process.env.NEXT_DEV_INDICATOR === "1" ? { position: "bottom-right" } : false,
   /* The landing page uses next/image with quality 78 and 82; Next 16 requires every quality to be listed. */
   images: { qualities: [75, 78, 82] },
   /* The engine API base URL (FastAPI). Overridable via env. */

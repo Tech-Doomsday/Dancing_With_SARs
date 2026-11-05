@@ -29,6 +29,10 @@ DEFAULTS: dict[str, dict] = {
         "stale_on_error": True,
     },
     "search": {"max_results": 250, "keep_all_versions": False, "timeout_s": 90, "retry_incomplete": 1},
+    # Background reads (granule / preview / probe / stack-pair): no read has a time limit. A request answers within
+    # meta_wait_s, else 202 + job id and the UI keeps polling; network failures are retried forever with the waits below
+    # (the last one repeats); a read nobody has polled for job_idle_s (the page was closed) is cancelled.
+    "api": {"meta_wait_s": 20, "job_idle_s": 120, "poll_interval_s": 1, "retry_backoff_s": [2, 5, 10, 30]},
     "poll": {"products": ["GCOV", "GUNW"], "lookback_days": None, "max_results": 2000, "interval_hours": 6, "region": None},
     "tiling": {"scheme": "mgrs", "cell_size_m": 10000, "margin_m": 300},
 }
@@ -87,6 +91,7 @@ class Settings:
     decode: dict = field(default_factory=dict)
     cache: dict = field(default_factory=dict)
     search: dict = field(default_factory=dict)
+    api: dict = field(default_factory=dict)
     poll: dict = field(default_factory=dict)
     tiling: dict = field(default_factory=dict)
 

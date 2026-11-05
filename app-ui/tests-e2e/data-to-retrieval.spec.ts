@@ -52,7 +52,7 @@ const cameraWrites = (page: Page) => page.evaluate(() => (window as unknown as {
 /** open the Data tab with the tile resolved, return the link */
 async function openDataTab(page: Page) {
   await page.goto("/map?lat=23.74797&lon=90.41847");
-  await page.getByRole("tab", { name: "Data" }).click();
+  await page.getByRole("button", { name: "Open Data panel" }).click();
   const link = page.getByRole("link", { name: /Search this box in Data retrieval/ });
   await expect(link).toHaveAttribute("href", /\/background\/retrieval\?/, { timeout: 15_000 });
   return link;

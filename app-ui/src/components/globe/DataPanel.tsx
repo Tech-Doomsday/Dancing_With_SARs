@@ -172,74 +172,8 @@ export default function DataPanel(props: DataPanelProps) {
       </div>
       <p className="text-[11px] text-[#8a837b]">
         every acquisition the engine can see, grouped exactly the way it groups them (stack =
-        direction + track). read-only: this tab never fetches or processes data — Scan does that.
+        direction + track). read-only: this panel never fetches or processes data — Scan does that.
       </p>
-      <fieldset className="rounded-lg border border-[#e7e2da] bg-white px-3 py-2">
-        <legend className="px-1 text-[11px] font-medium text-[#4a443c]">Search area &amp; window</legend>
-        <p className="text-[10px] text-[#8a837b]">
-          this tab searches the pinned tile&apos;s box (the engine fixes it to the tile around your pin)
-          over the engine&apos;s default lookback window. Edit the box or dates and open it in Data
-          retrieval to search any area.
-        </p>
-        <div className="mt-1.5 grid grid-cols-4 gap-1.5">
-          {([["w", "West"], ["s", "South"], ["e", "East"], ["n", "North"]] as const).map(([k, label]) => (
-            <label key={k} className="text-[10px] text-[#8a837b]">
-              {label}
-              <input suppressHydrationWarning
-                inputMode="decimal"
-                value={area[k]}
-                onChange={(ev) => setArea((a) => ({ ...a, [k]: ev.target.value }))}
-                className="mono mt-0.5 w-full rounded border border-[#e7e2da] px-1.5 py-1 text-[11px] text-[#1c1a17]"
-              />
-            </label>
-          ))}
-        </div>
-        <div className="mt-1.5 grid grid-cols-2 gap-1.5">
-          {([["from", "From (UTC)"], ["to", "To (UTC)"]] as const).map(([k, label]) => (
-            <label key={k} className="text-[10px] text-[#8a837b]">
-              {label}
-              <input suppressHydrationWarning
-                type="date"
-                value={area[k]}
-                onChange={(ev) => setArea((a) => ({ ...a, [k]: ev.target.value }))}
-                className="mono mt-0.5 w-full rounded border border-[#e7e2da] px-1.5 py-1 text-[11px] text-[#1c1a17]"
-              />
-            </label>
-          ))}
-        </div>
-        <div className="mt-2 flex items-center gap-2">
-          {retrievalLink ? (
-            <Link
-              href={retrievalLink}
-              onClick={() => areaCheck.ok && saveQueryContext({
-                bbox: areaCheck.bbox, level: "GUNW,GCOV",
-                from: area.from || undefined, to: area.to || undefined,
-              })}
-              className="rounded-md bg-[#2c5f58] px-2.5 py-1 text-[11px] font-medium text-white hover:bg-[#37736a]"
-            >
-              Search this box in Data retrieval →
-            </Link>
-          ) : (
-            <span className="rounded-md bg-[#e7e2da] px-2.5 py-1 text-[11px] font-medium text-[#8a837b]">
-              Search this box in Data retrieval →
-            </span>
-          )}
-          {props.tileBbox && (
-            <button
-              type="button"
-              onClick={() => {
-                const [w, s, e, n] = props.tileBbox as [number, number, number, number];
-                const r = (v: number) => String(Number(v.toFixed(4)));
-                setArea((a) => ({ ...a, w: r(w), s: r(s), e: r(e), n: r(n) }));
-              }}
-              className="text-[11px] text-[#4a443c] underline"
-            >
-              reset to tile
-            </button>
-          )}
-        </div>
-        {!areaCheck.ok && <p role="status" className="mt-1 text-[10px] text-[#9e3b2c]">{areaCheck.msg}</p>}
-      </fieldset>
       {loading && !data && (
         <div className="space-y-2" aria-busy="true">
           <div className="skeleton h-24 rounded-lg" />
@@ -320,6 +254,74 @@ export default function DataPanel(props: DataPanelProps) {
       {!loading && !data && !error && (
         <p role="status" className="text-[11px] text-[#8a837b]">loading granule availability…</p>
       )}
+      {/* the search form sits BELOW the selected acquisition's details: this panel is the details view, so what you
+          just clicked on the timeline (and its SAR switch) is the first thing you see, not something below a form */}
+      <fieldset className="rounded-lg border border-[#e7e2da] bg-white px-3 py-2">
+        <legend className="px-1 text-[11px] font-medium text-[#4a443c]">Search area &amp; window</legend>
+        <p className="text-[10px] text-[#8a837b]">
+          this tab searches the pinned tile&apos;s box (the engine fixes it to the tile around your pin)
+          over the engine&apos;s default lookback window. Edit the box or dates and open it in Data
+          retrieval to search any area.
+        </p>
+        <div className="mt-1.5 grid grid-cols-4 gap-1.5">
+          {([["w", "West"], ["s", "South"], ["e", "East"], ["n", "North"]] as const).map(([k, label]) => (
+            <label key={k} className="text-[10px] text-[#8a837b]">
+              {label}
+              <input suppressHydrationWarning
+                inputMode="decimal"
+                value={area[k]}
+                onChange={(ev) => setArea((a) => ({ ...a, [k]: ev.target.value }))}
+                className="mono mt-0.5 w-full rounded border border-[#e7e2da] px-1.5 py-1 text-[11px] text-[#1c1a17]"
+              />
+            </label>
+          ))}
+        </div>
+        <div className="mt-1.5 grid grid-cols-2 gap-1.5">
+          {([["from", "From (UTC)"], ["to", "To (UTC)"]] as const).map(([k, label]) => (
+            <label key={k} className="text-[10px] text-[#8a837b]">
+              {label}
+              <input suppressHydrationWarning
+                type="date"
+                value={area[k]}
+                onChange={(ev) => setArea((a) => ({ ...a, [k]: ev.target.value }))}
+                className="mono mt-0.5 w-full rounded border border-[#e7e2da] px-1.5 py-1 text-[11px] text-[#1c1a17]"
+              />
+            </label>
+          ))}
+        </div>
+        <div className="mt-2 flex items-center gap-2">
+          {retrievalLink ? (
+            <Link
+              href={retrievalLink}
+              onClick={() => areaCheck.ok && saveQueryContext({
+                bbox: areaCheck.bbox, level: "GUNW,GCOV",
+                from: area.from || undefined, to: area.to || undefined,
+              })}
+              className="rounded-md bg-[#2c5f58] px-2.5 py-1 text-[11px] font-medium text-white hover:bg-[#37736a]"
+            >
+              Search this box in Data retrieval →
+            </Link>
+          ) : (
+            <span className="rounded-md bg-[#e7e2da] px-2.5 py-1 text-[11px] font-medium text-[#8a837b]">
+              Search this box in Data retrieval →
+            </span>
+          )}
+          {props.tileBbox && (
+            <button
+              type="button"
+              onClick={() => {
+                const [w, s, e, n] = props.tileBbox as [number, number, number, number];
+                const r = (v: number) => String(Number(v.toFixed(4)));
+                setArea((a) => ({ ...a, w: r(w), s: r(s), e: r(e), n: r(n) }));
+              }}
+              className="text-[11px] text-[#4a443c] underline"
+            >
+              reset to tile
+            </button>
+          )}
+        </div>
+        {!areaCheck.ok && <p role="status" className="mt-1 text-[10px] text-[#9e3b2c]">{areaCheck.msg}</p>}
+      </fieldset>
     </div>
   );
 }

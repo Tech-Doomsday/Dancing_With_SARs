@@ -18,9 +18,9 @@ test("globe landing renders the map (or the honest WebGL message) and the search
   await expect(page.getByText(/Scan is disabled/).first()).toBeVisible({ timeout: 15_000 });
 });
 
-test("Data tab shows its own engine-offline message, never a stale or empty timeline", async ({ page }) => {
+test("Data panel shows its own engine-offline message, never a stale or empty timeline", async ({ page }) => {
   await page.goto("/map");
-  await page.getByRole("tab", { name: "Data" }).click();
+  await page.getByRole("button", { name: "Open Data panel" }).click();
   await expect(page.getByText(/the engine is offline — granule availability needs it/)).toBeVisible({ timeout: 20_000 });
   await expect(page.locator("svg[aria-label*='Granule timeline']")).toHaveCount(0);
 });

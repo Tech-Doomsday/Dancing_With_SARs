@@ -6,6 +6,7 @@
 import { usePathname } from "next/navigation";
 import AppNav, { BackgroundSubNav, type BackgroundSection } from "@/components/globe/AppNav";
 import BackgroundGate from "@/components/background/BackgroundGate";
+import BgWaitNote from "@/components/BgWaitNote";
 
 export default function BackgroundLayout({ children }: { children: React.ReactNode }) {
   const pathname = usePathname() ?? "";
@@ -27,6 +28,7 @@ export default function BackgroundLayout({ children }: { children: React.ReactNo
           internal — engine-gated (NISAR_BACKGROUND_TOKEN)
         </span>
       </header>
+      <div className="px-4 empty:hidden"><BgWaitNote dark /></div>
       <BackgroundGate>
         <div className="flex min-h-0 flex-1 flex-col">{children}</div>
       </BackgroundGate>

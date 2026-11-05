@@ -19,11 +19,17 @@ EXECUTION MODEL (two helpers, chosen per route):
              threadpool thread (the handlers are plain `def`, so the event loop is not blocked).
 Both still run after `require_token` and share the `_BG_HITS` rate limit (60/min).
 
+NO TIME LIMIT: a provider-backed read is never cut off. It answers within `api.meta_wait_s` (config/retrieval.yaml) or
+returns 202 + {pending, job_id, attempt, last_error}; the UI polls GET /api/background/jobs/{id} (200 = the same body
+the route would have sent, 202 = still working, 404 = unknown/expired) and DELETE cancels. Network failures are retried
+for ever with backoff (engine/api/bg_jobs.py); definite answers (404, 400, 422) are final.
+
 Endpoints (all read-only; the first four run on the shared single worker pool, the last four do not):
   GET /api/background/granule?id=                       decoded fields + layer inventory + group
   GET /api/background/preview?id=&layer=&box&max_px&cmap(auto|…)&scale(auto|db|linear)[&lo=&hi=][&quality=off|coherence][&format=json]   PNG (+ X-Img-Meta) or meta JSON
   GET /api/background/probe?id=&layer=&lon=&lat=        value at a point
   GET /api/background/stack-pair?id=                    the GCOV granules at a GUNW's two ends
+  GET|DELETE /api/background/jobs/{job_id}              poll / cancel a read that answered 202
   GET /api/background/runs/{id}/preprocessing[?bundle_id=]   §5 chain trace / bundle records
   GET /api/background/runs/{id}/arrays/{aid}[?cmap=&lo=&hi=&max_px=]   §5 array PNG
   GET /api/background/runs/{id}/arrays/{aid}/probe?fx=&fy=             §5 pixel probe
@@ -45,9 +51,11 @@ from pathlib import Path
 
 
 from fastapi import APIRouter, Header, HTTPException, Query, Response
+from fastapi.responses import JSONResponse
 
 from . import background as bg
 from .background import BackgroundError
+from .bg_jobs import JOBS, Cancelled
 from .jobs import NO_EARTHDATA_MESSAGE, earthdata_present
 from .state import get_runner
 
@@ -115,8 +123,27 @@ def _default_source():
     return _SOURCE_FACTORY()
 
 
-def _run_bg(fn, *args, preview_window: bool = False, **kwargs):
-    """Rate limit + credentials check + single-pool execution shared by the data routes."""
+def _http_from(ex: BaseException) -> BaseException:
+    """The HTTP form of a finished read's exception (BackgroundError keeps its status; a cancelled read is 410)."""
+    if isinstance(ex, BackgroundError):
+        return HTTPException(status_code=ex.status, detail={"ok": False, "error": str(ex)})
+    if isinstance(ex, Cancelled):
+        return HTTPException(status_code=410, detail={"ok": False, "error": str(ex)})
+    return ex
+
+
+def _pending_body(job_id: str, info: dict) -> dict:
+    return {"ok": True, "pending": True, "job_id": job_id, **info}
+
+
+def _run_bg(fn, *args, preview_window: bool = False, finalize=None, **kwargs):
+    """Rate limit + credentials check + metadata-pool execution shared by the data routes.
+
+    No deadline: a first read of a granule from NASA can take minutes and the person wants the result, not a "try
+    again" (it used to give up after 25 s with a 504). The read answers in this request when it is quick; otherwise
+    the answer is 202 + a job id and it keeps going, so no tunnel or proxy has to hold one request open for minutes
+    and a retry never starts the same read twice. Network failures are retried (bg_jobs). `finalize` turns the
+    worker's result into the HTTP body (a PNG, say) and is applied both here and when the job is polled."""
     retry = _rate_limited(_PREVIEW_HITS if preview_window else _BG_HITS,
                           _PREVIEW_RATE if preview_window else _BG_RATE)
     if retry is not None:
@@ -124,13 +151,13 @@ def _run_bg(fn, *args, preview_window: bool = False, **kwargs):
     if not earthdata_present():
         raise HTTPException(status_code=503, detail={"ok": False, "error": NO_EARTHDATA_MESSAGE})
     runner = get_runner()
-    fut = runner._meta_pool.submit(fn, *args, **kwargs)     # metadata lane: never queued behind a scan/retrieval
     try:
-        # No deadline: a first read of a granule from NASA can take minutes and the person wants the result, not a
-        # "try again". (It used to give up after 25 s with a 504 while the work carried on in the background.)
-        return fut.result()
-    except BackgroundError as ex:
-        raise HTTPException(status_code=ex.status, detail={"ok": False, "error": str(ex)}) from ex
+        res = JOBS.submit(runner._meta_pool, fn, *args, finalize=finalize, **kwargs)   # metadata lane: never behind a scan
+    except (BackgroundError, Cancelled) as ex:
+        raise _http_from(ex) from ex
+    if res[0] == "done":
+        return res[1]
+    return JSONResponse(status_code=202, content=_pending_body(res[1], res[2]))
 
 
 def _run_local(fn, *args, **kwargs):
@@ -213,14 +240,19 @@ def background_preview(id: str = Query(..., min_length=1, max_length=400),
         bg.check_range(lo, hi)
     except bg.BackgroundError as err:
         raise HTTPException(status_code=err.status, detail={"ok": False, "error": str(err)})
-    out = _run_bg(_preview_worker, id=id, layer=layer, bbox=(west, south, east, north),
-                  max_px=max_px, cmap=cmap, scale=scale, lo=lo, hi=hi, quality=quality, preview_window=True)
-    if fmt == "json":
-        return {"ok": True, "meta": out["meta"]}
-    import json as _json
-    return Response(content=out["png"], media_type="image/png",
-                    headers={"X-Img-Meta": _json.dumps(out["meta"]),
-                             "Cache-Control": "private, max-age=300"})
+    json_only = fmt == "json"
+
+    def finalize(out):
+        if json_only:
+            return {"ok": True, "meta": out["meta"]}
+        import json as _json
+        return Response(content=out["png"], media_type="image/png",
+                        headers={"X-Img-Meta": _json.dumps(out["meta"]),
+                                 "Cache-Control": "private, max-age=300"})
+
+    return _run_bg(_preview_worker, id=id, layer=layer, bbox=(west, south, east, north),
+                   max_px=max_px, cmap=cmap, scale=scale, lo=lo, hi=hi, quality=quality, preview_window=True,
+                   finalize=finalize)
 
 
 def _preview_worker(*, id: str, layer: str, bbox: tuple, max_px: int, cmap: str, scale: str = "auto",
@@ -266,6 +298,29 @@ def _stack_pair_worker(id: str):
         return bg.stack_pair(source, gid=id)
     finally:
         source.close()
+
+
+@router.get("/jobs/{job_id}")
+def background_job(job_id: str, authorization: str | None = Header(default=None)):
+    """Poll a read that answered 202. 200 = the route's own body, 202 = still working (with attempt / last_error),
+    404 = unknown or expired (the UI asks again), 410 = it was cancelled. Not rate limited: it only looks."""
+    require_token(authorization)
+    res = JOBS.poll(job_id)
+    if res[0] == "unknown":
+        raise HTTPException(status_code=404, detail={
+            "ok": False, "error": "unknown or expired background job (the engine restarted or nobody asked for it "
+                                  "for a while) — the read is asked again"})
+    if res[0] == "pending":
+        return JSONResponse(status_code=202, content=_pending_body(job_id, res[1]))
+    if res[0] == "error":
+        raise _http_from(res[1])
+    return res[1]
+
+
+@router.delete("/jobs/{job_id}")
+def background_job_cancel(job_id: str, authorization: str | None = Header(default=None)):
+    require_token(authorization)
+    return {"ok": True, "cancelled": JOBS.cancel(job_id)}
 
 
 # --------------------------------------------------------------------------- #

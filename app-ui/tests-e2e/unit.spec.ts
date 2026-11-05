@@ -685,3 +685,23 @@ test.describe("overlaySpecIdOfSource (the overlay cleanup lookup)", () => {
     }
   });
 });
+
+
+test.describe("Data panel URL state (separate right-hand panel)", () => {
+  test("data=1 opens it independently of the left tab; the older panel=granules link still parses", () => {
+    const a = parseUrlState(new URLSearchParams("panel=pin&data=1&tile=46QBM32"));
+    expect(a.panel).toBe("pin");
+    expect(a.data).toBe(true);
+    expect(parseUrlState(new URLSearchParams("panel=granules")).panel).toBe("granules");   // old links keep working
+    expect(parseUrlState(new URLSearchParams("data=0")).data).toBeUndefined();              // only "1" opens it
+    expect(parseUrlState(new URLSearchParams("")).data).toBeUndefined();
+  });
+  test("it round-trips and is dropped from the URL when closed", () => {
+    const params = new URLSearchParams();
+    writeUrlState(params, { panel: "results", data: true });
+    expect(params.get("panel")).toBe("results");
+    expect(params.get("data")).toBe("1");
+    writeUrlState(params, { panel: "results" });
+    expect(params.has("data")).toBe(false);
+  });
+});

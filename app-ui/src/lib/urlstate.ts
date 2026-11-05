@@ -13,6 +13,8 @@ export interface UrlState {
   layer?: string;
   scan?: string;
   panel: PanelMode;
+  /** the separate Data panel (right side on desktop) is open; `panel=granules` is the older way to say the same */
+  data?: true;
 }
 
 const PANELS: PanelMode[] = ["explore", "cached", "pin", "results", "granules"];
@@ -53,6 +55,7 @@ export function parseUrlState(params: URLSearchParams | Record<string, string | 
     layer: id("layer", /^[A-Za-z0-9_-]{1,64}$/),
     scan: id("scan", /^run-[0-9a-f]{12}$/),
     panel,
+    data: get("data") === "1" ? true : undefined,
   };
 }
 
@@ -71,6 +74,7 @@ export function writeUrlState(params: URLSearchParams, state: UrlState): void {
   setOrDrop("layer", state.layer);
   setOrDrop("scan", state.scan);
   setOrDrop("panel", state.panel === "explore" ? undefined : state.panel);
+  setOrDrop("data", state.data ? "1" : undefined);
 }
 
 // ---------------------------------------------------------------------------------------------

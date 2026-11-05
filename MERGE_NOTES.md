@@ -89,3 +89,35 @@ under its secondary date). `find_granule` is now: narrow window around each of r
   Moved to `app-ui/src/lib/disasters.json`.
 - Stale files from older merges removed (still present if you unzip over an old folder): `engine/common/defaults.py`, `tests/test_public_defaults.py`, `tests/test_eq_scan_selection.py`, `tests/test_select_no_signal.py`.
 - MapSarControl: the silent states now say what they wait for ("asking the engine for this granule's layer list… Ns", "drawing… Ns"). Before, a pending layer-list request showed NOTHING under the checkbox.
+
+# NASA reads: no time limit, survives tunnels (2026-11-06, on top of the 2026-11-05 repo)
+The repo already removed the server's 25 s cap (`fut.result()` with no deadline), retries previews in the browser (`bg.patiently`, `bg.previewBlob({patient})`),
+lays the Map out as a left column + bottom timeline dock, and shows exact step inputs/outputs (`Trace.step_io`). All of that is kept untouched. Added on top, because holding one
+HTTP request open for minutes does not survive a Colab/Cloudflare tunnel (~100 s), re-sending the read starts it a second time, and `bg.granule` / probe / stack-pair still hit the browser's 90 s cap:
+- `engine/api/bg_jobs.py` + `_run_bg`: a read answers in-request within `api.meta_wait_s`, else 202 + job id and keeps running; network failures are retried for ever with
+  `api.retry_backoff_s`; definite errors (404/400/422) are final; an unattended read is cancelled after `api.job_idle_s`. Routes `GET|DELETE /api/background/jobs/{id}`.
+  Settings: `config/retrieval.yaml` `api:` (env NISAR_API_*).
+- `lib/bgApi.ts` `bgFetch` polls a 202 job with no overall limit (tunnel blips retried, abort cancels the job); every background route benefits, `patiently` still handles 409/429.
+  `lib/bgWait.ts` + `components/BgWaitNote.tsx` show "still reading from NASA — N s, attempt n: <error>" in the Background header and the Map panel.
+- Tests: `tests/test_bg_jobs.py` (9, no fastapi needed). NOT run here: pytest suite, tsc on the app, Playwright, a browser (fastapi/pyproj/h5py/node_modules absent in the sandbox).
+
+# Unified (2026-11-06): the Data-panel rework + the NASA-read job layer
+Base = the newest upload (Data as its own RIGHT-hand panel, `data=1` in the URL, Explore/Pin/Results on the left, timeline dock between them) — kept as is.
+On top: the job layer from the section above (bg_jobs.py, bgApi polling, BgWaitNote). The two do not overlap: the newest upload does not touch bgApi.ts, routes_background.py,
+settings.py or retrieval.yaml, so those files are exactly the previous upload plus the job layer. The wait note sits in the left panel (global, covers reads from either panel).
+
+# UI: Data panel layout + dev badge + timeline lanes (2026-11-06)
+Ported from the separately patched tree onto this merge; the backend and every other file of this merge are untouched.
+- **Dev "N" badge no longer covers the map panel.** It sat bottom-left on top of the panel's last control (the "show a SAR layer" checkbox).
+  `next.config.ts`: `devIndicators` is off by default; `NEXT_DEV_INDICATOR=1 npm run dev` brings it back, parked bottom-right. Dev-only, never in a build.
+- **Data panel (right, desktop).** Replaces the previous right panel: it no longer spans the full height and no longer pushes the zoom/compass/scale cluster
+  left (the `.data-open` rules in `globe-overrides.css` are gone). It starts below the controls and below the legend (measured), and opens from a "Data" pill
+  under the controls (aria-label "Open Data panel"; the old left-header "Data" tab is gone). Selected-acquisition details and the SAR switch come first; the
+  search-area form moved below them. The bottom timeline dock is used from 1360 px wide; below that the timeline draws inside the panel. Phone: Data stays the 4th sheet tab.
+  URL: `data=1` (this merge's `urlstate`, unchanged); `panel=granules` still opens it. The left tab and the Data panel are both kept in the link.
+- **Timeline (`GranuleTimeline.tsx`).** Overlapping GUNW pairs of one stack get their own lanes (touching pairs share a lane); GCOV dots have their own strip
+  instead of sitting on the bars; bars are clipped to the plot and never draw over the stack labels; the verdict star is drawn inside its bar; the SVG is `width=100%`.
+  Gap labels keep the engine-style start-to-start day count but the dashed connector is drawn only through space empty in every lane.
+- Tests: `smoke` and `data-to-retrieval` open the panel with `getByRole("button", { name: "Open Data panel" })`.
+- Ran: `tsc --noEmit`, `guard:no-science`, `tests-e2e/unit.spec.ts` (62 passed), and a server-render check of the timeline geometry (overlapping pairs in separate lanes, no dot on a bar).
+  NOT run: Playwright browser specs (no browser could be downloaded), `npm run lint`, any visual check.

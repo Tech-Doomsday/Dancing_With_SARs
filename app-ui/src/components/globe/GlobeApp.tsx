@@ -9,7 +9,7 @@ import { boxFromCenter } from "@/lib/boxFromCenter";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import dynamic from "next/dynamic";
 import { useSearchParams } from "next/navigation";
-import { X } from "lucide-react";
+import { ChevronLeft, X } from "lucide-react";
 import { api, pollWhile } from "@/lib/api";
 import { useEngineUrl } from "@/lib/engineUrl";
 import { cache, cacheConfigured } from "@/lib/cache";
@@ -33,6 +33,7 @@ import ScanPanel from "./ScanPanel";
 import FindingsPanel, { type LayerSource } from "./FindingsPanel";
 import { verdictUseFrom } from "@/lib/verdictUse";
 import DataPanel from "./DataPanel";
+import BgWaitNote from "@/components/BgWaitNote";
 import BottomSheet from "./BottomSheet";
 import type { OverlaySpec } from "./GlobeMap";
 
@@ -110,6 +111,15 @@ export default function GlobeApp() {
   const [webglMsg, setWebglMsg] = useState<string | null>(null);
   const [reducedMotion, setReducedMotion] = useState(false);
   const [isNarrow, setIsNarrow] = useState(false);
+  // Data is NOT a tab of the left panel any more: on desktop it is its own details panel on the RIGHT (the left panel
+  // keeps Explore / Pin / Results). On a phone there is no room for two panels, so there it stays a tab of the sheet.
+  const [dataOpen, setDataOpen] = useState(false);
+  const bootOpensData = useRef(false);
+  // the timeline docks along the bottom only when the strip between the two panels is wide enough to read
+  const [isWide, setIsWide] = useState(false);
+  // bottom edge of the legend (top-right): the right-hand panel starts below it so the two never overlap
+  const legendRef = useRef<HTMLDivElement | null>(null);
+  const [legendBottom, setLegendBottom] = useState(0);
   // the Data tab's timeline is drawn into this bottom dock (React portal: its state stays in DataPanel)
   const [timelineHostEl, setTimelineHostEl] = useState<HTMLElement | null>(null);
   const zoomRef = useRef<number | undefined>(undefined);
@@ -158,7 +168,13 @@ export default function GlobeApp() {
       setResultsBundleId(st.bundle);
       setPanel("results");
     }
-    if (st.panel !== "explore") setPanel(st.panel);
+    if (st.data) setDataOpen(true);
+    if (st.panel === "granules") {
+      // old links (?panel=granules) keep working: the Data panel opens, the left panel shows the pin
+      bootOpensData.current = true;
+      setDataOpen(true);
+      setPanel("pin");
+    } else if (st.panel !== "explore") setPanel(st.panel);
     try {
       const saved = window.localStorage.getItem("globe-flat");
       if (saved === "1") setFlat(true);
@@ -168,7 +184,10 @@ export default function GlobeApp() {
     setReducedMotion(mq.matches);
     const onMq = () => setReducedMotion(mq.matches);
     mq.addEventListener?.("change", onMq);
-    const onResize = () => setIsNarrow(window.innerWidth < 1024);
+    const onResize = () => {
+      setIsNarrow(window.innerWidth < 1024);
+      setIsWide(window.innerWidth >= 1360);
+    };
     onResize();
     window.addEventListener("resize", onResize);
     return () => {
@@ -363,8 +382,9 @@ export default function GlobeApp() {
         setSelectedTile(null);
         setSelectedDetection(null);
         setPairFootprint(null);
+        setDataOpen(false);
         clearQueryContext();
-        pushUrl({ panel: undefined, tile: undefined, scan: undefined, bundle: undefined, lat: undefined, lon: undefined });
+        pushUrl({ panel: undefined, data: undefined, tile: undefined, scan: undefined, bundle: undefined, lat: undefined, lon: undefined });
       }
     };
     window.addEventListener("keydown", onKey);
@@ -605,26 +625,87 @@ export default function GlobeApp() {
     return entry ? { layer: entry.payload, opacity: o.opacity } : null;
   }, [overlays, resultsRunId, cachedResults]);
 
+  useEffect(() => {
+    const el = legendRef.current;
+    if (!el) return;
+    const measure = () => setLegendBottom(el.getBoundingClientRect().bottom);
+    measure();
+    const ro = new ResizeObserver(measure);
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, [activeOverlayLegend]);
+
+  // phone: a map click / scan that switches the sheet to another section leaves the Data tab
+  const prevPanel = useRef(panel);
+  useEffect(() => {
+    if (prevPanel.current === panel) return;
+    prevPanel.current = panel;
+    if (bootOpensData.current) { bootOpensData.current = false; return; }   // the ?panel=granules deep link's own panel switch
+    if (isNarrow) { setDataOpen(false); pushUrl({ data: undefined }); }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [panel]);
+
+  const openData = useCallback(() => {
+    setDataOpen(true);
+    pushUrl({ data: true, panel: panel === "granules" ? "pin" : panel });
+  }, [pushUrl, panel]);
+  const closeData = useCallback(() => {
+    setDataOpen(false);
+    pushUrl({ data: undefined });
+  }, [pushUrl]);
+
+  const dataPanelEl = (
+    <DataPanel
+      verdictUse={verdictUseFrom(results?.results ?? [])}
+      tileId={tile?.id ?? selectedTile}
+      tileBbox={tile?.bbox_lonlat ?? null}
+      lon={pin ? pin[1] : null}
+      lat={pin ? pin[0] : null}
+      engineOnline={engineOnline}
+      credentials={health?.earthdata_credentials}
+      granuleSearchStatus={health?.granule_search?.status}
+      granuleSearchReason={health?.granule_search?.reason ?? null}
+      onFootprintOnMap={(ring, fit) => {
+        setPairFootprint(ring ? [...ring] : null);
+        if (ring && fit) setFitFootprintKey((k) => k + 1);
+      }}
+      onSarOverlay={setSarSpec}
+      timelineHost={isNarrow || !isWide ? undefined : timelineHostEl}
+    />
+  );
+
+  const clearSelection = () => {
+    setPanel("explore");
+    setPin(null);
+    setSelectedDetection(null);
+    setPairFootprint(null);
+    setDataOpen(false);
+    clearQueryContext();
+    pushUrl({ panel: undefined, data: undefined, tile: undefined, scan: undefined, bundle: undefined, lat: undefined, lon: undefined });
+  };
+
+  const tabs: readonly (readonly [string, string])[] = isNarrow
+    ? [["explore", "Explore"], ["pin", "Pin"], ["results", "Results"], ["granules", "Data"]]
+    : [["explore", "Explore"], ["pin", "Pin"], ["results", "Results"]];
+  const activeTab = isNarrow && dataOpen ? "granules" : panel;
+
   const panelContent = (
     <>
       <div className="flex items-center justify-between border-b border-[#f0ece4] px-3 py-2">
         <div role="tablist" aria-label="Panel sections" className="flex gap-1">
-          {([
-            ["explore", "Explore"],
-            ["pin", "Pin"],
-            ["results", "Results"],
-            ["granules", "Data"],
-          ] as const).map(([mode, label]) => (
+          {tabs.map(([mode, label]) => (
             <button
               key={mode}
               role="tab"
-              aria-selected={panel === mode}
+              aria-selected={activeTab === mode}
               onClick={() => {
-                setPanel(mode);
-                pushUrl({ panel: mode });
+                if (mode === "granules") { openData(); return; }
+                setPanel(mode as PanelMode);
+                if (isNarrow) { setDataOpen(false); pushUrl({ panel: mode as PanelMode, data: undefined }); }
+                else pushUrl({ panel: mode as PanelMode });
               }}
               className={`rounded-full px-2.5 py-1 text-xs font-medium ${
-                panel === mode ? "bg-[#1c1a17] text-[#faf9f6]" : "text-[#4a443c] hover:bg-[#f0ece4]"
+                activeTab === mode ? "bg-[#1c1a17] text-[#faf9f6]" : "text-[#4a443c] hover:bg-[#f0ece4]"
               }`}
             >
               {label}
@@ -632,14 +713,7 @@ export default function GlobeApp() {
           ))}
         </div>
         <button
-          onClick={() => {
-            setPanel("explore");
-            setPin(null);
-            setSelectedDetection(null);
-            setPairFootprint(null);
-            clearQueryContext();
-            pushUrl({ panel: undefined, tile: undefined, scan: undefined, bundle: undefined, lat: undefined, lon: undefined });
-          }}
+          onClick={clearSelection}
           className="rounded p-1 text-[#8a837b] hover:bg-[#f0ece4]"
           title="clear selection (Esc)"
           aria-label="clear selection"
@@ -647,6 +721,8 @@ export default function GlobeApp() {
           <X size={14} aria-hidden />
         </button>
       </div>
+
+      <div className="mx-3 mt-2 empty:hidden"><BgWaitNote /></div>
 
       {!healthChecked && <div className="m-3 skeleton h-10 rounded-lg" aria-busy="true" />}
       {healthChecked && (
@@ -667,6 +743,7 @@ export default function GlobeApp() {
         </p>
       )}
 
+      {isNarrow && dataOpen ? dataPanelEl : (<>
       {panel === "explore" && (
         <AreasPanel
           featured={featured}
@@ -706,10 +783,7 @@ export default function GlobeApp() {
           busyRunId={busyRunId}
           onScan={() => pin && startScan(pin[1], pin[0])}
           onOpenResult={(id) => (scanRunId && id === scanRunId ? openRunResult(id) : openCachedResult(id))}
-          onOpenDataTab={() => {
-            setPanel("granules");
-            pushUrl({ panel: "granules" });
-          }}
+          onOpenDataTab={openData}
         />
       )}
       {panel === "results" && (() => {
@@ -791,25 +865,7 @@ export default function GlobeApp() {
           </div>
         );
       })()}
-      {panel === "granules" && (
-        <DataPanel
-          verdictUse={verdictUseFrom(results?.results ?? [])}
-          tileId={tile?.id ?? selectedTile}
-          tileBbox={tile?.bbox_lonlat ?? null}
-          lon={pin ? pin[1] : null}
-          lat={pin ? pin[0] : null}
-          engineOnline={engineOnline}
-          credentials={health?.earthdata_credentials}
-          granuleSearchStatus={health?.granule_search?.status}
-          granuleSearchReason={health?.granule_search?.reason ?? null}
-          onFootprintOnMap={(ring, fit) => {
-            setPairFootprint(ring ? [...ring] : null);
-            if (ring && fit) setFitFootprintKey((k) => k + 1);
-          }}
-          onSarOverlay={setSarSpec}
-          timelineHost={isNarrow ? undefined : timelineHostEl}
-        />
-      )}
+      </>)}
     </>
   );
 
@@ -853,7 +909,7 @@ export default function GlobeApp() {
         </div>
       )}
 
-      {/* left column: nav + search pill + the panel (Explore / Pin / Results / Data); on a phone the panel is the bottom sheet */}
+      {/* left column: nav + search pill + the panel (Explore / Pin / Results); Data is its own panel on the right; on a phone everything is the bottom sheet (Data = a tab there) */}
       <div className={`pointer-events-none absolute left-3 top-3 z-30 flex flex-col gap-2${isNarrow ? "" : " bottom-3 w-[400px]"}`}>
         <div className="pointer-events-auto w-fit rounded-xl border border-[#262c36] bg-[#0e1116]/95 px-3 py-2 shadow-lg backdrop-blur">
           <AppNav active="map" dark />
@@ -921,7 +977,7 @@ export default function GlobeApp() {
       </div>
 
       {/* legend (top-right, left of the zoom controls: the left side is the panel, the bottom is the timeline dock) */}
-      <div className="pointer-events-none absolute right-16 top-3 z-30 hidden md:block">
+      <div ref={legendRef} className="pointer-events-none absolute right-16 top-3 z-30 hidden md:block">
         <Legend layer={activeOverlayLegend?.layer ?? null} opacity={activeOverlayLegend?.opacity ?? 0.8} />
         <div className="pointer-events-none absolute bottom-2 right-2 z-10"><MapKey /></div>
       </div>
@@ -931,9 +987,47 @@ export default function GlobeApp() {
       {isNarrow ? (
         <BottomSheet ariaLabel="globe panel">{panelContent}</BottomSheet>
       ) : (
-        // bottom dock for the acquisition timeline: from the panel's right edge to the screen edge, above the
-        // map attribution. Empty (and click-through) unless the Data tab is open.
-        <div ref={setTimelineHostEl} className="pointer-events-none absolute bottom-9 left-[424px] right-3 z-30" />
+        <>
+          {/* bottom dock for the acquisition timeline: between the left panel and the right-hand Data panel, above the
+              map attribution. Empty (and click-through) unless the Data panel is open and the screen is wide enough. */}
+          <div
+            ref={setTimelineHostEl}
+            className={`pointer-events-none absolute bottom-9 left-[424px] z-30 ${dataOpen ? "right-[412px]" : "right-3"}`}
+          />
+          {/* the Data panel: details of the pinned tile, on the RIGHT. Starts below the zoom controls and the legend. */}
+          {dataOpen ? (
+            <aside
+              aria-label="Data panel"
+              style={{ top: Math.max(148, legendBottom + 8) }}
+              className="pointer-events-auto absolute bottom-9 right-3 z-30 flex w-[min(400px,calc(100vw-448px))] min-w-[320px] flex-col overflow-hidden rounded-2xl border border-[#e7e2da] bg-[#faf9f6]/97 shadow-xl backdrop-blur"
+            >
+              <div className="flex items-center justify-between border-b border-[#f0ece4] px-3 py-2">
+                <h2 className="text-xs font-semibold text-[#1c1a17]">Data <span className="font-normal text-[#8a837b]">· details for the pinned tile</span></h2>
+                <button
+                  type="button"
+                  onClick={closeData}
+                  className="rounded p-1 text-[#8a837b] hover:bg-[#f0ece4]"
+                  title="close the Data panel"
+                  aria-label="Close Data panel"
+                >
+                  <X size={14} aria-hidden />
+                </button>
+              </div>
+              <div className="flex-1 overflow-y-auto pb-6">{dataPanelEl}</div>
+            </aside>
+          ) : (
+            <button
+              type="button"
+              onClick={openData}
+              style={{ top: Math.max(148, legendBottom + 8) }}
+              className="pointer-events-auto absolute right-3 z-30 flex items-center gap-1 rounded-full border border-[#e7e2da] bg-[#faf9f6]/97 px-3 py-1.5 text-xs font-medium text-[#1c1a17] shadow-lg backdrop-blur hover:bg-white"
+              title="open the Data panel: how much SAR data exists at the pinned tile"
+              aria-label="Open Data panel"
+            >
+              <ChevronLeft size={13} aria-hidden /> Data
+            </button>
+          )}
+        </>
       )}
     </div>
   );
