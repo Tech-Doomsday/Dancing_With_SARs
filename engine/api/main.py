@@ -86,6 +86,10 @@ def create_app() -> FastAPI:
         allow_origins=_ui_origins(),
         allow_methods=["*"],
         allow_headers=["*"],
+        # Cross-origin, a browser only lets the UI read CORS-safelisted response headers unless they are listed
+        # here. X-Img-Meta carries the preview's corners_lonlat / lo / hi / unit (without it the UI sees "{}" and
+        # draws nothing); Retry-After drives the rate-limit wait; Content-Disposition names the downloads.
+        expose_headers=["X-Img-Meta", "Retry-After", "Content-Disposition", "Content-Range"],
     )
     app.include_router(pipelines_router)
     app.include_router(bundles_router)

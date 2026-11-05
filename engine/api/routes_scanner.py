@@ -135,11 +135,11 @@ def _bbox_granules(west: float, south: float, east: float, north: float, level: 
                    from_: str | None, to: str | None, max_results: int | None, fresh: bool):
     """E8: the Granule Explorer's bbox mode. Antimeridian boxes are REFUSED (400) — the search
     provider takes W<S<E<N and a wrapped box would silently invert; split the query instead."""
-    for name, v, lo, hi in (("west", west, -180.0, 180.0), ("east", east, -180.0, 180.0),
-                            ("south", south, -90.0, 90.0), ("north", north, -90.0, 90.0)):
-        if not (lo <= v <= hi):
+    for name, v, v_min, v_max in (("west", west, -180.0, 180.0), ("east", east, -180.0, 180.0),
+                                  ("south", south, -90.0, 90.0), ("north", north, -90.0, 90.0)):
+        if not (v_min <= v <= v_max):
             raise HTTPException(status_code=400, detail={
-                "ok": False, "error": f"{name} {v} outside [{lo}, {hi}]"})
+                "ok": False, "error": f"{name} {v} outside [{v_min}, {v_max}]"})
     if west > east:
         raise HTTPException(status_code=400, detail={
             "ok": False,

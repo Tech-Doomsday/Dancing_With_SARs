@@ -8,7 +8,7 @@
  *  Mount it with key={granuleId}: a new granule is a fresh control, so no request is ever made with the
  *  previous granule's layer key. */
 import { useEffect, useMemo, useRef, useState } from "react";
-import { dash } from "@/lib/explainCache";
+import { previewLegend, qualityLegend } from "@/lib/format";
 import type { GranuleDetailResponse } from "@/lib/types";
 import ExplainLine from "@/components/background/ExplainLine";
 import type { SarOverlay } from "./FootprintMiniMap";
@@ -34,12 +34,13 @@ export default function SarOverlayControl({ granuleId, bbox, inventory, onOverla
   const [layerKey, setLayerKey] = useState(request?.layerKey ?? "");
   const [scale, setScale] = useState<"auto" | "linear" | "db">("auto");
   const [opacity, setOpacity] = useState(0.8);
+  const [validate, setValidate] = useState(false);
   const [on, setOn] = useState(request != null);
   const rootRef = useRef<HTMLDivElement | null>(null);
 
   // the first previewable layer is the default once the inventory has arrived (unless one was asked for)
   const effectiveKey = layers.some((l) => l.key === layerKey) ? layerKey : (layers[0]?.key ?? "");
-  const img = useSarImage({ enabled: on, granuleId, layerKey: effectiveKey, bbox, scale });
+  const img = useSarImage({ enabled: on, granuleId, layerKey: effectiveKey, bbox, scale, validate });
 
   // host callbacks go through refs: no stale closure, and they never sit in an effect's dependency list
   const onOverlayRef = useRef(onOverlay);
@@ -81,6 +82,10 @@ export default function SarOverlayControl({ granuleId, bbox, inventory, onOverla
                 className="rounded border border-[#333b47] bg-[#0e1217] px-1 py-0.5">
           <option value="auto">auto</option><option value="linear">linear</option><option value="db">dB</option>
         </select>
+        <label className="flex items-center gap-1" title="Fade pixels where the interferometric coherence is low, so unreliable matches do not look like data. Display only: the values are not changed.">
+          <input type="checkbox" checked={validate} onChange={(e) => setValidate(e.target.checked)} data-testid="sar-validate" />
+          validate with coherence
+        </label>
         <label className="flex items-center gap-1">opacity
           <input type="range" min={0.1} max={1} step={0.05} value={opacity} onChange={(e) => setOpacity(Number(e.target.value))} />
         </label>
@@ -89,9 +94,12 @@ export default function SarOverlayControl({ granuleId, bbox, inventory, onOverla
       {img.message && <p role="alert" className="mt-1 text-[#e8a087]">{img.message}</p>}
       {meta && !img.message && (
         <p className="mt-1 font-mono text-[#8b949e]" data-testid="sar-legend">
-          {dash(meta.cmap)} · {dash(meta.scale)} · {dash(meta.lo)} … {dash(meta.hi)} {dash(meta.unit)} · no-data {dash(meta.nan_fraction != null ? `${Math.round(meta.nan_fraction * 100)}%` : null)}
+          {previewLegend(meta)}{qualityLegend(meta.quality) ? ` · ${qualityLegend(meta.quality)}` : ""}
         </p>
       )}
+      {meta && !img.message && (meta.notes ?? []).map((n) => (
+        <p key={n} role="note" className="mt-1 text-[#e6c977]" data-testid="sar-note">{n}</p>
+      ))}
       <ExplainLine role={chosen?.role} whatItIs={chosen?.what_it_is} />
     </div>
   );

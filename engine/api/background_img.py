@@ -49,9 +49,13 @@ def _lut(name: str) -> np.ndarray:
     return _LUT[name]
 
 
-def finite_view(a: np.ndarray) -> np.ndarray:
+def finite_view(a: np.ndarray, mask_int_fill: bool = False) -> np.ndarray:
     """2-D float32 view for display: complex -> |z|, bool/int -> float, non-finite -> NaN.
-    A (k, ny, nx) cube with a small leading axis shows its middle slice (noted in metadata)."""
+    A (k, ny, nx) cube with a small leading axis shows its middle slice (noted in metadata).
+
+    mask_int_fill=True (retrieved SAR layers only): an integer layer's fill value - dtype max for unsigned, dtype min
+    for signed, the same convention engine/common/p03_decode_gate applies - becomes NaN, so 255 / 65535 never gets
+    painted as a class. Float no-data is NaN already (the retrieval client now leaves never-written chunks as NaN)."""
     a = np.asarray(a)
     sliced = None
     if a.ndim == 3:
@@ -62,8 +66,10 @@ def finite_view(a: np.ndarray) -> np.ndarray:
     if a.dtype.kind == "c":
         a = np.abs(a)
     out = a.astype(np.float32, copy=False)
-    if sliced is not None:
-        out = out  # the slice index is reported by the caller from the source shape
+    if mask_int_fill and a.dtype.kind in "iu":
+        from engine.common.layers import integer_fill
+        out = out.copy()
+        out[a == integer_fill(a.dtype)] = np.nan
     return out
 
 
@@ -103,24 +109,46 @@ def auto_range(a: np.ndarray, symmetric: bool = False) -> tuple:
     return (float(lo), float(hi)) if hi > lo else (float(lo) - 0.5, float(hi) + 0.5)
 
 
-def stats(a: np.ndarray) -> dict:
-    """Engine-computed stats reported to the UI (shape/dtype/min/max/percentiles/nan fraction)."""
+def modal(v: np.ndarray, cap: int = 1_000_000) -> tuple:
+    """(most frequent exact value, its share of v) - how a flat or saturated image is told apart from a real one.
+    Large arrays are strided down to `cap` samples first (exact values are kept, nothing is resampled)."""
+    v = np.asarray(v).reshape(-1)
+    if v.size == 0:
+        return None, 0.0
+    if v.size > cap:
+        v = v[:: -(-v.size // cap)]
+    u, c = np.unique(v, return_counts=True)
+    i = int(np.argmax(c))
+    return float(u[i]), float(c[i]) / float(v.size)
+
+
+def stats(a: np.ndarray, masked: np.ndarray | None = None) -> dict:
+    """Engine-computed stats reported to the UI (shape/dtype/min/max/percentiles/nan fraction).
+    `masked` = the display view with no-data already NaN (finite_view(a, mask_int_fill=True), before any dB
+    transform): the numbers then describe the VALID pixels, so they agree with the legend's no-data share."""
     a = np.asarray(a)
     out = {"shape": list(a.shape), "dtype": str(a.dtype), "n_bytes": int(a.nbytes)}
-    f = np.abs(a) if a.dtype.kind == "c" else a.astype(np.float64, copy=False)
-    fin = np.isfinite(f) if a.dtype.kind in "fc" else np.ones(a.shape, bool)
+    if masked is not None:
+        f = np.asarray(masked, np.float64)
+        fin = np.isfinite(f)
+    else:
+        f = np.abs(a) if a.dtype.kind == "c" else a.astype(np.float64, copy=False)
+        fin = np.isfinite(f) if a.dtype.kind in "fc" else np.ones(a.shape, bool)
     out["nan_fraction"] = float(1.0 - fin.mean()) if fin.size else 0.0
     if fin.any():
         v = f[fin]
         p2, p50, p98 = np.percentile(v, [2, 50, 98])
+        mv, mf = modal(v)
         out.update(min=float(v.min()), max=float(v.max()), mean=float(v.mean()),
-                   p2=float(p2), p50=float(p50), p98=float(p98))
+                   p2=float(p2), p50=float(p50), p98=float(p98), modal_value=mv, modal_fraction=mf)
     else:
-        out.update(min=None, max=None, mean=None, p2=None, p50=None, p98=None)
+        out.update(min=None, max=None, mean=None, p2=None, p50=None, p98=None, modal_value=None, modal_fraction=None)
     return out
 
 
-def render(a: np.ndarray, cmap: str, lo: float, hi: float) -> bytes:
+def render(a: np.ndarray, cmap: str, lo: float, hi: float, alpha: np.ndarray | None = None) -> bytes:
+    """RGBA PNG. `alpha` (0..1, same shape as a) scales each valid pixel's opacity - used by the coherence
+    validation to fade unreliable pixels. No-data stays fully transparent whatever alpha says."""
     a = np.asarray(a, np.float32)
     ok = np.isfinite(a)
     out = np.zeros(a.shape + (4,), np.uint8)
@@ -132,8 +160,79 @@ def render(a: np.ndarray, cmap: str, lo: float, hi: float) -> bytes:
     else:
         t = np.clip(np.nan_to_num((a - lo) / ((hi - lo) or 1.0), nan=0.0, posinf=1.0, neginf=0.0), 0, 1)
         out[..., :3] = _lut(cmap)[(t * 255).astype(np.uint8)]
-    out[..., 3] = np.where(ok, 255, 0)           # transparent = no data (never painted as a value)
+    if alpha is None:
+        out[..., 3] = np.where(ok, 255, 0)       # transparent = no data (never painted as a value)
+    else:
+        al = np.clip(np.nan_to_num(np.asarray(alpha, np.float32), nan=0.0), 0.0, 1.0)
+        out[..., 3] = np.where(ok, np.rint(al * 255.0), 0).astype(np.uint8)
     return png(out)
 
 
-__all__ = ["CMAPS", "auto_range", "decimate", "finite_view", "png", "to_db", "render", "slice_note", "stats"]
+def _axis_ranges(tc: np.ndarray, sc: np.ndarray):
+    """For every target pixel centre `tc`: the half-open index range [i0, i1) of source pixels (centres `sc`) that
+    fall inside the target pixel, plus a mask of targets that lie outside the source extent. Both axes may run in
+    either direction; indices refer to the arrays as given. A target finer than the source takes the nearest one."""
+    tc, sc = np.asarray(tc, np.float64), np.asarray(sc, np.float64)
+    n = sc.size
+    s_flip = bool(n > 1 and sc[0] > sc[-1])
+    s = sc[::-1] if s_flip else sc                       # ascending source centres
+    t_flip = bool(tc.size > 1 and tc[0] > tc[-1])
+    t = tc[::-1] if t_flip else tc                       # ascending target centres
+    ds_ = np.diff(s)
+    dt_ = np.diff(t)
+    half_s = float(np.median(ds_)) / 2 if ds_.size else 0.5
+    half_t = float(np.median(dt_)) / 2 if dt_.size else half_s
+    te_lo, te_hi = t - half_t, t + half_t                # target pixel edges (regular grids)
+    i0 = np.searchsorted(s, te_lo, side="left")
+    i1 = np.searchsorted(s, te_hi, side="left")
+    nearest = np.clip(np.searchsorted((s[1:] + s[:-1]) / 2, t), 0, n - 1) if n > 1 else np.zeros(t.size, int)
+    empty = i1 <= i0
+    i0 = np.where(empty, nearest, i0)
+    i1 = np.where(empty, nearest + 1, i1)
+    outside = (t < s[0] - half_s) | (t > s[-1] + half_s)
+    if s_flip:                                           # back to the source's own index order
+        i0, i1 = n - i1, n - i0
+    if t_flip:                                           # back to the target's own order
+        i0, i1, outside = i0[::-1], i1[::-1], outside[::-1]
+    return i0.astype(np.int64), i1.astype(np.int64), outside
+
+
+def resample_mean(src: np.ndarray, sx, sy, tx, ty) -> np.ndarray:
+    """Mean of the VALID source pixels inside each target pixel (both grids in the same CRS) -> float32 array of
+    shape (len(ty), len(tx)); NaN where the target lies outside the source or no valid source pixel falls in it.
+    Used to bring a coherence layer onto another layer's grid (NISAR's pixelOffsets grid is coarser than the
+    interferogram grid). Exact: integral images, no interpolation, NaN-aware."""
+    src = np.asarray(src, np.float64)
+    if src.ndim != 2 or src.shape != (len(sy), len(sx)):
+        raise ValueError("source array does not match its axes")
+    for name, ax in (("source x", sx), ("source y", sy), ("target x", tx), ("target y", ty)):
+        d = np.diff(np.asarray(ax, np.float64))
+        if d.size and (np.any(d == 0) or not np.allclose(d, d[0], rtol=1e-3, atol=0)):
+            raise ValueError(f"{name} axis is not regularly spaced")        # never guess on a malformed grid
+    r0, r1, out_r = _axis_ranges(ty, sy)
+    c0, c1, out_c = _axis_ranges(tx, sx)
+    ok = np.isfinite(src)
+    val = np.where(ok, src, 0.0)
+    S = np.zeros((src.shape[0] + 1, src.shape[1] + 1)); C = np.zeros_like(S)
+    S[1:, 1:] = val.cumsum(0).cumsum(1)
+    C[1:, 1:] = ok.astype(np.float64).cumsum(0).cumsum(1)
+    R0, C0 = np.ix_(r0, c0); R1, C1 = np.ix_(r1, c1)
+    tot = S[R1, C1] - S[R0, C1] - S[R1, C0] + S[R0, C0]
+    cnt = C[R1, C1] - C[R0, C1] - C[R1, C0] + C[R0, C0]
+    with np.errstate(invalid="ignore", divide="ignore"):
+        out = np.where(cnt > 0.5, tot / np.maximum(cnt, 1.0), np.nan)
+    out[out_r, :] = np.nan
+    out[:, out_c] = np.nan
+    return out.astype(np.float32)
+
+
+def quality_alpha(q: np.ndarray, lo: float, hi: float, min_alpha: float) -> np.ndarray:
+    """Opacity from a 0..1 quality value: `min_alpha` at/below lo, 1.0 at/above hi, linear in between.
+    Unknown quality (NaN) is NOT trusted: it gets min_alpha, the same as the worst measured quality."""
+    q = np.asarray(q, np.float64)
+    t = np.clip(np.nan_to_num((q - lo) / (hi - lo), nan=0.0, posinf=1.0, neginf=0.0), 0.0, 1.0)
+    return (min_alpha + (1.0 - min_alpha) * t).astype(np.float32)
+
+
+__all__ = ["CMAPS", "auto_range", "decimate", "finite_view", "png", "to_db", "render", "slice_note", "stats",
+           "modal", "resample_mean", "quality_alpha"]

@@ -6,7 +6,7 @@ PreviewConfigError with a plain message; the routes answer it, the UI shows it â
 from __future__ import annotations
 
 import os
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 
 import yaml
@@ -14,6 +14,11 @@ import yaml
 from engine.common.config import repo_root
 
 SCALES = ("auto", "db", "linear")
+
+
+# coherence validation: opacity ramps from min_alpha (coherence <= lo) to 1 (coherence >= hi). Used when
+# preview.yaml has no `quality:` section (a custom NISAR_PREVIEW_CONFIG written before this option existed).
+QUALITY_DEFAULTS = {"lo": 0.2, "hi": 0.6, "min_alpha": 0.05}
 
 
 class PreviewConfigError(RuntimeError):
@@ -27,6 +32,7 @@ class PreviewCfg:
     cmap_by_kind: dict
     default_cmap: str
     unit_by_scale: dict
+    quality: dict = field(default_factory=lambda: {"coherence": dict(QUALITY_DEFAULTS)})
 
     def resolve_scale(self, requested: str, kind: str | None) -> str:
         if requested != "auto":
@@ -72,7 +78,16 @@ def load_preview_config(env: dict | None = None, root: Path | None = None) -> Pr
         bad = [v for v in maps["scale_by_kind"].values() if v not in ("db", "linear")]
         if bad:
             raise ValueError(f"scale_by_kind values must be db|linear, got {bad}")
+        q = {**QUALITY_DEFAULTS, **((raw.get("quality") or {}).get("coherence") or {})}
+        for k in ("lo", "hi", "min_alpha"):
+            if isinstance(q[k], bool) or not isinstance(q[k], (int, float)):
+                raise ValueError(f"quality.coherence.{k} must be a number")
+        q = {k: float(q[k]) for k in ("lo", "hi", "min_alpha")}
+        if not (0.0 <= q["lo"] < q["hi"] <= 1.0):
+            raise ValueError("quality.coherence needs 0 <= lo < hi <= 1")
+        if not (0.0 <= q["min_alpha"] <= 1.0):
+            raise ValueError("quality.coherence.min_alpha must be within 0..1")
         return PreviewCfg(rv, maps["scale_by_kind"], maps["cmap_by_kind"], str(raw.get("default_cmap") or "viridis"),
-                          maps["unit_by_scale"])
+                          maps["unit_by_scale"], {"coherence": q})
     except (KeyError, ValueError) as err:
         raise PreviewConfigError(f"preview config {path.name} is invalid: {err}")

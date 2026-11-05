@@ -25,6 +25,8 @@ export interface SarImageParams {
   lo?: number | null;
   hi?: number | null;
   maxPx?: number;
+  /** fade pixels with low coherence (engine-side; off = every valid pixel opaque) */
+  validate?: boolean;
   /** bump to ask again after a failure (a saved token, a rate limit) */
   nonce?: number;
 }
@@ -65,6 +67,7 @@ export function useSarImage(p: SarImageParams): SarImage {
       id: p.granuleId, layer: p.layerKey, west: box[0], south: box[1], east: box[2], north: box[3],
       maxPx: p.maxPx ?? 512, scale: p.scale ?? "auto", cmap: p.cmap ?? "auto",
       ...(p.lo != null && p.hi != null ? { lo: p.lo, hi: p.hi } : {}),
+      ...(p.validate ? { quality: "coherence" as const } : {}),
     }, ctrl.signal)
       .then(({ blob, meta }) => {
         if (ctrl.signal.aborted) return;
@@ -86,7 +89,7 @@ export function useSarImage(p: SarImageParams): SarImage {
     return () => ctrl.abort();
     // p.* are read through the dependency list below on purpose (primitives only)
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [p.enabled, p.granuleId, p.layerKey, bboxKey, p.scale, p.cmap, p.lo, p.hi, p.maxPx, p.nonce]);
+  }, [p.enabled, p.granuleId, p.layerKey, bboxKey, p.scale, p.cmap, p.lo, p.hi, p.maxPx, p.validate, p.nonce]);
 
   return state;
 }

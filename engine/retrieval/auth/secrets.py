@@ -34,7 +34,7 @@ class EarthdataAuth:
 
 
 def earthdata_auth() -> EarthdataAuth:
-    # .env is loaded by settings.load_settings(); real env vars win.
+    # the dotenv file is loaded by settings.load_settings(); real env vars win.
     return EarthdataAuth(
         token=os.environ.get("EARTHDATA_TOKEN") or None,
         username=os.environ.get("EARTHDATA_USERNAME") or None,

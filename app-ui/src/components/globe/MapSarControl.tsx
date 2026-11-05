@@ -12,7 +12,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import { bg } from "@/lib/bg";
 import { GateError } from "@/lib/bgApi";
-import { dash } from "@/lib/explainCache";
+import { previewLegend, qualityLegend } from "@/lib/format";
 import type { GranuleDetailResponse } from "@/lib/types";
 import ExplainLine from "@/components/background/ExplainLine";
 import type { OverlaySpec } from "./GlobeMap";
@@ -41,6 +41,7 @@ export default function MapSarControl({ granuleId, bbox, onOverlay }: {
   const [layerKey, setLayerKey] = useState("");
   const [scale, setScale] = useState<"auto" | "linear" | "db">("auto");
   const [opacity, setOpacity] = useState(0.8);
+  const [validate, setValidate] = useState(false);
   const [on, setOn] = useState(false);
   const [nonce, setNonce] = useState(0);
   const onOverlayRef = useRef(onOverlay);
@@ -64,7 +65,7 @@ export default function MapSarControl({ granuleId, bbox, onOverlay }: {
   const layers = useMemo(
     () => (inventory?.grids ?? []).flatMap((g) => g.layers).filter((l) => l.previewable), [inventory]);
   const effectiveKey = layers.some((l) => l.key === layerKey) ? layerKey : (layers[0]?.key ?? "");
-  const img = useSarImage({ enabled: on && !!inventory, granuleId, layerKey: effectiveKey, bbox, scale, nonce });
+  const img = useSarImage({ enabled: on && !!inventory, granuleId, layerKey: effectiveKey, bbox, scale, validate, nonce });
   const gate = gateKind ?? img.gate;
   // every silent wait gets a visible state: reading the layer list (engine finds the granule at NASA, then reads its HDF5 index)
   const invWaiting = on && !inventory && !invError && !gate;
@@ -123,6 +124,10 @@ export default function MapSarControl({ granuleId, bbox, onOverlay }: {
                   className="rounded border border-[#d8d2c8] bg-white px-1 py-0.5">
             <option value="auto">auto</option><option value="linear">linear</option><option value="db">dB</option>
           </select>
+          <label className="flex items-center gap-1" title="Fade pixels where the interferometric coherence is low, so unreliable matches do not look like data. Display only: the values are not changed.">
+          <input type="checkbox" checked={validate} onChange={(e) => setValidate(e.target.checked)} data-testid="map-sar-validate" />
+          validate with coherence
+        </label>
           <label className="flex items-center gap-1">opacity
             <input type="range" min={0.1} max={1} step={0.05} value={opacity} onChange={(e) => setOpacity(Number(e.target.value))} />
           </label>
@@ -136,9 +141,12 @@ export default function MapSarControl({ granuleId, bbox, onOverlay }: {
       {on && img.message && !gate && <p role="alert" className="mt-1 text-[10px] text-[#9e3b2c]">{img.message}</p>}
       {on && meta && !img.message && (
         <p className="mono mt-1 text-[10px] text-[#8a837b]" data-testid="map-sar-legend">
-          {dash(meta.cmap)} · {dash(meta.scale)} · {dash(meta.lo)} … {dash(meta.hi)} {dash(meta.unit)} · no-data {dash(meta.nan_fraction != null ? `${Math.round(meta.nan_fraction * 100)}%` : null)}
+          {previewLegend(meta)}{qualityLegend(meta.quality) ? ` · ${qualityLegend(meta.quality)}` : ""}
         </p>
       )}
+      {on && meta && !img.message && (meta.notes ?? []).map((n) => (
+        <p key={n} role="note" className="mt-1 text-[10px] text-[#8a6d1f]" data-testid="map-sar-note">{n}</p>
+      ))}
       {on && chosen && <div className="mt-1"><ExplainLine role={chosen.role} whatItIs={chosen.what_it_is} /></div>}
     </div>
   );

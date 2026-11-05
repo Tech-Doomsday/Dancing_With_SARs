@@ -1,7 +1,7 @@
 # How GET /api/background/preview turns a layer into a picture. Display encoding only — the
 # engine computes, the UI shows. Override the file with NISAR_PREVIEW_CONFIG, or the folder with
 # NISAR_CONFIG_DIR. Bump render_version whenever rendering changes: it invalidates cached previews.
-render_version: 2
+render_version: 3   # 3: previews cached under 2 were all drawn on a forced -90..90 range
 
 # scale=auto picks one of: db (10*log10, non-positive and non-finite values become no-data) | linear.
 # Keys are layer kinds from engine/common/layers.py (phase, coherence, cc, mask, power, float, angle, count).
@@ -23,3 +23,12 @@ default_cmap: viridis
 # unit shown for a rendered scale (null = unknown: the UI shows a dash)
 unit_by_scale:
   db: dB
+
+# "validate with coherence" (the UI toggle, ?quality=coherence): a pixel's opacity follows the interferometric
+# coherence (0..1): min_alpha at coherence <= lo, fully opaque at coherence >= hi, linear in between.
+# Unknown coherence counts as the worst. Display encoding only - the data and the colour values are untouched.
+quality:
+  coherence:
+    lo: 0.2
+    hi: 0.6
+    min_alpha: 0.05

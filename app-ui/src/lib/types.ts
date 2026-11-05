@@ -394,8 +394,17 @@ export interface PreviewMeta {
   clip_bbox_lonlat: [number, number, number, number] | null;
   requested_bbox: [number, number, number, number];
   slice_note?: string | null;
+  /** engine-measured warnings about why the image may look empty (range misses the data, one dominant value) */
+  notes?: string[];
+  /** what the engine counted as no-data for this layer */
+  nodata_rule?: string;
+  /** what the coherence validation did; applied=false carries the reason it could not */
+  quality?: { mode: "off" | "coherence"; applied: boolean; layer?: string | null; reason?: string | null;
+              lo?: number; hi?: number; min_alpha?: number; same_grid?: boolean; range_from?: string;
+              hidden_fraction?: number; faded_fraction?: number; unvalidated_fraction?: number };
   stats: { shape: number[]; dtype: string; min: number | null; max: number | null;
            mean: number | null; p2: number | null; p50: number | null; p98: number | null;
+           modal_value?: number | null; modal_fraction?: number | null;
            nan_fraction: number; n_bytes: number };
   wire_bytes?: Record<string, number>;
   clip_source?: string;

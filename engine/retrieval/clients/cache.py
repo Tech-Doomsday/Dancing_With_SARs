@@ -128,7 +128,7 @@ class ClipStore:
     def __init__(self, root: Path, ttl_s: float | None):
         self.root, self.ttl = Path(root), ttl_s
 
-    def key(self, granule_id: str, bbox, layers: list[str] | None, schema: int = 2) -> str:
+    def key(self, granule_id: str, bbox, layers: list[str] | None, schema: int = 3) -> str:   # 3: unwritten chunks are NaN, not 0
         bb = ",".join(f"{v:.6f}" for v in bbox)
         return sha("clip", schema, granule_id, bb, ",".join(sorted(layers or ["*"])))
 
@@ -168,6 +168,7 @@ class ClipStore:
             grp.attrs["grid_key"] = g.grid
             grp.attrs["epsg"] = int(g.epsg)
             grp.attrs["extras"] = list(g.extras)
+            grp.attrs["units"] = dict(getattr(g, "units", {}) or {})
             for name, arr in [("x", g.x), ("y", g.y), *g.extras.items()]:
                 a_ = np.asarray(arr)
                 grp.create_array(name, data=a_, chunks=a_.shape or (1,))

@@ -34,6 +34,7 @@ class GridClip:
     y: np.ndarray
     extras: dict[str, np.ndarray]
     layers: dict[str, np.ndarray]  # flat layer key -> array (raw HDF5 values, native dtype)
+    units: dict[str, str] = field(default_factory=dict)   # flat layer key -> the file's `units` attribute (if stated)
 
 
 @dataclass

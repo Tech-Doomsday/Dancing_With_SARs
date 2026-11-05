@@ -204,9 +204,10 @@ def find_granule(source, gid: str, bbox=None):
                                   "this is NOT proof it does not" if cut_off else ""))
 
 
-def _clip_of(source, ref, bbox, layer_key: str | None):
-    """One GranuleClip for the bbox; layer_key is a flat key ('__' naming) or None (all layers)."""
-    layers = re.escape(layer_key.replace("__", "/")) if layer_key else None
+def _clip_of(source, ref, bbox, layer_key: str | None, also: tuple = ()):
+    """One GranuleClip for the bbox; layer_key is a flat key ('__' naming) or None (all layers). `also` = further
+    flat keys fetched in the same clip (the coherence candidates); the one that does not exist is simply absent."""
+    layers = "|".join(re.escape(k.replace("__", "/")) for k in (layer_key, *also)) if layer_key else None
     fr = source.fetch(tuple(bbox), None, None, None, layers, granules=[ref])
     if fr.errors:
         gid, why = next(iter(fr.errors.items()))
@@ -308,14 +309,15 @@ _PREVIEW_LOCK = threading.Lock()      # one preview at a time (the fetch can mov
 
 
 def _cache_paths(gid: str, layer: str, bbox, max_px: int, cmap: str, scale: str = "auto", render_version: int = 0,
-                 rng: tuple | None = None):
+                 rng: tuple | None = None, quality: str = ""):
     """Cache key = what was ASKED (cmap/scale as requested) + the render version, so changing either
     parameter makes a new entry and bumping render_version in config/preview.yaml retires old ones."""
     from engine.common.config import data_root
     key = hashlib.sha256("|".join([gid, layer,
                                    ",".join(f"{v:.6f}" for v in bbox),
                                    str(max_px), cmap, scale, f"v{render_version}"]
-                                  + ([f"range={rng[0]!r},{rng[1]!r}"] if rng else [])).encode()).hexdigest()[:32]
+                                  + ([f"range={rng[0]!r},{rng[1]!r}"] if rng else [])
+                                  + ([f"quality={quality}"] if quality else [])).encode()).hexdigest()[:32]
     root = Path(data_root()) / "background" / "previews"
     return root / f"{key}.png", root / f"{key}.json"
 
@@ -349,6 +351,28 @@ def _annotate_inventory(inventory: dict) -> None:
             layer["what_it_is"] = (layer_explanation(layer["key"], ecfg)["what_it_is"] if ecfg is not None else None)
 
 
+_QUALITY_CHOICES = ("off", "coherence")
+_POLS = ("HH", "VV", "HV", "VH", "RH", "RV")
+
+
+def coherence_candidates(layer_key: str) -> list:
+    """Flat keys of the coherence layers that can validate `layer_key`, best first: the same polarization (every
+    polarization when the layer has none, e.g. a group-level mask), and the coherence of the layer's own group
+    before the other one. NISAR GUNW only - a GCOV product has no coherence layer, so the list is empty."""
+    parts = layer_key.split("__")
+    if "GUNW" not in parts or "grids" not in parts:
+        return []
+    gi = parts.index("grids")
+    if len(parts) < gi + 3:
+        return []
+    prefix, group = parts[: gi + 2], parts[gi + 2]
+    pol = next((x for x in parts[gi + 3:] if x in _POLS), None)
+    groups = ["unwrappedInterferogram", "wrappedInterferogram"]
+    if group == "wrappedInterferogram":
+        groups.reverse()
+    return ["__".join(prefix + [g, p, "coherenceMagnitude"]) for g in groups for p in ([pol] if pol else _POLS)]
+
+
 _CMAP_CHOICES = ("auto", "viridis", "diverging", "magma", "gray", "categorical")
 _SCALE_CHOICES = ("auto", "db", "linear")
 
@@ -369,9 +393,53 @@ def check_range(lo, hi) -> tuple | None:
     return lo, hi
 
 
+def _coherence_on_grid(clip, grid, layer: str, view_shape: tuple, qcfg: dict) -> tuple:
+    """Coherence aligned pixel-for-pixel with the drawn layer -> (q float32 array | None, info dict).
+    Same grid -> used as is; another grid in the same CRS (pixelOffsets vs the interferogram) -> mean of the valid
+    coherence pixels inside each drawn pixel. Anything that cannot be done honestly returns (None, info) with the
+    reason spelled out; the image is then drawn unfaded and the reason is shown, never silently skipped."""
+    import numpy as np
+    from . import background_img as bimg
+    info = {"mode": "coherence", "applied": False, "layer": None, "reason": None,
+            "lo": qcfg["lo"], "hi": qcfg["hi"], "min_alpha": qcfg["min_alpha"]}
+    cands = coherence_candidates(layer)
+    if not cands:
+        info["reason"] = ("coherence validation needs a GUNW interferogram product; this layer has no coherence "
+                          "to validate against (GCOV and metadata layers have none)")
+        return None, info
+    found = next(((g, k) for k in cands for g in clip.grids.values() if k in g.layers), None)
+    if found is None:
+        info["reason"] = "this granule's clip has no coherenceMagnitude layer for this polarization"
+        return None, info
+    qg, qkey = found
+    info["layer"] = qkey
+    if grid is None or getattr(grid, "x", None) is None or getattr(grid, "y", None) is None:
+        info["reason"] = "the drawn layer has no grid axes to align the coherence to"
+        return None, info
+    q = bimg.finite_view(qg.layers[qkey], mask_int_fill=True)
+    same = qg is grid or (qg.epsg == grid.epsg and q.shape == tuple(view_shape)
+                          and np.array_equal(np.asarray(qg.x), np.asarray(grid.x))
+                          and np.array_equal(np.asarray(qg.y), np.asarray(grid.y)))
+    info["same_grid"] = bool(same)
+    if not same:
+        if qg.epsg != grid.epsg:
+            info["reason"] = (f"coherence is on EPSG:{qg.epsg} but the layer is on EPSG:{grid.epsg}; "
+                              "the engine does not reproject for validation")
+            return None, info
+        try:
+            q = bimg.resample_mean(q, qg.x, qg.y, grid.x, grid.y)
+        except ValueError as err:
+            info["reason"] = f"coherence could not be aligned to the layer's grid: {err}"
+            return None, info
+    if q.shape != tuple(view_shape):
+        info["reason"] = f"coherence shape {q.shape} does not match the drawn layer {tuple(view_shape)}"
+        return None, info
+    return q.astype(np.float32, copy=False), info
+
+
 def preview(source, *, gid: str, layer: str, bbox: tuple, max_px: int, cmap: str = "auto",
             scale: str = "auto", lo: float | None = None, hi: float | None = None,
-            use_cache: bool = True, cfg=None) -> dict:
+            use_cache: bool = True, cfg=None, quality: str = "off") -> dict:
     """-> {png: bytes, meta: {...}}. The meta is the engine's own statement about the array:
     shape/dtype/epsg/box/min-max/percentiles/nan fraction/wire bytes/cache hit, the scale and colour
     map actually used (+ what was requested), the unit (null = unknown), and the image's corner
@@ -381,6 +449,8 @@ def preview(source, *, gid: str, layer: str, bbox: tuple, max_px: int, cmap: str
         raise BackgroundError(400, f"cmap {cmap!r} not in {'|'.join(_CMAP_CHOICES)}")
     if scale not in _SCALE_CHOICES:
         raise BackgroundError(400, f"scale {scale!r} not in {'|'.join(_SCALE_CHOICES)}")
+    if quality not in _QUALITY_CHOICES:
+        raise BackgroundError(400, f"quality {quality!r} not in {'|'.join(_QUALITY_CHOICES)}")
     from .preview_cfg import PreviewConfigError, load_preview_config
     try:
         cfg = cfg or load_preview_config()
@@ -388,7 +458,9 @@ def preview(source, *, gid: str, layer: str, bbox: tuple, max_px: int, cmap: str
         raise BackgroundError(500, str(err))
     max_px = max(16, min(int(max_px or 256), _LAYER_CAP))
     fixed = check_range(lo, hi)           # explicit colour range, e.g. so two dates share one stretch
-    png_path, json_path = _cache_paths(gid, layer, bbox, max_px, cmap, scale, cfg.render_version, fixed)
+    qcfg = cfg.quality["coherence"]
+    qtoken = (f"coherence:{qcfg['lo']}:{qcfg['hi']}:{qcfg['min_alpha']}" if quality == "coherence" else "")
+    png_path, json_path = _cache_paths(gid, layer, bbox, max_px, cmap, scale, cfg.render_version, fixed, qtoken)
     if use_cache and json_path.exists() and png_path.exists():
         try:
             meta = json.loads(json_path.read_text())
@@ -404,15 +476,15 @@ def preview(source, *, gid: str, layer: str, bbox: tuple, max_px: int, cmap: str
         from engine.common.grids import edge_corners_lonlat
         from engine.common.layers import parse_layer_key
         ref, _dec = find_granule(source, gid, bbox)
-        clip, grid, arr, fr = _clip_of(source, ref, bbox, layer)
+        also = tuple(coherence_candidates(layer)) if quality == "coherence" else ()
+        clip, grid, arr, fr = _clip_of(source, ref, bbox, layer, also)
         from . import background_img as bimg
         info = parse_layer_key(layer).info
         kind = info.kind if info else None
         use_scale = cfg.resolve_scale(scale, kind)
         use_cmap = cfg.resolve_cmap(cmap, kind)
-        view = bimg.finite_view(arr)
-        if use_scale == "db":
-            view = bimg.to_db(view)
+        linear = bimg.finite_view(arr, mask_int_fill=True)
+        view = bimg.to_db(linear) if use_scale == "db" else linear
         note = bimg.slice_note(arr)
         finite = view[np.isfinite(view)]
         if finite.size == 0:
@@ -420,14 +492,39 @@ def preview(source, *, gid: str, layer: str, bbox: tuple, max_px: int, cmap: str
                                        f"layer {layer!r} is NaN / no-data here"
                                        + (" (values <= 0 have no dB value)" if use_scale == "db" else ""))
         shown, stride = bimg.decimate(view, max_px)
+        qinfo, alpha_shown, q_shown = {"mode": "off", "applied": False}, None, None
+        if quality == "coherence":
+            q_full, qinfo = _coherence_on_grid(clip, grid, layer, view.shape[-2:], qcfg)
+            if q_full is not None:
+                a_full = bimg.quality_alpha(q_full, qcfg["lo"], qcfg["hi"], qcfg["min_alpha"])
+                alpha_shown = a_full[::stride, ::stride] if stride > 1 else a_full
+                q_shown = q_full[::stride, ::stride] if stride > 1 else q_full
+                qinfo["applied"] = True
+        basis = shown
+        if alpha_shown is not None:
+            # the colour stretch must come from the pixels we trust: failed matches (saturated at a search-window
+            # limit, say) would otherwise stretch the scale and flatten the real signal they are being faded from
+            trusted = np.where(alpha_shown >= 0.5, shown, np.nan)
+            if int(np.isfinite(trusted).sum()) >= 25:
+                basis, qinfo["range_from"] = trusted, "pixels with coherence above the fade midpoint"
+            else:
+                qinfo["range_from"] = "all pixels (too few have usable coherence)"
         if use_cmap == "categorical":
             lo = hi = 0.0
             fixed = None                  # a categorical map has no range to fix
         elif fixed is not None:
             lo, hi = fixed
         else:
-            lo, hi = bimg.auto_range(shown, symmetric=(use_cmap == "diverging"))
-        body = bimg.render(shown, use_cmap, lo, hi)
+            lo, hi = bimg.auto_range(basis, symmetric=(use_cmap == "diverging"))
+        body = bimg.render(shown, use_cmap, lo, hi, alpha=alpha_shown)
+        if alpha_shown is not None:
+            okp = np.isfinite(shown)
+            if okp.any():
+                al = alpha_shown[okp]
+                qinfo["hidden_fraction"] = float(np.mean(al <= qcfg["min_alpha"] + 1e-6))
+                qinfo["faded_fraction"] = float(np.mean(al < 1.0 - 1e-6))
+                qinfo["unvalidated_fraction"] = float(np.mean(~np.isfinite(q_shown[okp])))
+        notes = _render_notes(finite, shown, use_cmap, lo, hi, fixed is not None)
         corners, corners_note = (None, "no grid axes for this layer")
         if grid is not None and getattr(grid, "x", None) is not None and getattr(grid, "y", None) is not None:
             if (len(grid.y), len(grid.x)) != tuple(view.shape[-2:]):
@@ -436,7 +533,8 @@ def preview(source, *, gid: str, layer: str, bbox: tuple, max_px: int, cmap: str
                 corners, corners_note = edge_corners_lonlat(grid.x, grid.y, int(grid.epsg), stride=int(stride))
         meta = {
             "id": gid, "layer": layer, "cmap": use_cmap, "cmap_requested": cmap,
-            "scale": use_scale, "scale_requested": scale, "unit": cfg.unit(use_scale),
+            "scale": use_scale, "scale_requested": scale,
+            "unit": cfg.unit(use_scale) or (dict(getattr(grid, "units", None) or {}).get(layer) if grid is not None else None),
             "render_version": cfg.render_version, "lo": lo, "hi": hi,
             "range_fixed": fixed is not None,
             "nan_fraction": float(1.0 - np.isfinite(view).mean()),
@@ -446,7 +544,11 @@ def preview(source, *, gid: str, layer: str, bbox: tuple, max_px: int, cmap: str
             "corners_lonlat": corners, "corners_note": corners_note,
             "requested_bbox": [float(v) for v in bbox],
             "slice_note": note,
-            "stats": bimg.stats(arr),
+            "notes": notes + _quality_notes(qinfo),
+            "quality": qinfo,
+            "nodata_rule": ("NaN / +-Inf; integer fill = dtype max (unsigned) or dtype min (signed)"
+                            + ("; values <= 0 (no dB value)" if use_scale == "db" else "")),
+            "stats": bimg.stats(arr, linear),
             "wire_bytes": {k: v for k, v in (fr.stats or {}).items() if isinstance(v, (int, float))},
             "clip_source": clip.source,
             "max_px_cap": _LAYER_CAP,
@@ -462,6 +564,50 @@ def preview(source, *, gid: str, layer: str, bbox: tuple, max_px: int, cmap: str
         return {"png": body, "meta": meta}
     finally:
         _PREVIEW_LOCK.release()
+
+
+def _render_notes(finite, shown, cmap: str, lo: float, hi: float, range_fixed: bool) -> list:
+    """Plain-language warnings about WHY an image may look empty, stated from numbers the engine just measured:
+    a colour range that misses the data, or one value that most pixels share. Never a verdict, only facts."""
+    import numpy as np
+    out: list = []
+    if cmap == "categorical" or finite.size == 0:
+        return out
+    dmin, dmax = float(finite.min()), float(finite.max())
+    if dmax < lo or dmin > hi:
+        out.append(f"the colour range {lo:g} … {hi:g} does not overlap the data ({dmin:g} … {dmax:g}): "
+                   "the image is one flat colour")
+    elif range_fixed and (hi - lo) > 0:
+        p2, p98 = (float(v) for v in np.percentile(finite, [2, 98]))
+        if (p98 - p2) < 0.02 * (hi - lo):
+            out.append(f"98 % of the data sits inside {p2:g} … {p98:g}, a sliver of the fixed colour range "
+                       f"{lo:g} … {hi:g}: the image looks flat")
+    mv, mf = bimg_modal(shown)
+    if mv is not None and mf >= 0.5:
+        out.append(f"{round(mf * 100)} % of the drawn pixels share one value ({mv:g})")
+    return out
+
+
+def _quality_notes(q: dict) -> list:
+    """Facts about what the coherence validation did (or why it did nothing), for the legend."""
+    if q.get("mode") != "coherence":
+        return []
+    if not q.get("applied"):
+        return [f"coherence validation not applied: {q.get('reason') or 'unknown reason'}"]
+    out = []
+    hid, un = q.get("hidden_fraction", 0.0), q.get("unvalidated_fraction", 0.0)
+    if hid >= 0.9:
+        out.append(f"coherence validation fades {round(hid * 100)}% of the pixels to near-transparent "
+                   f"(coherence ≤ {q['lo']:g}): almost nothing here is reliable")
+    if un >= 0.25:
+        out.append(f"{round(un * 100)}% of the pixels had no coherence value and were treated as unreliable")
+    return out
+
+
+def bimg_modal(shown) -> tuple:
+    import numpy as np
+    from . import background_img as bimg
+    return bimg.modal(shown[np.isfinite(shown)])
 
 
 def probe(source, *, gid: str, layer: str, lon: float, lat: float) -> dict:

@@ -39,7 +39,9 @@ export const bg = {
     p: { id: string; layer: string; west: number; south: number; east: number; north: number;
          maxPx?: number; cmap?: string; scale?: string; format?: "json";
          /** explicit colour range (engine units of meta.scale): both or neither */
-         lo?: number; hi?: number },
+         lo?: number; hi?: number;
+         /** "coherence": fade pixels by interferometric coherence (the engine decides how; GUNW layers only) */
+         quality?: "coherence" },
     signal?: AbortSignal,
   ): Promise<{ blob: Blob | null; meta: PreviewMeta }> => {
     const q = new URLSearchParams({
@@ -49,6 +51,7 @@ export const bg = {
     });
     if (p.format) q.set("format", p.format);
     if (p.lo != null && p.hi != null) { q.set("lo", String(p.lo)); q.set("hi", String(p.hi)); }
+    if (p.quality) q.set("quality", p.quality);
     const { bgFetch } = await import("./bgApi");
     const res = await bgFetch(`/api/background/preview?${q.toString()}`, { signal });
     if (!res.ok) {

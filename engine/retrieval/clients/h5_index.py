@@ -15,7 +15,7 @@ import numpy as np
 from .decode import SUPPORTED
 from .fsutil import replace_file
 
-INDEX_VERSION = 3
+INDEX_VERSION = 4       # 4: `fill` is the dataset's _FillValue attribute (NaN for floats), not h5py's default 0
 
 
 @dataclass
@@ -35,6 +35,7 @@ class LayerLayout:
     fast: bool
     reason: str = ""
     loaded: bool = True           # False until this layer's chunk table has been read
+    units: str | None = None      # the dataset's `units` attribute, verbatim; None = the file did not say
     _table: np.ndarray | None = field(default=None, repr=False)
 
     @property
@@ -101,7 +102,7 @@ class GranuleIndex:
                                    "dtype": dt.str if dt.fields is None else dt.descr,
                                    "chunks": list(l.chunks) if l.chunks else None, "filters": l.filters,
                                    "fill": l.fill, "fast": l.fast, "reason": l.reason,
-                                   "loaded": l.loaded})
+                                   "loaded": l.loaded, "units": l.units})
         arrs["meta"] = np.frombuffer(json.dumps(meta).encode(), dtype=np.uint8)
         path.parent.mkdir(parents=True, exist_ok=True)
         tmp = path.with_suffix(f".tmp{os.getpid()}-{threading.get_ident()}.npz")
@@ -127,7 +128,7 @@ class GranuleIndex:
                     l["path"], l["key"], l["grid"], tuple(l["shape"]), dt,
                     tuple(l["chunks"]) if l["chunks"] else None, l["filters"], l["fill"],
                     z[f"l{li}_origins"], z[f"l{li}_offsets"], z[f"l{li}_sizes"], z[f"l{li}_masks"],
-                    l["fast"], l["reason"], l.get("loaded", True))
+                    l["fast"], l["reason"], l.get("loaded", True), l.get("units"))
             return GranuleIndex(meta["granule"], meta["size"], grids, layers)
         except (OSError, KeyError, ValueError):
             return None
@@ -206,15 +207,62 @@ def build_index(h5, granule: str, size: int) -> GranuleIndex:
     return GranuleIndex(granule, size, grids, layers)
 
 
-def _layer(d, gl: GridLayout) -> LayerLayout:
+def declared_fill(d) -> float | None:
+    """The value that means "no data" in this dataset, in the order NISAR / HDF5 state it:
+
+      1. the `_FillValue` attribute (what the NISAR product spec declares: NaN for floats, 255 / 65535 for the
+         integer masks / connected components);
+      2. a fill value the file explicitly set on the dataset-creation property list;
+      3. NaN for floating-point layers (NISAR convention) - NEVER h5py's `d.fillvalue` when nothing was declared,
+         because that is the library default 0.0, and chunks the writer skipped (outside the swath) would then be
+         read as real zeros: "0 % no-data" over an empty area;
+      4. None (integers with no declaration: the caller keeps 0, as HDF5 itself would).
+    """
     dt = d.dtype
-    key = d.name.strip("/").replace("/", "__")
-    fill = None
+    if dt.fields is not None or dt.kind not in "fiub":
+        return None
     try:
-        fv = d.fillvalue
-        fill = float(fv) if dt.fields is None and dt.kind in "fiub" else None
+        if "_FillValue" in d.attrs:
+            v = np.asarray(d.attrs["_FillValue"]).reshape(-1)
+            if v.size:
+                return float(v[0])
     except Exception:
         pass
+    try:
+        import h5py
+        if d.id.get_create_plist().fill_value_defined() == h5py.h5d.FILL_VALUE_USER_DEFINED:
+            return float(d.fillvalue)
+    except Exception:
+        pass
+    return float("nan") if dt.kind == "f" else None
+
+
+def declared_units(d) -> str | None:
+    """The dataset's `units` attribute exactly as the file states it (bytes / 1-element arrays decoded); None when
+    absent or empty. The engine repeats it, never guesses one."""
+    try:
+        if "units" not in d.attrs:
+            return None
+        v = np.asarray(d.attrs["units"]).reshape(-1)
+        if not v.size:
+            return None
+        u = v[0]
+        u = u.decode("utf-8", "replace") if isinstance(u, (bytes, np.bytes_)) else str(u)
+        return u.strip() or None
+    except Exception:
+        return None
+
+
+def _layer(d, gl: GridLayout) -> LayerLayout:
+    lay = _layer_unitless(d, gl)
+    lay.units = declared_units(d)
+    return lay
+
+
+def _layer_unitless(d, gl: GridLayout) -> LayerLayout:
+    dt = d.dtype
+    key = d.name.strip("/").replace("/", "__")
+    fill = declared_fill(d)
     empty = dict(origins=np.zeros((0, d.ndim), np.int64), offsets=np.zeros(0, np.int64),
                  sizes=np.zeros(0, np.int64), masks=np.zeros(0, np.uint32))
     if d.chunks is None:

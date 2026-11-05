@@ -31,3 +31,37 @@ export function fmtNum(v: number): string {
   if (a >= 1e5 || a < 1e-3) return v.toExponential(2);
   return String(Number(v.toPrecision(4)));
 }
+
+/** Share of a fraction as text that never rounds a real, non-zero amount down to "0%". */
+export function fmtShare(f: number | null | undefined): string {
+  if (f == null || !Number.isFinite(f)) return "—";
+  if (f <= 0) return "0%";
+  if (f < 0.01) return "<1%";
+  return `${Math.round(f * 100)}%`;
+}
+
+/** What coherence validation did, in words: "faded below coherence 0.6 · 48% nearly transparent". "" when off. */
+export function qualityLegend(q: { mode?: string; applied?: boolean; hi?: number; lo?: number;
+                                   hidden_fraction?: number } | null | undefined): string {
+  if (!q || q.mode !== "coherence" || !q.applied) return "";
+  return `faded below coherence ${fmtNum(q.hi ?? 0)} · ${fmtShare(q.hidden_fraction)} nearly transparent (≤ ${fmtNum(q.lo ?? 0)})`;
+}
+
+/** One legend line for an engine preview: colour map, scale, the colour range (marked when it was fixed rather
+ *  than stretched from the image), the DATA's own min…max (so a range that misses the data is visible at a
+ *  glance), the unit and the no-data share. Display only: every number comes from the engine's metadata. */
+export function previewLegend(m: {
+  cmap?: string | null; scale?: string | null; lo?: number | null; hi?: number | null; unit?: string | null;
+  range_fixed?: boolean; nan_fraction?: number | null;
+  stats?: { min: number | null; max: number | null } | null;
+}): string {
+  const n = (v: number | null | undefined) => (v == null ? "—" : fmtNum(v));
+  const parts = [
+    m.cmap || "—", m.scale || "—",
+    `colours ${n(m.lo)} … ${n(m.hi)}${m.range_fixed ? " (fixed)" : ""}`,
+    `data ${n(m.stats?.min)} … ${n(m.stats?.max)}`,
+    `unit ${m.unit || "—"}`,
+    `no-data ${fmtShare(m.nan_fraction)}`,
+  ];
+  return parts.join(" · ");
+}

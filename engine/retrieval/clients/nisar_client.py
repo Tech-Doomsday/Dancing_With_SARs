@@ -87,6 +87,22 @@ def plan_chunks(layer: LayerLayout, ys: slice, xs: slice) -> list[tuple[int, tup
     return [(int(t[c]), c) for c in iproduct(*rngs)]
 
 
+def _empty_clip_array(shape: tuple, L: LayerLayout) -> np.ndarray:
+    """The clip array before any chunk is placed. Chunks the writer never allocated stay at the layer's declared
+    no-data value (NaN for floats). A fill that cannot be represented in the dtype (NaN in an integer layer,
+    65535 in uint8) falls back to 0 instead of raising or wrapping around silently."""
+    if L.dtype.fields is not None:
+        return np.zeros(shape, L.dtype)
+    fill = L.fill
+    if fill is None:
+        return np.zeros(shape, L.dtype)
+    if L.dtype.kind in "iu":
+        info = np.iinfo(L.dtype)
+        if not (np.isfinite(fill) and float(fill).is_integer() and info.min <= fill <= info.max):
+            return np.zeros(shape, L.dtype)
+    return np.full(shape, fill, dtype=L.dtype)
+
+
 class RetrievalCancelled(Exception):
     """Raised inside a granule's fetch when the retrieval was cancelled; nothing partial is stored as a clip."""
 
@@ -556,7 +572,8 @@ class NisarClient:
                 lk = grp[k].attrs.get("layer_key")
                 if lk is not None:
                     lay[lk] = np.asarray(grp[k][:])
-            grids[key] = GridClip(key, int(grp.attrs["epsg"]), np.asarray(grp["x"][:]), np.asarray(grp["y"][:]), extras, lay)
+            grids[key] = GridClip(key, int(grp.attrs["epsg"]), np.asarray(grp["x"][:]), np.asarray(grp["y"][:]), extras, lay,
+                                  dict(grp.attrs.get("units", {}) or {}))
         return GranuleClip(g, tuple(bbox), grids, source)
 
     # ---------------------------------------------------------------- layout index
@@ -742,12 +759,13 @@ class NisarClient:
             gc = GridClip(gl.key, gl.epsg, gl.x[xs], gl.y[ys], dict(gl.extras), {})
             out_grids[gl.key] = gc
             for L in sel:
+                if L.units:
+                    gc.units[L.key] = L.units
                 if not L.fast:
                     slow.append((gc, L, ys, xs))
                     continue
                 shape = L.shape[:-2] + (ys.stop - ys.start, xs.stop - xs.start)
-                fill = L.fill if L.fill is not None else 0
-                arr = np.full(shape, fill, dtype=L.dtype) if L.dtype.fields is None else np.zeros(shape, L.dtype)
+                arr = _empty_clip_array(shape, L)
                 gc.layers[L.key] = arr
                 for ci, coord in plan_chunks(L, ys, xs):
                     if ci >= 0:
