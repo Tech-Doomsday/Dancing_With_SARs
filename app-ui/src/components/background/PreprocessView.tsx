@@ -172,13 +172,17 @@ function TraceView({ payload }: { payload: PreprocessingResponse }) {
                 </span>
                 <span className="font-mono text-[10px] text-[#8b949e]">{s.seconds.toFixed(2)} s</span>
                 <span className="text-[10px] text-[#5a636e]">
-                  wrote {s.arrays.length} array{s.arrays.length === 1 ? "" : "s"}
+                  {s.inputs === undefined && s.arrays.length === 0
+                    ? "no images stored"
+                    : `in ${(s.inputs ?? []).length} · out ${s.arrays.length} image${s.arrays.length === 1 ? "" : "s"}`}
                 </span>
               </button>
               {open && (
                 <div className="border-t border-[#262c36] px-3 py-2 text-[10.5px]">
                   <p><span className="text-[#8b949e]">read:</span> {s.reads?.length ? s.reads.join(", ") : "— (always runs)"}</p>
-                  <p><span className="text-[#8b949e]">wrote:</span> {s.arrays.length ? s.arrays.map((a) => a.label).join(", ") : "no arrays recorded"}</p>
+                  <p><span className="text-[#8b949e]">wrote:</span> {s.arrays.length
+                    ? `${s.arrays.slice(0, 8).map((a) => a.label).join(", ")}${s.arrays.length > 8 ? ` … +${s.arrays.length - 8} more` : ""}`
+                    : "no arrays recorded"}</p>
                   {s.message && <p><span className="text-[#8b949e]">message:</span> {s.message}</p>}
                   {s.new_flags.length > 0 && (
                     <p><span className="text-[#8b949e]">flags:</span>{" "}
@@ -192,14 +196,13 @@ function TraceView({ payload }: { payload: PreprocessingResponse }) {
                   {s.new_assumptions.length > 0 && (
                     <p><span className="text-[#8b949e]">assumptions:</span> {s.new_assumptions.join(" · ")}</p>
                   )}
-                  {/* arrays as images (hover probe, click to enlarge) */}
-                  {s.arrays.length > 0 && (
-                    <div className="mt-2 grid grid-cols-2 gap-2 sm:grid-cols-3 lg:grid-cols-4">
-                      {s.arrays.map((a) => (
-                        <TraceArrayCard key={a.aid} meta={a} runId={payload.run.id} onZoom={setZoom} />
-                      ))}
-                    </div>
-                  )}
+                  {/* the exact images going in and coming out of this step (hover probe, click to enlarge) */}
+                  <ArraySection title={`INPUT — what ${s.code} received`} arrays={s.inputs ?? []} runId={payload.run.id} onZoom={setZoom}
+                    empty={s.inputs === undefined
+                      ? "not recorded (this run has no live trace)"
+                      : `no array inputs — ${s.code} reads ${s.reads?.length ? s.reads.join(", ") : "nothing array-shaped"}`} />
+                  <ArraySection title={`OUTPUT — what ${s.code} wrote`} arrays={s.arrays} runId={payload.run.id} onZoom={setZoom}
+                    empty="this step wrote no arrays" />
                 </div>
               )}
             </li>
@@ -280,6 +283,45 @@ function TraceView({ payload }: { payload: PreprocessingResponse }) {
             </p>
           </div>
         </div>
+      )}
+    </div>
+  );
+}
+
+const FIRST_BATCH = 8;
+
+/** A labelled gallery of array images. Only the first batch mounts (each card fetches its own PNG), "show all" mounts
+ *  the rest: a step can hold 100+ arrays and must not fire 100 requests at once. */
+function ArraySection({ title, arrays, runId, onZoom, empty }: {
+  title: string;
+  arrays: TraceArrayMeta[];
+  runId: string | null;
+  onZoom: (z: { runId: string | null; aid: string; meta: TraceArrayMeta }) => void;
+  empty: string;
+}) {
+  const [all, setAll] = useState(false);
+  const shown = all ? arrays : arrays.slice(0, FIRST_BATCH);
+  return (
+    <div className="mt-3">
+      <h3 className="text-[10px] font-semibold uppercase tracking-wide text-[#7fd8e6]">
+        {title} <span className="font-normal normal-case text-[#5a636e]">({arrays.length})</span>
+      </h3>
+      {arrays.length === 0 ? (
+        <p className="mt-1 text-[10px] text-[#5a636e]">{empty}</p>
+      ) : (
+        <>
+          <div className="mt-1 grid grid-cols-2 gap-2 sm:grid-cols-3 lg:grid-cols-4">
+            {shown.map((a) => (
+              <TraceArrayCard key={a.aid} meta={a} runId={runId} onZoom={onZoom} />
+            ))}
+          </div>
+          {arrays.length > FIRST_BATCH && (
+            <button type="button" onClick={() => setAll((v) => !v)}
+              className="mt-1.5 rounded border border-[#333b47] px-2 py-0.5 text-[10px] text-[#cfd6dc] hover:bg-[#1c222b]">
+              {all ? `show first ${FIRST_BATCH}` : `show all ${arrays.length}`}
+            </button>
+          )}
+        </>
       )}
     </div>
   );

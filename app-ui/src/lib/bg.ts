@@ -4,6 +4,7 @@
  *  The bearer token rides the Authorization header (never a URL); preview PNGs are fetched as
  *  blobs for the same reason. Types mirror the engine shapes in lib/types.ts. */
 import { bgGet } from "./bgApi";
+import { EngineError } from "./engineFetch";
 import type {
   BackgroundGroup,
   ExplainPayload,
@@ -29,6 +30,49 @@ export class PreviewHttpError extends Error {
   }
 }
 
+/** Why a failed preview attempt is worth retrying (a plain-language reason), or null when retrying cannot help. */
+export function transientReason(err: unknown): string | null {
+  if (err instanceof PreviewHttpError) {
+    if (err.status === 409) return "the engine is busy with another read";
+    if (err.status === 429) return "the engine asked for a short pause";
+    if (err.status === 502 || err.status === 504 || (err.status >= 520 && err.status <= 530))
+      return "the connection dropped while the engine kept working";
+    return null;                                    // 400/404/422/500: the request itself is the problem
+  }
+  if (err instanceof EngineError) {
+    if (err.kind === "timeout") return "the engine is still reading from NASA";
+    if (err.kind === "unreachable") return "the engine cannot be reached right now";
+  }
+  return null;
+}
+
+function sleepAbortable(ms: number, signal?: AbortSignal): Promise<void> {
+  return new Promise((resolve, reject) => {
+    if (signal?.aborted) { reject(new DOMException("aborted", "AbortError")); return; }
+    const t = setTimeout(() => { signal?.removeEventListener("abort", onAbort); resolve(); }, ms);
+    const onAbort = () => { clearTimeout(t); reject(new DOMException("aborted", "AbortError")); };
+    signal?.addEventListener("abort", onAbort, { once: true });
+  });
+}
+
+/** Run `attempt` until it succeeds. Only transient failures are retried (backoff 1.5 s -> 5 s, or the engine's own
+ *  Retry-After); anything else, and an abort, is thrown straight away. No attempt limit and no total time limit. */
+export async function patiently<T>(attempt: () => Promise<T>, signal?: AbortSignal,
+                                   onWait?: (why: string) => void): Promise<T> {
+  for (let n = 0; ; n++) {
+    try {
+      return await attempt();
+    } catch (err) {
+      if (signal?.aborted) throw err;
+      const why = transientReason(err);
+      if (why === null) throw err;
+      onWait?.(why);
+      const hinted = err instanceof PreviewHttpError && err.retryAfterS ? err.retryAfterS * 1000 : 0;
+      await sleepAbortable(Math.max(hinted, Math.min(1500 * (n + 1), 5000)), signal);
+    }
+  }
+}
+
 export const bg = {
   granule: (id: string, signal?: AbortSignal) =>
     bgGet<GranuleDetailResponse>(
@@ -41,9 +85,16 @@ export const bg = {
          /** explicit colour range (engine units of meta.scale): both or neither */
          lo?: number; hi?: number;
          /** "coherence": fade pixels by interferometric coherence (the engine decides how; GUNW layers only) */
-         quality?: "coherence" },
+         quality?: "coherence";
+         /** keep trying - no time limit - while the engine is busy, the connection drops or a read is slow;
+          *  stops only on success, a real error (bad request, no token) or the AbortSignal */
+         patient?: boolean;
+         /** patient mode: why it is still waiting (shown to the person), called before every wait */
+         onWait?: (why: string) => void },
     signal?: AbortSignal,
+    longWait = false,
   ): Promise<{ blob: Blob | null; meta: PreviewMeta }> => {
+    if (p.patient) return patiently(() => bg.previewBlob({ ...p, patient: false }, signal, true), signal, p.onWait);
     const q = new URLSearchParams({
       id: p.id, layer: p.layer,
       west: String(p.west), south: String(p.south), east: String(p.east), north: String(p.north),
@@ -53,7 +104,8 @@ export const bg = {
     if (p.lo != null && p.hi != null) { q.set("lo", String(p.lo)); q.set("hi", String(p.hi)); }
     if (p.quality) q.set("quality", p.quality);
     const { bgFetch } = await import("./bgApi");
-    const res = await bgFetch(`/api/background/preview?${q.toString()}`, { signal });
+    const res = await bgFetch(`/api/background/preview?${q.toString()}`, { signal },
+                              longWait ? { timeoutMs: 10 * 60_000 } : undefined);
     if (!res.ok) {
       const body = await res.json().catch(() => ({}));
       throw new PreviewHttpError(

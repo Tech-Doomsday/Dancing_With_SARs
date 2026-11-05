@@ -462,7 +462,10 @@ export interface PreprocessingTrace {
     new_assumptions: string[];
     n_arrays_total: number;
     reads?: string[];
+    /** the arrays this step WROTE (the exact versions it produced) */
     arrays: TraceArrayMeta[];
+    /** the arrays this step RECEIVED (the exact versions as they stood before it ran); absent on cached bundles */
+    inputs?: TraceArrayMeta[];
   }[];
   arrays: Record<string, TraceArrayMeta>;
   n_arrays?: number;

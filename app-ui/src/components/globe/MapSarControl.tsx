@@ -135,7 +135,7 @@ export default function MapSarControl({ granuleId, bbox, onOverlay }: {
       )}
       {on && img.busy && (
         <p role="status" className="mt-1 text-[10px] text-[#8a837b]">
-          drawing… {waited}s (the engine reads only this tile&apos;s pixels from NASA, then colours them)
+          drawing… {waited}s (the engine reads only this tile&apos;s pixels from NASA, then colours them){img.wait ? ` — ${img.wait}, still trying` : ""}
         </p>
       )}
       {on && img.message && !gate && <p role="alert" className="mt-1 text-[10px] text-[#9e3b2c]">{img.message}</p>}

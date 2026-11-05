@@ -90,7 +90,7 @@ export default function SarOverlayControl({ granuleId, bbox, inventory, onOverla
           <input type="range" min={0.1} max={1} step={0.05} value={opacity} onChange={(e) => setOpacity(Number(e.target.value))} />
         </label>
       </div>
-      {img.busy && <p role="status" className="mt-1 text-[#8b949e]">drawing…</p>}
+      {img.busy && <p role="status" className="mt-1 text-[#8b949e]">drawing…{img.wait ? ` ${img.wait}, still trying` : ""}</p>}
       {img.message && <p role="alert" className="mt-1 text-[#e8a087]">{img.message}</p>}
       {meta && !img.message && !img.busy && (
         <p className="mt-1 font-mono text-[#8b949e]" data-testid="sar-legend">

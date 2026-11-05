@@ -4,6 +4,7 @@
  *  (DEC5): granule search is not cached in Supabase, so offline it says so plainly. Read-only
  *  discovery: it never triggers a scan. Loading/empty/error states follow the honesty rules. */
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import Link from "next/link";
 import { api } from "@/lib/api";
 import { useEngineUrl } from "@/lib/engineUrl";
@@ -29,6 +30,8 @@ export interface DataPanelProps {
   onFootprintOnMap: (ring: [number, number][] | null, fit?: boolean) => void;
   /** a georeferenced SAR image of the selected granule, drawn by the map (null = remove) */
   onSarOverlay?: (o: OverlaySpec | null) => void;
+  /** DOM node of the bottom dock the timeline is drawn into; undefined = no dock (draw it inline), null = dock not mounted yet */
+  timelineHost?: HTMLElement | null;
 }
 
 export default function DataPanel(props: DataPanelProps) {
@@ -255,23 +258,37 @@ export default function DataPanel(props: DataPanelProps) {
               {data.search_incomplete ? "ASF/CMR returned a short listing even after a retry: some granules may be missing (see flags below)" : "degraded search: results may be incomplete (see flags below)"}
             </p>
           )}
-          <GranuleTimeline
-            verdictUse={props.verdictUse}
-            data={data}
-            selection={selection}
-            onSelect={(sel) => {
-              setSelection(sel);
-              if (!sel) {
-                props.onFootprintOnMap(null);
-                return;
-              }
-              const stack = data.stacks[sel.stackKey];
-              if (!stack) return;
-              const ring = sel.kind === "gunw" ? stack.gunw[sel.index]?.footprint : stack.gcov[sel.index]?.footprint;
-              props.onFootprintOnMap(sel.kind === "gunw" ? ring ?? null : null);
-            }}
-            onWindowChange={(from, to) => setQuery({ from, to })}
-          />
+          {(() => {
+            const timeline = (
+              <GranuleTimeline
+                verdictUse={props.verdictUse}
+                data={data}
+                selection={selection}
+                onSelect={(sel) => {
+                  setSelection(sel);
+                  if (!sel) {
+                    props.onFootprintOnMap(null);
+                    return;
+                  }
+                  const stack = data.stacks[sel.stackKey];
+                  if (!stack) return;
+                  const ring = sel.kind === "gunw" ? stack.gunw[sel.index]?.footprint : stack.gcov[sel.index]?.footprint;
+                  props.onFootprintOnMap(sel.kind === "gunw" ? ring ?? null : null);
+                }}
+                onWindowChange={(from, to) => setQuery({ from, to })}
+              />
+            );
+            // undefined = no dock (phone): inline in the sheet. null = dock not mounted yet: draw nothing this frame
+            // (drawing inline first and then moving it would reset the timeline's zoom/pan state).
+            if (props.timelineHost === undefined) return timeline;
+            if (props.timelineHost === null) return null;
+            return createPortal(
+              <div className="pointer-events-auto max-h-[42vh] overflow-y-auto rounded-2xl border border-[#e7e2da] bg-[#faf9f6]/97 p-3 shadow-xl backdrop-blur">
+                {timeline}
+              </div>,
+              props.timelineHost,
+            );
+          })()}
           {Object.keys(data.search_errors).length > 0 && (
             <div className="rounded-lg border border-[#b08d57]/40 bg-[#f7f2e7] px-3 py-2 text-[11px] text-[#7a6438]">
               {Object.entries(data.search_errors).map(([prod, reason]) => (

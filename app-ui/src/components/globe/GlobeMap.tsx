@@ -191,8 +191,8 @@ export default function GlobeMap(props: GlobeMapProps) {
                      paint: { "line-color": "#9e3b2c", "line-width": 2.5, "line-dasharray": [2, 1.5] } });
       // §7.2 bottom-right: zoom + compass, scale, attribution — with the engine's Esri
       // attribution already bound to the raster source
-      map.addControl(new maplibregl.NavigationControl({ showCompass: true, visualizePitch: false }), "bottom-right");
-      map.addControl(new maplibregl.ScaleControl({ maxWidth: 96, unit: "metric" }), "bottom-right");
+      map.addControl(new maplibregl.NavigationControl({ showCompass: true, visualizePitch: false }), "top-right");
+      map.addControl(new maplibregl.ScaleControl({ maxWidth: 96, unit: "metric" }), "top-right");
       const c0 = map.getCenter().wrap();      // remember the camera the map actually opened at
       saveCamera({ center: [c0.lng, c0.lat], zoom: map.getZoom(), projection: cbRef.current.flat ? "mercator" : "globe" });
       setReady(true);

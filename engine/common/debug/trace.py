@@ -66,6 +66,9 @@ class Trace:
     arrays: dict = field(default_factory=dict)
     bundle: object = None
     tracer_errors: list = field(default_factory=list)
+    # step code -> (inputs, outputs): the exact ArrayRec versions the step received / wrote (kept off StepSnap on
+    # purpose: dataclasses.asdict(StepSnap) feeds the debug report and must not deep-copy thumbnails)
+    step_io: dict = field(default_factory=dict)
 
 
 # ---------------------------------------------------------------------------------------------
@@ -214,6 +217,12 @@ class Tracer:
             self.trace.tracer_errors.append(f"{step.code}: {type(ex).__name__}: {ex}")
 
     def _observe(self, step, ctx, rec):
+        # exact input of this step = the arrays of the context groups it `needs`, AS THEY STOOD BEFORE it ran
+        # (self.trace.arrays still holds the pre-step versions here), plus the pre-step version of every array the
+        # step then changes. Records are replaced, never mutated, so these references stay exact.
+        needs = tuple(getattr(step, "needs", ()) or ())
+        inputs = [r for r in self.trace.arrays.values() if r.group in needs]
+        outputs: list = []
         found: list = []
         for r in ROOTS:
             _walk(getattr(ctx, r, None), [r], found, None)
@@ -236,6 +245,10 @@ class Tracer:
                     new.first_step, new.history = old.first_step, old.history + new.history
                 self.trace.arrays[key] = new
                 changed.append(key)
+                outputs.append(new)
+                if old is not None and not any(old is r for r in inputs):
+                    inputs.append(old)
+        self.trace.step_io[step.code] = (inputs, outputs)
         flags = [{"code": f.code, "severity": f.severity, "message": f.message} for f in ctx.flags[self._seen_flags:]]
         self._seen_flags = len(ctx.flags)
         assume = list(ctx.assumptions[self._seen_assume:])

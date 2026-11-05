@@ -39,9 +39,11 @@ export interface SarImage {
   message: string | null;
   /** set when the engine answered 401 / gate-503; the caller decides what to show */
   gate: "unauthorized" | "unconfigured" | null;
+  /** while busy: why the engine is still working / being retried ("the engine is busy with another read"); no time limit */
+  wait: string | null;
 }
 
-const IDLE: SarImage = { url: null, corners: null, meta: null, busy: false, message: null, gate: null };
+const IDLE: SarImage = { url: null, corners: null, meta: null, busy: false, message: null, gate: null, wait: null };
 
 export function useSarImage(p: SarImageParams): SarImage {
   const [state, setState] = useState<SarImage>(IDLE);
@@ -62,12 +64,14 @@ export function useSarImage(p: SarImageParams): SarImage {
     }
     const box = p.bbox;
     const ctrl = new AbortController();
-    setState((s) => ({ ...s, busy: true, message: null, gate: null }));
+    setState((s) => ({ ...s, busy: true, message: null, gate: null, wait: null }));
     bg.previewBlob({
       id: p.granuleId, layer: p.layerKey, west: box[0], south: box[1], east: box[2], north: box[3],
       maxPx: p.maxPx ?? 512, scale: p.scale ?? "auto", cmap: p.cmap ?? "auto",
       ...(p.lo != null && p.hi != null ? { lo: p.lo, hi: p.hi } : {}),
       ...(p.validate ? { quality: "coherence" as const } : {}),
+      patient: true,                         // no time limit: keep trying until it is drawn or the person moves on
+      onWait: (why) => { if (!ctrl.signal.aborted) setState((s) => ({ ...s, wait: why })); },
     }, ctrl.signal)
       .then(({ blob, meta }) => {
         if (ctrl.signal.aborted) return;

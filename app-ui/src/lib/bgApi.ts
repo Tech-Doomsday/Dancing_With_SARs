@@ -65,14 +65,15 @@ export function setToken(token: string): void {
 /** fetch with the bearer header when a token is held. 401 -> GateError("unauthorized"); 503 whose
  *  engine text names NISAR_BACKGROUND_TOKEN -> GateError("unconfigured"); any other 503 ->
  *  EngineUnavailableError with the engine's verbatim text (not a gate problem). */
-export async function bgFetch(path: string, init?: RequestInit & { signal?: AbortSignal }): Promise<Response> {
+export async function bgFetch(path: string, init?: RequestInit & { signal?: AbortSignal },
+                              opts?: { timeoutMs?: number }): Promise<Response> {
   const token = getToken();
   const headers = new Headers(init?.headers);
   if (token) headers.set("Authorization", `Bearer ${token}`);
   // paths are engine-relative ("/api/..."); resolve them against the engine in use
   const url = /^https?:\/\//i.test(path) ? path : `${engineBase()}${path}`;
   // transport failures / timeouts become an EngineError that says what failed and what to do
-  const res = await engineFetch(url, { ...init, headers }, { timeoutMs: ENGINE_LONG_MS });
+  const res = await engineFetch(url, { ...init, headers }, { timeoutMs: opts?.timeoutMs ?? ENGINE_LONG_MS });
   if (res.status === 401) {
     throw new GateError("unauthorized", await engineText(res, "missing or wrong background token"));
   }

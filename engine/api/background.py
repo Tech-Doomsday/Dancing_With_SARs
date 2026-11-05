@@ -699,7 +699,6 @@ def build_trace_payload(tracer, bundle) -> dict:
     from engine.common.chain import STEPS
     needs_of = {s.code: list(s.needs) for s in STEPS}
     steps = []
-    arrays: dict[str, dict] = {}
     for snap in tracer.trace.steps:
         steps.append({
             "code": snap.code, "name": snap.name, "status": snap.status,
@@ -707,22 +706,30 @@ def build_trace_payload(tracer, bundle) -> dict:
             "new_flags": list(snap.new_flags), "new_assumptions": list(snap.new_assumptions),
             "n_arrays_total": int(snap.n_arrays_total),
             "reads": needs_of.get(snap.code, []),
-            "arrays": [a for a in (arrays.get(p) for p in snap.arrays) if a],
+            # filled by register_trace once every array version has an id (this list used to be built from an
+            # empty dict here, so every step reported "wrote 0 arrays" even when the tracer had recorded hundreds)
+            "arrays": [], "inputs": [],
         })
-    return {"steps": steps, "arrays": arrays, "_recs": dict(tracer.trace.arrays)}
+    return {"steps": steps, "arrays": {}, "_recs": dict(tracer.trace.arrays),
+            "_step_io": dict(getattr(tracer.trace, "step_io", {}))}
 
 
 def register_trace(runner: "JobRunnerLike", run_id: str, payload: dict) -> dict:
     """Split the tracer's arrays into (endpoint-visible meta, in-memory records) and bind them
     to the run. The records are evicted with the run's state."""
     from .background_img import finite_view, slice_note, stats as img_stats
+    from engine.common.grids import extent_corners_lonlat
     recs = payload.pop("_recs")
+    step_io = payload.pop("_step_io", {})
     meta: dict[str, dict] = {}
     store: dict[str, object] = {}
-    for i, (path, rec) in enumerate(sorted(recs.items()), start=1):
-        aid = f"t{i}"
+    aid_of: dict[int, str] = {}        # id(ArrayRec) -> aid: one id per exact version, shared by every step that shows it
+
+    def add(path: str, rec) -> str:
+        if id(rec) in aid_of:
+            return aid_of[id(rec)]
+        aid = f"t{len(meta) + 1}"
         view = finite_view(rec.thumb)
-        from engine.common.grids import extent_corners_lonlat
         corners, corners_note = extent_corners_lonlat(rec.extent, rec.epsg, stride=int(rec.stride), shape=rec.shape)
         m = {
             "corners_lonlat": corners, "corners_note": corners_note,
@@ -738,10 +745,23 @@ def register_trace(runner: "JobRunnerLike", run_id: str, payload: dict) -> dict:
         }
         meta[aid] = m
         store[aid] = rec
+        aid_of[id(rec)] = aid
+        return aid
+
+    for path, rec in sorted(recs.items()):            # the latest version of every array first (ids as before)
+        add(path, rec)
+    n_latest = len(meta)
+    for ins, outs in step_io.values():                # then the exact versions each step received / wrote
+        for rec in (*ins, *outs):
+            add(rec.path, rec)
+    for s in payload.get("steps", []):
+        ins, outs = step_io.get(s["code"], ([], []))
+        s["inputs"] = [meta[aid_of[id(r)]] for r in ins]
+        s["arrays"] = [meta[aid_of[id(r)]] for r in outs]
     with runner._lock:      # trace_arrays is read/evicted under this lock by the other threads
         runner.trace_arrays[run_id] = store
     payload["arrays"] = meta
-    payload["n_arrays"] = len(meta)
+    payload["n_arrays"] = n_latest                     # distinct arrays; `arrays` also holds earlier versions
     return payload
 
 

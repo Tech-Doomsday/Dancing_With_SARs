@@ -13,7 +13,7 @@ import type { ExplorerGranule, PreviewMeta } from "@/lib/types";
 import { dash } from "@/lib/explainCache";
 
 export type PaneState =
-  | { s: "loading" }
+  | { s: "loading"; wait?: string }
   | { s: "image"; url: string; meta: PreviewMeta }
   | { s: "empty"; text: string }          // no acquisition at this date
   | { s: "error"; text: string };         // preview unavailable: <engine error text>
@@ -54,7 +54,9 @@ export default function PreviewPane({ granule, layer, box, maxPx, cmap, scale = 
     abortRef.current = ctrl;
     setState({ s: "loading" });
     setProbe(null);
-    bg.previewBlob({ id: granule.id, layer, west: box[0], south: box[1], east: box[2], north: box[3], maxPx, cmap, scale }, ctrl.signal)
+    bg.previewBlob({ id: granule.id, layer, west: box[0], south: box[1], east: box[2], north: box[3], maxPx, cmap, scale,
+                    patient: true,
+                    onWait: (why) => { if (!ctrl.signal.aborted) setState({ s: "loading", wait: why }); } }, ctrl.signal)
       .then(({ blob, meta }) => {
         if (ctrl.signal.aborted) return;
         if (urlRef.current) URL.revokeObjectURL(urlRef.current);
@@ -151,7 +153,7 @@ export default function PreviewPane({ granule, layer, box, maxPx, cmap, scale = 
         {state.s === "loading" && (
           <div className="flex h-full items-center justify-center gap-2 p-4 text-xs text-[#8b949e]" role="status" aria-live="polite">
             <span className="h-3 w-3 animate-spin rounded-full border-2 border-[#3fb6c9] border-t-transparent" aria-hidden />
-            fetching the preview (clipped to the box, engine-side)…
+            fetching the preview (clipped to the box, engine-side){state.wait ? ` — ${state.wait}, still trying` : ""}…
           </div>
         )}
         {state.s === "empty" && (

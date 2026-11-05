@@ -43,7 +43,6 @@ import re
 import threading
 from pathlib import Path
 
-from concurrent.futures import TimeoutError as FuturesTimeout
 
 from fastapi import APIRouter, Header, HTTPException, Query, Response
 
@@ -127,13 +126,11 @@ def _run_bg(fn, *args, preview_window: bool = False, **kwargs):
     runner = get_runner()
     fut = runner._meta_pool.submit(fn, *args, **kwargs)     # metadata lane: never queued behind a scan/retrieval
     try:
-        return fut.result(timeout=25.0)
+        # No deadline: a first read of a granule from NASA can take minutes and the person wants the result, not a
+        # "try again". (It used to give up after 25 s with a 504 while the work carried on in the background.)
+        return fut.result()
     except BackgroundError as ex:
         raise HTTPException(status_code=ex.status, detail={"ok": False, "error": str(ex)}) from ex
-    except FuturesTimeout as ex:
-        raise HTTPException(status_code=504, detail={
-            "ok": False, "error": ("this read from NASA did not finish within 25 s (the engine keeps working on it; "
-                                   "ask again in a moment and it will usually be served from cache)")}) from ex
 
 
 def _run_local(fn, *args, **kwargs):

@@ -110,6 +110,8 @@ export default function GlobeApp() {
   const [webglMsg, setWebglMsg] = useState<string | null>(null);
   const [reducedMotion, setReducedMotion] = useState(false);
   const [isNarrow, setIsNarrow] = useState(false);
+  // the Data tab's timeline is drawn into this bottom dock (React portal: its state stays in DataPanel)
+  const [timelineHostEl, setTimelineHostEl] = useState<HTMLElement | null>(null);
   const zoomRef = useRef<number | undefined>(undefined);
   const pinRef = useRef<[number, number] | null>(null);
   useEffect(() => { pinRef.current = pin; }, [pin]);
@@ -805,6 +807,7 @@ export default function GlobeApp() {
             if (ring && fit) setFitFootprintKey((k) => k + 1);
           }}
           onSarOverlay={setSarSpec}
+          timelineHost={isNarrow ? undefined : timelineHostEl}
         />
       )}
     </>
@@ -850,8 +853,8 @@ export default function GlobeApp() {
         </div>
       )}
 
-      {/* top-left floating nav + search pill */}
-      <div className="pointer-events-none absolute left-3 top-3 z-30 flex flex-col gap-2">
+      {/* left column: nav + search pill + the panel (Explore / Pin / Results / Data); on a phone the panel is the bottom sheet */}
+      <div className={`pointer-events-none absolute left-3 top-3 z-30 flex flex-col gap-2${isNarrow ? "" : " bottom-3 w-[400px]"}`}>
         <div className="pointer-events-auto w-fit rounded-xl border border-[#262c36] bg-[#0e1116]/95 px-3 py-2 shadow-lg backdrop-blur">
           <AppNav active="map" dark />
         </div>
@@ -907,10 +910,18 @@ export default function GlobeApp() {
             results still open from Explore.
           </p>
         )}
+        {!isNarrow && (
+          <aside
+            className="pointer-events-auto flex min-h-0 flex-1 flex-col overflow-hidden rounded-2xl border border-[#e7e2da] bg-[#faf9f6]/97 shadow-xl backdrop-blur"
+            aria-label="globe panel"
+          >
+            <div className="flex-1 overflow-y-auto">{panelContent}</div>
+          </aside>
+        )}
       </div>
 
-      {/* legend (bottom-left) */}
-      <div className="pointer-events-none absolute bottom-3 left-3 z-30 hidden md:block">
+      {/* legend (top-right, left of the zoom controls: the left side is the panel, the bottom is the timeline dock) */}
+      <div className="pointer-events-none absolute right-16 top-3 z-30 hidden md:block">
         <Legend layer={activeOverlayLegend?.layer ?? null} opacity={activeOverlayLegend?.opacity ?? 0.8} />
         <div className="pointer-events-none absolute bottom-2 right-2 z-10"><MapKey /></div>
       </div>
@@ -920,12 +931,9 @@ export default function GlobeApp() {
       {isNarrow ? (
         <BottomSheet ariaLabel="globe panel">{panelContent}</BottomSheet>
       ) : (
-        <aside
-          className="absolute bottom-3 right-3 top-3 z-30 flex w-[400px] flex-col overflow-hidden rounded-2xl border border-[#e7e2da] bg-[#faf9f6]/97 shadow-xl backdrop-blur"
-          aria-label="globe panel"
-        >
-          <div className="flex-1 overflow-y-auto">{panelContent}</div>
-        </aside>
+        // bottom dock for the acquisition timeline: from the panel's right edge to the screen edge, above the
+        // map attribution. Empty (and click-through) unless the Data tab is open.
+        <div ref={setTimelineHostEl} className="pointer-events-none absolute bottom-9 left-[424px] right-3 z-30" />
       )}
     </div>
   );
