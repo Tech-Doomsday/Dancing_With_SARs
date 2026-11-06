@@ -49,10 +49,13 @@ async function routeEngine(page: Page, counters: { granules: number }) {
 
 const cameraWrites = (page: Page) => page.evaluate(() => (window as unknown as { __cameraWrites: number }).__cameraWrites);
 
-/** open the Data tab with the tile resolved, return the link */
+/** open the Data tab with the tile resolved, return the link. The Data panel now expands itself
+ *  (desktop) the moment a point is pinned — ?lat=&lon= pins one on load, so no click is needed;
+ *  this still clicks "Open Data panel" if some earlier step left it closed, for robustness. */
 async function openDataTab(page: Page) {
   await page.goto("/map?lat=23.74797&lon=90.41847");
-  await page.getByRole("button", { name: "Open Data panel" }).click();
+  const opener = page.getByRole("button", { name: "Open Data panel" });
+  if (await opener.isVisible().catch(() => false)) await opener.click();
   const link = page.getByRole("link", { name: /Search this box in Data retrieval/ });
   await expect(link).toHaveAttribute("href", /\/background\/retrieval\?/, { timeout: 15_000 });
   return link;

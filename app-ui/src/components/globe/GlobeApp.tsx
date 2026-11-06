@@ -118,6 +118,8 @@ export default function GlobeApp() {
   const [isNarrow, setIsNarrow] = useState(false);
   // Data is NOT a tab of the left panel any more: on desktop it is its own details panel on the RIGHT (the left panel
   // keeps Explore / Pin / Results). On a phone there is no room for two panels, so there it stays a tab of the sheet.
+  // It starts closed (nothing pinned yet) but opens itself, on desktop, the moment a point IS pinned — see the
+  // pin -> tile-at effect below — so "how much SAR data exists here" is visible without an extra click.
   const [dataOpen, setDataOpen] = useState(false);
   const bootOpensData = useRef(false);
   // the timeline docks along the bottom only when the strip between the two panels is wide enough to read
@@ -130,6 +132,9 @@ export default function GlobeApp() {
   const zoomRef = useRef<number | undefined>(undefined);
   const pinRef = useRef<[number, number] | null>(null);
   useEffect(() => { pinRef.current = pin; }, [pin]);
+  // read inside the pin effect without making it re-run the tile-at fetch on every resize
+  const isNarrowRef = useRef(false);
+  useEffect(() => { isNarrowRef.current = isNarrow; }, [isNarrow]);
 
   // the camera a link asks for — read ONCE; GlobeMap creates the map there (no world view first)
   const startAt = useMemo(() => {
@@ -271,6 +276,9 @@ export default function GlobeApp() {
       setTileError(null);
       return;
     }
+    // the Data panel (desktop, right side) expands by default with the pin — no extra click to see
+    // how much SAR data exists here. Narrow/phone layouts keep their own Pin <-> Data tab switch.
+    if (!isNarrowRef.current) setDataOpen(true);
     // remember the pin NOW (before the tile resolves) so Background can pick it up even if the
     // user switches tab mid-load; the previous pin's tile/box is dropped so it can't leak across
     saveQueryContext({ lat: pin[0], lon: pin[1], tile: undefined, bbox: undefined });

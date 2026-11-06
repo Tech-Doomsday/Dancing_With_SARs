@@ -67,7 +67,10 @@ function packLanes(bars: { start: number; end: number }[]): number[] {
 const rowHeight = (r: { lanes: number; marks: unknown[] }, d: Dims) =>
   d.pad + (r.marks.length ? d.mark : 0) + Math.max(1, r.lanes) * d.lane;
 
-function stackRows(stacks: Record<string, GranuleStack>, d: Dims): Row[] {
+/** which product's acquisitions the timeline draws — the two small tabs above it switch this */
+export type Product = "gcov" | "gunw";
+
+function stackRows(stacks: Record<string, GranuleStack>, d: Dims, product: Product): Row[] {
   const rows: Row[] = [];
   for (const key of Object.keys(stacks).sort((a, b) => {
     const da = a[0] === "D" ? 1 : 0;
@@ -77,16 +80,19 @@ function stackRows(stacks: Record<string, GranuleStack>, d: Dims): Row[] {
     const stack = stacks[key];
     const bars: Row["bars"] = [];
     const marks: Row["marks"] = [];
-    stack.gunw.forEach((p, index) => {
-      if (!p.ref_time || !p.sec_time) return; // unresolved: no dates to draw (honest gap)
-      const start = Date.parse(p.ref_time);
-      const end = Date.parse(p.sec_time);
-      if (Number.isFinite(start) && Number.isFinite(end)) bars.push({ start: Math.min(start, end), end: Math.max(start, end), kind: "gunw", index, lane: 0 });
-    });
-    stack.gcov.forEach((e, index) => {
-      const at = e.time ? Date.parse(e.time) : NaN;
-      if (Number.isFinite(at)) marks.push({ at, kind: "gcov", index });
-    });
+    if (product === "gunw") {
+      stack.gunw.forEach((p, index) => {
+        if (!p.ref_time || !p.sec_time) return; // unresolved: no dates to draw (honest gap)
+        const start = Date.parse(p.ref_time);
+        const end = Date.parse(p.sec_time);
+        if (Number.isFinite(start) && Number.isFinite(end)) bars.push({ start: Math.min(start, end), end: Math.max(start, end), kind: "gunw", index, lane: 0 });
+      });
+    } else {
+      stack.gcov.forEach((e, index) => {
+        const at = e.time ? Date.parse(e.time) : NaN;
+        if (Number.isFinite(at)) marks.push({ at, kind: "gcov", index });
+      });
+    }
     const lanes = packLanes(bars);
     bars.forEach((b, i) => { b.lane = lanes[i]; });
     const row: Row = { key, stack, bars, marks, lanes: Math.max(1, ...lanes.map((l) => l + 1)), y: 0, h: 0 };
@@ -102,6 +108,18 @@ export default function GranuleTimeline(props: GranuleTimelineProps) {
   const compact = !!props.compact;
   const D = compact ? COMPACT : FULL;
   const LABEL_W = D.label;
+  // two small tabs pick which product's acquisitions are drawn — GCOV (single-date markers) by
+  // default, since that is almost always the denser, more-available product; switching tabs
+  // clears any selection from the other product so the detail panel never points at a hidden item
+  const [product, setProduct] = useState<Product>("gcov");
+  const counts = useMemo(() => {
+    let gcov = 0, gunw = 0;
+    for (const stack of Object.values(props.data.stacks)) { gcov += stack.gcov.length; gunw += stack.gunw.length; }
+    return { gcov, gunw };
+  }, [props.data.stacks]);
+  // a hovered/focused bar or marker grows and gets a soft halo so it reads as clickable before
+  // you've clicked it, not just after
+  const [hoverId, setHoverId] = useState<string | null>(null);
   const bounds = useMemo(() => ({
     min: Date.parse(props.data.window.t0),
     max: Date.parse(props.data.window.t1),
@@ -142,7 +160,16 @@ export default function GranuleTimeline(props: GranuleTimelineProps) {
     setScale((s) => clamp({ ...s }, bounds));
   }, [bounds]);
 
-  const rows = useMemo(() => stackRows(props.data.stacks, D), [props.data.stacks, D]);
+  const rows = useMemo(() => stackRows(props.data.stacks, D, product), [props.data.stacks, D, product]);
+  const onSelectRef = useRef(props.onSelect);
+  onSelectRef.current = props.onSelect;
+  const switchProduct = useCallback((p: Product) => {
+    setProduct((cur) => {
+      if (cur === p) return cur;
+      onSelectRef.current(null);
+      return p;
+    });
+  }, []);
   const rowsBottom = rows.length ? rows[rows.length - 1].y + rows[rows.length - 1].h : D.axis;
   const height = rowsBottom + (compact ? 2 : 14);
   const today = Date.now();
@@ -199,6 +226,30 @@ export default function GranuleTimeline(props: GranuleTimelineProps) {
 
   return (
     <div className={`rounded-lg border border-[#e7e2da] bg-white ${compact ? "px-1.5 py-1" : "p-2"}`}>
+      <div className={`flex items-center gap-1 px-1 ${compact ? "mb-0.5" : "mb-1"}`} role="tablist" aria-label="Product">
+        {(["gcov", "gunw"] as const).map((p) => {
+          const active = product === p;
+          const n = p === "gcov" ? counts.gcov : counts.gunw;
+          return (
+            <button
+              key={p}
+              type="button"
+              role="tab"
+              aria-selected={active}
+              onClick={() => switchProduct(p)}
+              title={p === "gcov" ? "GCOV: one marker per near-instantaneous backscatter acquisition" : "GUNW: one bar per ref→secondary interferometric pair"}
+              className={`rounded-full border px-2 py-0.5 text-[10px] font-semibold tracking-wide transition-colors ${
+                active
+                  ? "border-[#2c5f58] bg-[#2c5f58] text-white"
+                  : "border-[#e7e2da] text-[#8a837b] hover:border-[#2c5f58] hover:text-[#2c5f58]"
+              }`}
+            >
+              {p.toUpperCase()}
+              <span className={active ? "ml-1 text-white/75" : "ml-1 text-[#8a837b]"}>{n}</span>
+            </button>
+          );
+        })}
+      </div>
       <div className={`flex items-center justify-between gap-2 px-1 ${compact ? "mb-0.5" : "mb-1"}`}>
         <p className={`${compact ? "truncate text-[10px]" : "text-[11px]"} text-[#8a837b]`}>
           {compact
@@ -223,7 +274,7 @@ export default function GranuleTimeline(props: GranuleTimelineProps) {
           height={height}
           role="application"
           tabIndex={0}
-          aria-label="Granule timeline; arrow keys pan, plus and minus zoom"
+          aria-label={`Granule timeline (${product.toUpperCase()}); arrow keys pan, plus and minus zoom`}
           onKeyDown={onKeyDown}
           onPointerDown={onPointerDown}
           onPointerMove={onPointerMove}
@@ -294,7 +345,7 @@ export default function GranuleTimeline(props: GranuleTimelineProps) {
                   <g key={row.key}>
                     {row.bars.length === 0 && row.marks.length === 0 && (
                       <text x={8} y={midY + 3} fontSize={9} fill="#8a837b">
-                        no dated acquisitions in this window
+                        no dated {product.toUpperCase()} acquisitions in this window
                       </text>
                     )}
                     {gaps.map((g, i) => (
@@ -308,6 +359,8 @@ export default function GranuleTimeline(props: GranuleTimelineProps) {
                     {row.bars.map((b) => {
                       const selected = props.selection?.kind === "gunw" && props.selection.stackKey === row.key
                         && props.selection.index === b.index;
+                      const hid = `gunw:${row.key}:${b.index}`;
+                      const hovered = hoverId === hid;
                       const x1 = px(b.start);
                       const x2 = Math.max(px(b.end), px(b.start) + 3);
                       const by = lanesTop + b.lane * D.lane + 1;
@@ -317,14 +370,24 @@ export default function GranuleTimeline(props: GranuleTimelineProps) {
                         && u.sec_time.slice(0, 10) === isoDay(b.end));
                       return (
                         <g key={`b-${b.index}`}>
+                          {(selected || hovered) && (
+                            <rect
+                              x={x1 - 2} y={by - 2} width={Math.max(3, x2 - x1) + 4} height={bh + 4} rx={5}
+                              fill="none" stroke={color} strokeOpacity={0.4} strokeWidth={2} pointerEvents="none"
+                            />
+                          )}
                           <rect
                             x={x1} y={by} width={Math.max(3, x2 - x1)} height={bh} rx={3}
-                            fill={color} fillOpacity={selected ? 1 : 0.75}
-                            stroke={selected ? "#1c1a17" : "#ffffff"} strokeWidth={selected ? 1.5 : 0.75}
+                            fill={color} fillOpacity={selected ? 1 : hovered ? 0.95 : 0.75}
+                            stroke={selected || hovered ? "#1c1a17" : "#ffffff"} strokeWidth={selected ? 1.5 : hovered ? 1.25 : 0.75}
                             tabIndex={0}
                             role="button"
                             aria-label={`pair ${isoDay(b.start)} to ${isoDay(b.end)} baseline ${Math.round((b.end - b.start) / DAY_MS)} days`}
                             onPointerDown={(e) => e.stopPropagation()}
+                            onPointerEnter={() => setHoverId(hid)}
+                            onPointerLeave={() => setHoverId((h) => (h === hid ? null : h))}
+                            onFocus={() => setHoverId(hid)}
+                            onBlur={() => setHoverId((h) => (h === hid ? null : h))}
                             onClick={(e) => {
                               e.stopPropagation();
                               props.onSelect({ stackKey: row.key, kind: "gunw", index: b.index });
@@ -336,6 +399,7 @@ export default function GranuleTimeline(props: GranuleTimelineProps) {
                               }
                             }}
                             className="cursor-pointer"
+                            style={{ transition: "stroke-width 100ms ease, fill-opacity 100ms ease" }}
                           >
                             <title>{`${dirText}: pair ${isoDay(b.start)} -> ${isoDay(b.end)} (${Math.round((b.end - b.start) / DAY_MS)} d)`}</title>
                           </rect>
@@ -354,30 +418,43 @@ export default function GranuleTimeline(props: GranuleTimelineProps) {
                     {row.marks.map((m) => {
                       const selected = props.selection?.kind === "gcov" && props.selection.stackKey === row.key
                         && props.selection.index === m.index;
+                      const hid = `gcov:${row.key}:${m.index}`;
+                      const hovered = hoverId === hid;
+                      const r = selected ? 5.5 : hovered ? 5 : 4;
+                      const cx = px(m.at);
                       return (
-                        <circle
-                          key={`m-${m.index}`}
-                          cx={px(m.at)} cy={markY} r={selected ? 5 : 4}
-                          fill={color} fillOpacity={selected ? 1 : 0.75}
-                          stroke={selected ? "#1c1a17" : "#ffffff"} strokeWidth={selected ? 1.5 : 0.75}
-                          tabIndex={0}
-                          role="button"
-                          aria-label={`acquisition ${isoDay(m.at)}`}
-                          onPointerDown={(e) => e.stopPropagation()}
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            props.onSelect({ stackKey: row.key, kind: "gcov", index: m.index });
-                          }}
-                          onKeyDown={(e) => {
-                            if (e.key === "Enter" || e.key === " ") {
+                        <g key={`m-${m.index}`}>
+                          {(selected || hovered) && (
+                            <circle cx={cx} cy={markY} r={r + 3.5} fill="none" stroke={color} strokeOpacity={0.35} strokeWidth={2} pointerEvents="none" />
+                          )}
+                          <circle
+                            cx={cx} cy={markY} r={r}
+                            fill={color} fillOpacity={selected ? 1 : hovered ? 0.95 : 0.8}
+                            stroke={selected || hovered ? "#1c1a17" : "#ffffff"} strokeWidth={selected ? 1.5 : hovered ? 1.25 : 1}
+                            tabIndex={0}
+                            role="button"
+                            aria-label={`acquisition ${isoDay(m.at)}`}
+                            onPointerDown={(e) => e.stopPropagation()}
+                            onPointerEnter={() => setHoverId(hid)}
+                            onPointerLeave={() => setHoverId((h) => (h === hid ? null : h))}
+                            onFocus={() => setHoverId(hid)}
+                            onBlur={() => setHoverId((h) => (h === hid ? null : h))}
+                            onClick={(e) => {
+                              e.stopPropagation();
                               props.onSelect({ stackKey: row.key, kind: "gcov", index: m.index });
-                              e.preventDefault();
-                            }
-                          }}
-                          className="cursor-pointer"
-                        >
-                          <title>{`${dirText}: acquisition ${isoDay(m.at)}`}</title>
-                        </circle>
+                            }}
+                            onKeyDown={(e) => {
+                              if (e.key === "Enter" || e.key === " ") {
+                                props.onSelect({ stackKey: row.key, kind: "gcov", index: m.index });
+                                e.preventDefault();
+                              }
+                            }}
+                            className="cursor-pointer"
+                            style={{ transition: "r 100ms ease, fill-opacity 100ms ease" }}
+                          >
+                            <title>{`${dirText}: acquisition ${isoDay(m.at)}`}</title>
+                          </circle>
+                        </g>
                       );
                     })}
                   </g>
