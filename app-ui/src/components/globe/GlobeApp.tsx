@@ -105,6 +105,11 @@ export default function GlobeApp() {
 
   // ---- map state -----------------------------------------------------------------------------
   const [flat, setFlat] = useState(false);
+  // 3D terrain (relief + hillshade + tilt) is ON by default; the choice and the exaggeration are remembered
+  const [terrain3d, setTerrain3d] = useState(true);
+  const [terrainEx, setTerrainEx] = useState(1.5);
+  const [buildings3d, setBuildings3d] = useState(true);
+  const [viewCmd, setViewCmd] = useState<{ key: number; pitch?: number; rotateBy?: number } | null>(null);
   const [flyTarget, setFlyTarget] = useState<{ center: [number, number]; zoom: number; key: number } | null>(null);
   const [pairFootprint, setPairFootprint] = useState<[number, number][] | null>(null);
   const [fitFootprintKey, setFitFootprintKey] = useState(0);
@@ -180,13 +185,19 @@ export default function GlobeApp() {
       if (saved === "1") setFlat(true);
       else if (saved === null && loadCamera()?.projection === "mercator") setFlat(true);
     } catch { /* private mode */ }
+    try {
+      if (window.localStorage.getItem("globe-3d") === "0") setTerrain3d(false);
+      if (window.localStorage.getItem("globe-3d-bld") === "0") setBuildings3d(false);
+      const ex = Number(window.localStorage.getItem("globe-3d-ex"));
+      if (Number.isFinite(ex) && ex >= 1 && ex <= 5) setTerrainEx(ex);
+    } catch { /* private mode */ }
     const mq = window.matchMedia("(prefers-reduced-motion: reduce)");
     setReducedMotion(mq.matches);
     const onMq = () => setReducedMotion(mq.matches);
     mq.addEventListener?.("change", onMq);
     const onResize = () => {
       setIsNarrow(window.innerWidth < 1024);
-      setIsWide(window.innerWidth >= 1360);
+      setIsWide(window.innerWidth >= 1220);
     };
     onResize();
     window.addEventListener("resize", onResize);
@@ -883,6 +894,10 @@ export default function GlobeApp() {
         pairFootprint={pairFootprint}
         detectionOutline={selectedDetection?.bbox ? bboxRing(selectedDetection.bbox) : null}
         flat={flat}
+        terrain3d={terrain3d}
+        terrainExaggeration={terrainEx}
+        buildings3d={buildings3d}
+        viewCmd={viewCmd}
         reducedMotion={reducedMotion}
         idleSpin={!pin}
         onMapClick={onMapClick}
@@ -910,7 +925,7 @@ export default function GlobeApp() {
       )}
 
       {/* left column: nav + search pill + the panel (Explore / Pin / Results); Data is its own panel on the right; on a phone everything is the bottom sheet (Data = a tab there) */}
-      <div className={`pointer-events-none absolute left-3 top-3 z-30 flex flex-col gap-2${isNarrow ? "" : " bottom-3 w-[400px]"}`}>
+      <div className={`pointer-events-none absolute left-3 top-3 z-30 flex flex-col gap-2${isNarrow ? "" : " bottom-3 w-[340px]"}`}>
         <div className="pointer-events-auto w-fit rounded-xl border border-[#262c36] bg-[#0e1116]/95 px-3 py-2 shadow-lg backdrop-blur">
           <AppNav active="map" dark />
         </div>
@@ -958,6 +973,26 @@ export default function GlobeApp() {
               return !f;
             });
           }}
+          terrain3d={terrain3d}
+          onToggleTerrain={() => {
+            setTerrain3d((v) => {
+              try { window.localStorage.setItem("globe-3d", v ? "0" : "1"); } catch { /* private mode */ }
+              return !v;
+            });
+          }}
+          terrainExaggeration={terrainEx}
+          buildings3d={buildings3d}
+          onToggleBuildings={() => {
+            setBuildings3d((v) => {
+              try { window.localStorage.setItem("globe-3d-bld", v ? "0" : "1"); } catch { /* private mode */ }
+              return !v;
+            });
+          }}
+          onView={(c) => setViewCmd({ key: Date.now(), ...c })}
+          onTerrainExaggeration={(v) => {
+            setTerrainEx(v);
+            try { window.localStorage.setItem("globe-3d-ex", String(v)); } catch { /* private mode */ }
+          }}
           reducedMotion={reducedMotion}
         />
         {!engineOnline && healthChecked && (
@@ -988,18 +1023,18 @@ export default function GlobeApp() {
         <BottomSheet ariaLabel="globe panel">{panelContent}</BottomSheet>
       ) : (
         <>
-          {/* bottom dock for the acquisition timeline: between the left panel and the right-hand Data panel, above the
-              map attribution. Empty (and click-through) unless the Data panel is open and the screen is wide enough. */}
+          {/* bottom dock for the acquisition timeline: between the left panel and the right-hand Data panel, stuck to the
+              bottom edge (thin, so the map keeps the height). Empty (and click-through) unless the Data panel is open and the screen is wide enough. */}
           <div
             ref={setTimelineHostEl}
-            className={`pointer-events-none absolute bottom-9 left-[424px] z-30 ${dataOpen ? "right-[412px]" : "right-3"}`}
+            className={`pointer-events-none absolute bottom-3 left-[364px] z-30 ${dataOpen ? "right-[364px]" : "right-3"}`}
           />
           {/* the Data panel: details of the pinned tile, on the RIGHT. Starts below the zoom controls and the legend. */}
           {dataOpen ? (
             <aside
               aria-label="Data panel"
               style={{ top: Math.max(148, legendBottom + 8) }}
-              className="pointer-events-auto absolute bottom-9 right-3 z-30 flex w-[min(400px,calc(100vw-448px))] min-w-[320px] flex-col overflow-hidden rounded-2xl border border-[#e7e2da] bg-[#faf9f6]/97 shadow-xl backdrop-blur"
+              className="pointer-events-auto absolute bottom-9 right-3 z-30 flex w-[min(340px,calc(100vw-400px))] min-w-[300px] flex-col overflow-hidden rounded-2xl border border-[#e7e2da] bg-[#faf9f6]/97 shadow-xl backdrop-blur"
             >
               <div className="flex items-center justify-between border-b border-[#f0ece4] px-3 py-2">
                 <h2 className="text-xs font-semibold text-[#1c1a17]">Data <span className="font-normal text-[#8a837b]">· details for the pinned tile</span></h2>

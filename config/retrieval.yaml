@@ -41,6 +41,8 @@ search:
 
 api:                         # Background reads (granule / preview / probe / stack-pair) have NO time limit
   meta_wait_s: 20            # a request answers within this long, else 202 + job id; the UI then polls until the read is done
+  preview_wait_s: 2          # a layer preview answers within this long, else 202 + job id. Short on purpose: the page can only cancel
+                             # a read it has the job id of, and people click through layers faster than a NASA read finishes
   job_idle_s: 120            # a read nobody has asked about for this long (page closed) is cancelled
   poll_interval_s: 1         # how often the UI asks a waiting read for its answer (sent to the UI in every 202)
   retry_backoff_s: [2, 5, 10, 30]   # waits between attempts after a network failure; the last repeats, attempts are not capped

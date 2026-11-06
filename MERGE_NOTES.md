@@ -121,3 +121,39 @@ Ported from the separately patched tree onto this merge; the backend and every o
 - Tests: `smoke` and `data-to-retrieval` open the panel with `getByRole("button", { name: "Open Data panel" })`.
 - Ran: `tsc --noEmit`, `guard:no-science`, `tests-e2e/unit.spec.ts` (62 passed), and a server-render check of the timeline geometry (overlapping pairs in separate lanes, no dot on a bar).
   NOT run: Playwright browser specs (no browser could be downloaded), `npm run lint`, any visual check.
+
+# 3D map (2026-11-06)
+Real 3D terrain on BOTH the globe and the flat map, with the overlays draped over it. Display only; no science, no engine change.
+- `GlobeMap.tsx`: a `raster-dem` source (AWS Terrain Tiles, terrarium encoding, no key, attribution added) drives `map.setTerrain` and a faint
+  `hillshade` layer. Raster/image layers (the SAR corner-placed quad, result overlays) are draped by maplibre automatically, so they follow the relief.
+  The camera tilts to 55 degrees only from zoom 8 up (at world zoom the globe stays upright); right-drag / Ctrl-drag tilts and rotates (max pitch 75 in 3D, 0 otherwise);
+  the compass control now shows pitch. Turning 3D off flattens the camera and the terrain.
+- Layer order changed on purpose: overlays are inserted BELOW the hillshade, so relief shows through a semi-transparent overlay, and therefore below the tile/footprint/
+  detection outlines and the pins (they used to be painted over by an overlay).
+- `SearchBar.tsx` / `GlobeApp.tsx`: a "3D" toggle next to Globe/Flat and a "relief x1-5" slider (default 1.5; flat deltas such as Bangladesh need exaggeration to read).
+  ON by default; remembered in localStorage (`globe-3d`, `globe-3d-ex`).
+- Ran: `tsc --noEmit`, `guard:no-science`, `unit.spec.ts`, and the exact terrain + hillshade + image-overlay style through maplibre's style-spec validator (0 errors).
+  NOT run: any browser (none could be downloaded). Terrain tiles come from s3.amazonaws.com at runtime, so the page needs internet access to that host.
+
+# Slimmer layout (2026-11-06)
+More map: narrower side panels and a thin timeline stuck to the bottom edge. Layout only.
+- Left column and the right Data panel: 400 px -> 340 px (the search pill was already 340). The dock sits between them at `left-[364px]` / `right-[364px]`, `bottom-3`
+  (it was `bottom-9`, above the attribution; the attribution now only sits under the Data panel, which still ends at `bottom-9`). The dock is used from 1220 px wide (was 1360).
+  Fit-to-footprint padding follows (left 360 / right 380).
+- `GranuleTimeline` has a `compact` mode (used only in the dock; the inline/phone timeline is unchanged): lane 12 px (was 18), GCOV strip 9, axis 14, one-line row labels
+  ("A069 asc"), one header row that also carries the visible window (the footer line and the px/ms scale are dropped), no "today" label, padding p-1, max height 30vh (was 42vh).
+  For two stacks / 5 lanes the timeline svg is 100 px (full: 162 px); with header and padding the dock is roughly 130 px instead of roughly 310 px.
+- Ran: `tsc --noEmit`, `guard:no-science`, `unit.spec.ts`, server-render height/overlap check. NOT run: any browser.
+
+# 3D, part 2 (2026-11-06): buildings, sky, camera controls
+Builds on the terrain from "3D map". Display only; no engine change.
+- **3D buildings** (`GlobeMap.tsx`): a `fill-extrusion` layer over OpenFreeMap's free OpenMapTiles vector tiles (`https://tiles.openfreemap.org/planet`, no key), source-layer
+  `building`, from zoom 13, heights from `render_height` / `render_min_height` (OpenStreetMap). Many OSM buildings have no height tag and fall back to 5 m blocks. Opacity 0.72 so a
+  draped overlay under a building stays readable. Layer order: overlays < hillshade < buildings < outlines < pins. Attribution added. Switch: "buildings" (default on, `localStorage globe-3d-bld`).
+- **Sky + horizon haze** while 3D is on (`map.setSky`, fades out before zoom 7 so the world globe keeps its plain look); `setSky()` resets it when 3D is off.
+- **Camera controls** (SearchBar, shown only in 3D): Top-down (tilt 0, north up), Tilt (55), Low (72), rotate -/+ 30 degrees; for trackpads/phones where right-drag is awkward.
+  One-shot `viewCmd` prop on `GlobeMap`, re-fired by a new key.
+- New spec in `tests-e2e/smoke.spec.ts` (3D controls on by default; toggling hides the camera group).
+- Ran: `tsc --noEmit`, `guard:no-science`, `unit.spec.ts`, and the terrain + sky + building-extrusion + DEM style through maplibre's style-spec validator (0 errors).
+  NOT run: any browser, the new spec, or a request to tiles.openfreemap.org / s3.amazonaws.com (the sandbox cannot reach them). If OpenFreeMap's layer or field names differ from
+  the OpenMapTiles schema the buildings layer simply draws nothing; nothing else depends on it.

@@ -64,7 +64,11 @@ export function useSarImage(p: SarImageParams): SarImage {
     }
     const box = p.bbox;
     const ctrl = new AbortController();
-    setState((s) => ({ ...s, busy: true, message: null, gate: null, wait: null }));
+    // A new request means a different picture (another layer, scale, coherence option ...): drop the previous image,
+    // its corners and its legend NOW. Keeping them showed layer A's picture under layer B's name for as long as B
+    // took to read from NASA, which looked exactly like "I pick other layers and always get the same image".
+    dropUrl();
+    setState({ ...IDLE, busy: true });
     bg.previewBlob({
       id: p.granuleId, layer: p.layerKey, west: box[0], south: box[1], east: box[2], north: box[3],
       maxPx: p.maxPx ?? 512, scale: p.scale ?? "auto", cmap: p.cmap ?? "auto",

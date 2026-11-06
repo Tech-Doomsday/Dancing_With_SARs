@@ -24,7 +24,7 @@ import uuid
 from concurrent.futures import TimeoutError as FuturesTimeout
 
 _MAX_JOBS = 50
-_DEFAULTS = {"meta_wait_s": 20.0, "job_idle_s": 120.0, "poll_interval_s": 1.0,
+_DEFAULTS = {"meta_wait_s": 20.0, "preview_wait_s": 2.0, "job_idle_s": 120.0, "poll_interval_s": 1.0,
              "retry_backoff_s": [2.0, 5.0, 10.0, 30.0]}
 _NETWORK_MODULES = ("aiohttp", "requests", "urllib3", "httpx", "http.client", "ssl")
 _NETWORK_NAME_BITS = ("timeout", "connection", "5xx", "servererror", "unavailable")
@@ -42,7 +42,7 @@ def api_config() -> dict:
     except Exception:                                           # a broken config must not take the routes down
         raw = {}
     out = dict(_DEFAULTS)
-    for k in ("meta_wait_s", "job_idle_s", "poll_interval_s"):
+    for k in ("meta_wait_s", "preview_wait_s", "job_idle_s", "poll_interval_s"):
         try:
             v = float(raw.get(k, out[k]))
             out[k] = v if v > 0 else _DEFAULTS[k]
@@ -73,6 +73,61 @@ def is_transient(ex: BaseException) -> bool:
     return False
 
 
+_TLS = threading.local()          # the job the current worker thread is running (None outside a job)
+
+
+class _CancelEvent(threading.Event):
+    """A cancel flag that also trips whatever the running read registered with `link_cancel` (the retrieval client's own
+    cancel_event, say). Without that link a cancelled read kept pulling chunks from NASA to the very end."""
+
+    def __init__(self):
+        super().__init__()
+        self._linked: list = []
+        self._llock = threading.Lock()
+
+    def link(self, ev: threading.Event) -> None:
+        with self._llock:
+            self._linked.append(ev)
+        if self.is_set():
+            ev.set()
+
+    def set(self) -> None:
+        super().set()
+        with self._llock:
+            linked = list(self._linked)
+        for ev in linked:
+            ev.set()
+
+
+def in_job() -> bool:
+    return getattr(_TLS, "job", None) is not None
+
+
+def current_cancel():
+    """The cancel flag of the job this thread runs, or None outside a job."""
+    job = getattr(_TLS, "job", None)
+    return job.cancel if job is not None else None
+
+
+def link_cancel(event) -> None:
+    """From inside a worker: also set `event` when this job is cancelled. No-op outside a job or for None."""
+    job = getattr(_TLS, "job", None)
+    if job is not None and event is not None:
+        job.cancel.link(event)
+
+
+def check_cancelled() -> None:
+    """Raise Cancelled when the job this thread runs was cancelled, or nobody has asked about it for the idle lease.
+    No-op outside a job."""
+    job = getattr(_TLS, "job", None)
+    if job is None:
+        return
+    if job.expired():
+        job.cancel.set()
+    if job.cancel.is_set():
+        raise Cancelled("the read was cancelled (nobody was waiting for it any more)")
+
+
 class _Job:
     def __init__(self, fn, args, kwargs, finalize, cfg):
         self.id = f"bg-{uuid.uuid4().hex[:12]}"
@@ -80,7 +135,7 @@ class _Job:
         self.cfg = cfg
         self.t0 = time.monotonic()
         self.last_seen = self.t0
-        self.cancel = threading.Event()
+        self.cancel = _CancelEvent()
         self.attempt = 0
         self.last_error: str | None = None
         self.retry_in: float | None = None
@@ -93,6 +148,13 @@ class _Job:
         return time.monotonic() - self.last_seen > self.cfg["job_idle_s"]
 
     def run(self):
+        _TLS.job = self
+        try:
+            return self._run()
+        finally:
+            _TLS.job = None
+
+    def _run(self):
         steps = self.cfg["retry_backoff_s"]
         while True:
             if self.cancel.is_set() or self.expired():

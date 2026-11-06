@@ -308,6 +308,45 @@ def granule_detail(source, gid: str) -> dict:
 _PREVIEW_LOCK = threading.Lock()      # one preview at a time (the fetch can move hundreds of MB)
 
 
+_PREVIEW_QUEUE: list = []            # cancel flags of the previews waiting for the lock (oldest first)
+_PREVIEW_QUEUE_MAX = 2               # the metadata pool has 4 workers: a longer line would starve the other reads
+_QUEUE_LOCK = threading.Lock()
+
+
+def _take_preview_lock() -> None:
+    """One preview at a time (a fetch can move hundreds of MB). Called from a route it runs inside a job: the
+    preview then WAITS for its turn there - the browser just keeps polling one job, instead of being refused with a
+    409 and re-sending the request (every re-send used one of the 12 previews per minute, so a long read in front
+    of it quickly exhausted the budget and the page said "the engine asked for a short pause" for ever). A waiting
+    preview leaves the line when it is cancelled (the person picked something else); a third one in line cancels
+    the oldest (last click wins). Called directly (outside a job), the old behaviour stays: 409 at once."""
+    from .bg_jobs import Cancelled, check_cancelled, current_cancel, in_job
+    if not in_job():
+        if not _PREVIEW_LOCK.acquire(blocking=False):
+            raise BackgroundError(409, "a preview is already running — try again when it finishes "
+                                       "(single concurrent preview by design)")
+        return
+    if _PREVIEW_LOCK.acquire(blocking=False):
+        return
+    me = current_cancel()
+    with _QUEUE_LOCK:
+        _PREVIEW_QUEUE.append(me)
+        while len(_PREVIEW_QUEUE) > _PREVIEW_QUEUE_MAX:
+            _PREVIEW_QUEUE.pop(0).set()                       # superseded: its person has asked for something newer
+    try:
+        while not _PREVIEW_LOCK.acquire(timeout=0.25):
+            check_cancelled()
+        try:
+            check_cancelled()                                 # cancelled in the instant the lock came free
+        except Cancelled:
+            _PREVIEW_LOCK.release()
+            raise
+    finally:
+        with _QUEUE_LOCK:
+            if me in _PREVIEW_QUEUE:
+                _PREVIEW_QUEUE.remove(me)
+
+
 def _cache_paths(gid: str, layer: str, bbox, max_px: int, cmap: str, scale: str = "auto", render_version: int = 0,
                  rng: tuple | None = None, quality: str = ""):
     """Cache key = what was ASKED (cmap/scale as requested) + the render version, so changing either
@@ -468,9 +507,7 @@ def preview(source, *, gid: str, layer: str, bbox: tuple, max_px: int, cmap: str
             return {"png": png_path.read_bytes(), "meta": meta}
         except Exception:
             pass                      # a corrupt cache entry is re-rendered, never served
-    if not _PREVIEW_LOCK.acquire(blocking=False):
-        raise BackgroundError(409, "a preview is already running — try again when it finishes "
-                                   "(single concurrent preview by design)")
+    _take_preview_lock()
     try:
         import numpy as np
         from engine.common.grids import edge_corners_lonlat

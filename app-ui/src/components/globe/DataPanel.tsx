@@ -210,6 +210,7 @@ export default function DataPanel(props: DataPanelProps) {
                   props.onFootprintOnMap(sel.kind === "gunw" ? ring ?? null : null);
                 }}
                 onWindowChange={(from, to) => setQuery({ from, to })}
+                compact={props.timelineHost !== undefined}
               />
             );
             // undefined = no dock (phone): inline in the sheet. null = dock not mounted yet: draw nothing this frame
@@ -217,7 +218,7 @@ export default function DataPanel(props: DataPanelProps) {
             if (props.timelineHost === undefined) return timeline;
             if (props.timelineHost === null) return null;
             return createPortal(
-              <div className="pointer-events-auto max-h-[42vh] overflow-y-auto rounded-2xl border border-[#e7e2da] bg-[#faf9f6]/97 p-3 shadow-xl backdrop-blur">
+              <div className="pointer-events-auto max-h-[30vh] overflow-y-auto rounded-xl border border-[#e7e2da] bg-[#faf9f6]/97 p-1 shadow-xl backdrop-blur">
                 {timeline}
               </div>,
               props.timelineHost,

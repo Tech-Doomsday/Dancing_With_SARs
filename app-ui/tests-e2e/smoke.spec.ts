@@ -45,3 +45,17 @@ test("/runs/run-does-not-exist still surfaces the API error, never 'Loading runâ
   await expect(page.getByRole("alert").first()).toBeVisible({ timeout: 15_000 });
   await expect(page.getByText("Loading runâ€¦")).toHaveCount(0, { timeout: 15_000 });
 });
+
+test("3D controls: on by default, with camera presets and a buildings switch; turning 3D off hides them", async ({ page }) => {
+  await page.goto("/map");
+  const toggle = page.getByRole("button", { name: "3D", exact: true });
+  await expect(toggle).toHaveAttribute("aria-pressed", "true", { timeout: 30_000 });
+  const cam = page.getByRole("group", { name: "3D camera" });
+  await expect(cam).toBeVisible();
+  await expect(cam.getByRole("button", { name: "Tilt" })).toBeVisible();
+  await expect(cam.getByRole("checkbox", { name: /buildings/ })).toBeChecked();
+  await expect(page.getByLabel("relief exaggeration")).toBeVisible();
+  await toggle.click();
+  await expect(toggle).toHaveAttribute("aria-pressed", "false");
+  await expect(cam).toHaveCount(0);
+});

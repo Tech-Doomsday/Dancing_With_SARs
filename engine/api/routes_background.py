@@ -55,7 +55,8 @@ from fastapi.responses import JSONResponse
 
 from . import background as bg
 from .background import BackgroundError
-from .bg_jobs import JOBS, Cancelled
+from . import bg_jobs as _bg_jobs
+from .bg_jobs import JOBS, Cancelled, link_cancel
 from .jobs import NO_EARTHDATA_MESSAGE, earthdata_present
 from .state import get_runner
 
@@ -136,7 +137,7 @@ def _pending_body(job_id: str, info: dict) -> dict:
     return {"ok": True, "pending": True, "job_id": job_id, **info}
 
 
-def _run_bg(fn, *args, preview_window: bool = False, finalize=None, **kwargs):
+def _run_bg(fn, *args, preview_window: bool = False, finalize=None, wait_s: float | None = None, **kwargs):
     """Rate limit + credentials check + metadata-pool execution shared by the data routes.
 
     No deadline: a first read of a granule from NASA can take minutes and the person wants the result, not a "try
@@ -152,7 +153,7 @@ def _run_bg(fn, *args, preview_window: bool = False, finalize=None, **kwargs):
         raise HTTPException(status_code=503, detail={"ok": False, "error": NO_EARTHDATA_MESSAGE})
     runner = get_runner()
     try:
-        res = JOBS.submit(runner._meta_pool, fn, *args, finalize=finalize, **kwargs)   # metadata lane: never behind a scan
+        res = JOBS.submit(runner._meta_pool, fn, *args, finalize=finalize, wait_s=wait_s, **kwargs)   # metadata lane: never behind a scan
     except (BackgroundError, Cancelled) as ex:
         raise _http_from(ex) from ex
     if res[0] == "done":
@@ -252,12 +253,15 @@ def background_preview(id: str = Query(..., min_length=1, max_length=400),
 
     return _run_bg(_preview_worker, id=id, layer=layer, bbox=(west, south, east, north),
                    max_px=max_px, cmap=cmap, scale=scale, lo=lo, hi=hi, quality=quality, preview_window=True,
-                   finalize=finalize)
+                   finalize=finalize, wait_s=_bg_jobs.api_config()["preview_wait_s"])
 
 
 def _preview_worker(*, id: str, layer: str, bbox: tuple, max_px: int, cmap: str, scale: str = "auto",
                     lo: float | None = None, hi: float | None = None, quality: str = "off"):
     source = _default_source()
+    # a cancelled job (the person picked another layer) also stops this read between chunk batches, so it frees the
+    # preview lock quickly instead of pulling the rest of an abandoned layer from NASA
+    link_cancel(getattr(getattr(source, "client", None), "cancel_event", None))
     try:
         return bg.preview(source, gid=id, layer=layer, bbox=bbox, max_px=max_px, cmap=cmap, scale=scale,
                           lo=lo, hi=hi, quality=quality)

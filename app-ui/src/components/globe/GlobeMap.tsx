@@ -17,6 +17,26 @@ import { DEFAULT_CAMERA, initialCamera, loadCamera, saveCamera } from "@/lib/cam
 import "./globe-overrides.css";
 
 const ESRI_ATTRIBUTION = "Source: Esri, Vantor, Earthstar Geographics, and the GIS User Community";
+/** Terrain (3D): free AWS Terrain Tiles, "terrarium" RGB-encoded elevation, no API key. Used for the real 3D relief
+ *  (map.setTerrain) and for a faint hillshade. Image/raster layers (the SAR image, result overlays) are DRAPED over the
+ *  terrain by maplibre itself, so they follow the relief with no extra code. Pure display: nothing here is science. */
+const DEM_TILES = "https://s3.amazonaws.com/elevation-tiles-prod/terrarium/{z}/{x}/{y}.png";
+const DEM_ATTRIBUTION = "Terrain: Mapzen, SRTM, USGS and other sources via AWS Terrain Tiles";
+/** 3D buildings: OpenStreetMap footprints + heights from OpenFreeMap's free vector tiles (OpenMapTiles schema, no key).
+ *  Real data, but many OSM buildings carry no height tag: those fall back to a flat 5 m so the footprint still shows. */
+const BUILDINGS_URL = "https://tiles.openfreemap.org/planet";
+const BUILDINGS_ATTRIBUTION = "OpenFreeMap © OpenMapTiles, data from OpenStreetMap";
+const BUILDINGS_MIN_ZOOM = 13;
+/** sky + horizon haze for tilted views; fades out before zoom 7 so the upright globe keeps its plain look at world scale */
+const SKY: maplibregl.SkySpecification = {
+  "sky-color": "#16324f", "horizon-color": "#8fa6bd", "fog-color": "#0b0d12",
+  "fog-ground-blend": 0.6, "horizon-fog-blend": 0.5, "sky-horizon-blend": 0.5,
+  "atmosphere-blend": ["interpolate", ["linear"], ["zoom"], 0, 1, 5, 1, 7, 0],
+};
+/** below this zoom the relief is too small to read, so 3D mode does not tilt the camera on its own */
+const TILT_MIN_ZOOM = 8;
+const TILT_PITCH = 55;
+const MAX_PITCH_3D = 75;
 const ESRI_TILES = "https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}";
 
 export interface OverlaySpec {
@@ -57,6 +77,14 @@ export interface GlobeMapProps {
   fitFootprintKey?: number;
   detectionOutline: [number, number][] | null;
   flat: boolean;
+  /** 3D terrain on/off (relief + hillshade + tilt). Works on the globe and on the flat map. */
+  terrain3d?: boolean;
+  /** vertical exaggeration of the relief (1 = true scale) */
+  terrainExaggeration?: number;
+  /** extruded OpenStreetMap buildings (only drawn in 3D mode, from zoom 13) */
+  buildings3d?: boolean;
+  /** one-shot camera command from the 3D controls: set the tilt and/or rotate by degrees; a new `key` re-fires it */
+  viewCmd?: { key: number; pitch?: number; rotateBy?: number } | null;
   /** a link that names a point: the map is CREATED here (no world-view frame, no fly-in) */
   startAt?: { lat?: number; lon?: number; z?: number };
   reducedMotion: boolean;
@@ -157,6 +185,31 @@ export default function GlobeMap(props: GlobeMapProps) {
         attribution: ESRI_ATTRIBUTION,
       });
       map.addLayer({ id: "esri", type: "raster", source: "esri" });
+      // elevation: drives map.setTerrain (3D) and a faint hillshade. The hillshade sits ABOVE the imagery and the overlays
+      // but BELOW the outlines and pins, so relief stays visible through a semi-transparent overlay and the pins stay on top.
+      map.addSource("dem", {
+        type: "raster-dem", tiles: [DEM_TILES], encoding: "terrarium", tileSize: 256, maxzoom: 15,
+        attribution: DEM_ATTRIBUTION,
+      });
+      map.addLayer({
+        id: "hillshade", type: "hillshade", source: "dem", layout: { visibility: "none" },
+        paint: {
+          "hillshade-exaggeration": 0.35,
+          "hillshade-shadow-color": "#0b0d12", "hillshade-highlight-color": "#ffffff", "hillshade-accent-color": "#0b0d12",
+        },
+      });
+      map.addSource("buildings", { type: "vector", url: BUILDINGS_URL, attribution: BUILDINGS_ATTRIBUTION });
+      map.addLayer({
+        id: "buildings-3d", type: "fill-extrusion", source: "buildings", "source-layer": "building",
+        minzoom: BUILDINGS_MIN_ZOOM, layout: { visibility: "none" },
+        paint: {
+          "fill-extrusion-color": "#d8d2c6",
+          "fill-extrusion-height": ["coalesce", ["get", "render_height"], 5],
+          "fill-extrusion-base": ["coalesce", ["get", "render_min_height"], 0],
+          "fill-extrusion-opacity": 0.72,
+          "fill-extrusion-vertical-gradient": true,
+        },
+      });
       map.addSource("tile-outline", { type: "geojson", data: { type: "FeatureCollection", features: [] } });
       map.addLayer({ id: "tile-outline-line", type: "line", source: "tile-outline",
                      paint: { "line-color": "#ffffff", "line-width": 1.5, "line-opacity": 0.9 } });
@@ -191,7 +244,7 @@ export default function GlobeMap(props: GlobeMapProps) {
                      paint: { "line-color": "#9e3b2c", "line-width": 2.5, "line-dasharray": [2, 1.5] } });
       // §7.2 bottom-right: zoom + compass, scale, attribution — with the engine's Esri
       // attribution already bound to the raster source
-      map.addControl(new maplibregl.NavigationControl({ showCompass: true, visualizePitch: false }), "top-right");
+      map.addControl(new maplibregl.NavigationControl({ showCompass: true, visualizePitch: true }), "top-right");
       map.addControl(new maplibregl.ScaleControl({ maxWidth: 96, unit: "metric" }), "top-right");
       const c0 = map.getCenter().wrap();      // remember the camera the map actually opened at
       saveCamera({ center: [c0.lng, c0.lat], zoom: map.getZoom(), projection: cbRef.current.flat ? "mercator" : "globe" });
@@ -261,14 +314,69 @@ export default function GlobeMap(props: GlobeMapProps) {
     else map.once("style.load", apply);
   }, [props.flat, ready]);
 
+  // ---- 3D terrain: real relief + hillshade + tilt, on the globe AND on the flat map ----
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map || !ready) return;
+    try {
+      if (props.terrain3d) {
+        map.setMaxPitch(MAX_PITCH_3D);
+        map.setTerrain({ source: "dem", exaggeration: props.terrainExaggeration ?? 1.5 });
+        if (map.getLayer("hillshade")) map.setLayoutProperty("hillshade", "visibility", "visible");
+        map.setSky(SKY);
+        // only tilt once the relief is large enough to read; at world zoom the globe stays upright
+        if (map.getZoom() >= TILT_MIN_ZOOM && map.getPitch() < 20) {
+          if (props.reducedMotion) map.setPitch(TILT_PITCH);
+          else map.easeTo({ pitch: TILT_PITCH, duration: 900 });
+        }
+      } else {
+        map.setTerrain(null);
+        map.setSky(undefined as unknown as maplibregl.SkySpecification);   // empty = back to the plain space background (the runtime resets to transparent)
+        if (map.getLayer("hillshade")) map.setLayoutProperty("hillshade", "visibility", "none");
+        if (map.getPitch() > 0 && !props.reducedMotion) {
+          map.easeTo({ pitch: 0, bearing: 0, duration: 600 });
+          map.once("moveend", () => { if (!cbRef.current.terrain3d) map.setMaxPitch(0); });
+        } else {
+          map.setPitch(0);
+          map.setMaxPitch(0);
+        }
+      }
+    } catch { /* the map went away mid-flight, or the style is not ready: the next change re-applies */ }
+  }, [props.terrain3d, props.terrainExaggeration, ready]);  // eslint-disable-line react-hooks/exhaustive-deps
+
+  // ---- 3D buildings: only while 3D is on ----
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map || !ready || !map.getLayer("buildings-3d")) return;
+    map.setLayoutProperty("buildings-3d", "visibility", props.terrain3d && props.buildings3d ? "visible" : "none");
+  }, [props.terrain3d, props.buildings3d, ready]);
+
+  // ---- view presets / rotate (for trackpads and phones, where right-drag tilting is awkward) ----
+  const lastViewCmd = useRef(0);
+  useEffect(() => {
+    const map = mapRef.current;
+    const cmd = props.viewCmd;
+    if (!map || !ready || !cmd || cmd.key === lastViewCmd.current) return;
+    lastViewCmd.current = cmd.key;
+    const opts: { pitch?: number; bearing?: number; duration: number } = { duration: props.reducedMotion ? 0 : 600 };
+    if (cmd.pitch !== undefined) {
+      if (cmd.pitch > 0) map.setMaxPitch(MAX_PITCH_3D);
+      opts.pitch = Math.max(0, Math.min(MAX_PITCH_3D, cmd.pitch));
+      if (cmd.pitch === 0) opts.bearing = 0;           // "top-down" also puts north up
+    }
+    if (cmd.rotateBy !== undefined) opts.bearing = map.getBearing() + cmd.rotateBy;
+    map.easeTo(opts);
+  }, [props.viewCmd, ready, props.reducedMotion]);
+
   // ---- fly-to ----
   useEffect(() => {
     const map = mapRef.current;
     if (!map || !ready || !props.flyTarget) return;
     const { center, zoom } = props.flyTarget;
-    if (props.reducedMotion) map.jumpTo({ center, zoom });
-    else map.flyTo({ center, zoom, duration: 1600, essential: true });
-  }, [props.flyTarget, ready, props.reducedMotion]);
+    const tilt = props.terrain3d && zoom >= TILT_MIN_ZOOM ? { pitch: TILT_PITCH } : props.terrain3d ? { pitch: 0 } : {};
+    if (props.reducedMotion) map.jumpTo({ center, zoom, ...tilt });
+    else map.flyTo({ center, zoom, ...tilt, duration: 1600, essential: true });
+  }, [props.flyTarget, ready, props.reducedMotion]);  // eslint-disable-line react-hooks/exhaustive-deps
 
   // ---- selection pin ----
   useEffect(() => {
@@ -343,7 +451,7 @@ export default function GlobeMap(props: GlobeMapProps) {
       const reduce = typeof window !== "undefined" && window.matchMedia?.("(prefers-reduced-motion: reduce)").matches;
       const wide = typeof window !== "undefined" && window.innerWidth >= 1024;
       map.fitBounds([[Math.min(...lons), Math.min(...lats)], [Math.max(...lons), Math.max(...lats)]], {
-        padding: { top: 70, bottom: 70, left: wide ? 380 : 40, right: wide ? 460 : 40 },
+        padding: { top: 70, bottom: 70, left: wide ? 360 : 40, right: wide ? 380 : 40 },
         maxZoom: 9, duration: reduce ? 0 : 900,
       });
     }
@@ -384,7 +492,9 @@ export default function GlobeMap(props: GlobeMapProps) {
       }
       if (!map.getLayer(id)) {
         // NOTE: default linear resampling — nearest renders black on maplibre 5.23/5.24 (S1)
-        map.addLayer({ id, type: "raster", source: id, paint: { "raster-opacity": opacity } });
+        // below the hillshade (relief shows through) and therefore below the outlines/pins (they stay visible on top)
+        map.addLayer({ id, type: "raster", source: id, paint: { "raster-opacity": opacity } },
+                     map.getLayer("hillshade") ? "hillshade" : undefined);
       } else {
         map.setPaintProperty(id, "raster-opacity", opacity);
       }
@@ -430,5 +540,5 @@ export default function GlobeMap(props: GlobeMapProps) {
     };
   }, [props.overlays, ready]);
 
-  return <div ref={containerRef} className="h-full w-full" aria-label="Earth globe — SAR results and granule coverage" role="application" />;
+  return <div ref={containerRef} className="h-full w-full" aria-label="Earth globe in 3D — SAR results and granule coverage" role="application" />;
 }

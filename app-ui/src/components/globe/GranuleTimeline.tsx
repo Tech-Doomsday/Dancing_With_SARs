@@ -21,11 +21,10 @@ export interface TimelineSelection {
 }
 
 const DAY_MS = 86_400_000;
-const LANE_H = 18;      // one bar lane
-const MARK_H = 12;      // the strip for GCOV dots (never shares a lane with a bar)
-const ROW_PAD = 8;      // breathing room above/below a row's lanes
-const LABEL_W = 64;     // fixed left gutter for the stack label; the plot never draws under it
-const AXIS_H = 18;
+/** vertical sizes: FULL for the inline timeline, COMPACT for the thin bottom dock */
+interface Dims { lane: number; mark: number; pad: number; axis: number; label: number }
+const FULL: Dims = { lane: 18, mark: 12, pad: 8, axis: 18, label: 64 };
+const COMPACT: Dims = { lane: 12, mark: 9, pad: 3, axis: 14, label: 58 };
 
 export interface GranuleTimelineProps {
   /** pairs the verdict analysed / is based on (from the engine's result); marked on the bars (B9) */
@@ -34,6 +33,8 @@ export interface GranuleTimelineProps {
   selection: TimelineSelection | null;
   onSelect: (sel: TimelineSelection | null) => void;
   onWindowChange: (fromIso: string, toIso: string) => void;
+  /** thin bottom-dock density: smaller bars, one-line labels, one header row */
+  compact?: boolean;
 }
 
 interface Row {
@@ -63,10 +64,10 @@ function packLanes(bars: { start: number; end: number }[]): number[] {
   return out;
 }
 
-const rowHeight = (r: { lanes: number; marks: unknown[] }) =>
-  ROW_PAD + (r.marks.length ? MARK_H : 0) + Math.max(1, r.lanes) * LANE_H;
+const rowHeight = (r: { lanes: number; marks: unknown[] }, d: Dims) =>
+  d.pad + (r.marks.length ? d.mark : 0) + Math.max(1, r.lanes) * d.lane;
 
-function stackRows(stacks: Record<string, GranuleStack>): Row[] {
+function stackRows(stacks: Record<string, GranuleStack>, d: Dims): Row[] {
   const rows: Row[] = [];
   for (const key of Object.keys(stacks).sort((a, b) => {
     const da = a[0] === "D" ? 1 : 0;
@@ -89,20 +90,23 @@ function stackRows(stacks: Record<string, GranuleStack>): Row[] {
     const lanes = packLanes(bars);
     bars.forEach((b, i) => { b.lane = lanes[i]; });
     const row: Row = { key, stack, bars, marks, lanes: Math.max(1, ...lanes.map((l) => l + 1)), y: 0, h: 0 };
-    row.h = rowHeight(row);
+    row.h = rowHeight(row, d);
     rows.push(row);
   }
-  let y = AXIS_H;
+  let y = d.axis;
   for (const row of rows) { row.y = y; y += row.h; }
   return rows;
 }
 
 export default function GranuleTimeline(props: GranuleTimelineProps) {
+  const compact = !!props.compact;
+  const D = compact ? COMPACT : FULL;
+  const LABEL_W = D.label;
   const bounds = useMemo(() => ({
     min: Date.parse(props.data.window.t0),
     max: Date.parse(props.data.window.t1),
   }), [props.data.window.t0, props.data.window.t1]);
-  const [scale, setScale] = useState<TimeScale>({ t0: bounds.min, t1: bounds.max, widthPx: 640 - LABEL_W });
+  const [scale, setScale] = useState<TimeScale>({ t0: bounds.min, t1: bounds.max, widthPx: 640 - 64 });
   const [width, setWidth] = useState(640);          // the whole svg; the plot is `width - LABEL_W` wide
   const plotW = Math.max(120, width - LABEL_W);
   const svgRef = useRef<SVGSVGElement | null>(null);
@@ -120,7 +124,7 @@ export default function GranuleTimeline(props: GranuleTimelineProps) {
     });
     obs.observe(el);
     return () => obs.disconnect();
-  }, []);
+  }, [LABEL_W]);
 
   // the visible range feeds back into the query (debounced by the parent's effect)
   useEffect(() => {
@@ -138,9 +142,9 @@ export default function GranuleTimeline(props: GranuleTimelineProps) {
     setScale((s) => clamp({ ...s }, bounds));
   }, [bounds]);
 
-  const rows = useMemo(() => stackRows(props.data.stacks), [props.data.stacks]);
-  const rowsBottom = rows.length ? rows[rows.length - 1].y + rows[rows.length - 1].h : AXIS_H;
-  const height = rowsBottom + 14;
+  const rows = useMemo(() => stackRows(props.data.stacks, D), [props.data.stacks, D]);
+  const rowsBottom = rows.length ? rows[rows.length - 1].y + rows[rows.length - 1].h : D.axis;
+  const height = rowsBottom + (compact ? 2 : 14);
   const today = Date.now();
   const sc = useMemo<TimeScale>(() => ({ ...scale, widthPx: plotW }), [scale, plotW]);
   const px = useCallback((ms: number) => tToX(sc, ms), [sc]);   // plot coordinates (0 = left edge of the plot)
@@ -194,19 +198,21 @@ export default function GranuleTimeline(props: GranuleTimelineProps) {
   const isoDay = (ms: number) => new Date(ms).toISOString().slice(0, 10);
 
   return (
-    <div className="rounded-lg border border-[#e7e2da] bg-white p-2">
-      <div className="mb-1 flex items-center justify-between gap-2 px-1">
-        <p className="text-[11px] text-[#8a837b]">
-          drag to pan · scroll or +/− to zoom · one row per orbit stack (direction + track); overlapping pairs stack in lanes
+    <div className={`rounded-lg border border-[#e7e2da] bg-white ${compact ? "px-1.5 py-1" : "p-2"}`}>
+      <div className={`flex items-center justify-between gap-2 px-1 ${compact ? "mb-0.5" : "mb-1"}`}>
+        <p className={`${compact ? "truncate text-[10px]" : "text-[11px]"} text-[#8a837b]`}>
+          {compact
+            ? `${isoDay(scale.t0)} → ${isoDay(scale.t1)} · drag to pan · scroll to zoom`
+            : "drag to pan · scroll or +/− to zoom · one row per orbit stack (direction + track); overlapping pairs stack in lanes"}
         </p>
         <div className="flex shrink-0 gap-1">
           <button onClick={() => doZoom(1 / 1.3)} title="Zoom out" aria-label="Zoom out"
-                  className="rounded border border-[#e7e2da] p-1 text-[#4a443c] hover:border-[#2c5f58]">
-            <Minus size={12} aria-hidden />
+                  className={`rounded border border-[#e7e2da] text-[#4a443c] hover:border-[#2c5f58] ${compact ? "p-0.5" : "p-1"}`}>
+            <Minus size={compact ? 10 : 12} aria-hidden />
           </button>
           <button onClick={() => doZoom(1.3)} title="Zoom in" aria-label="Zoom in"
-                  className="rounded border border-[#e7e2da] p-1 text-[#4a443c] hover:border-[#2c5f58]">
-            <Plus size={12} aria-hidden />
+                  className={`rounded border border-[#e7e2da] text-[#4a443c] hover:border-[#2c5f58] ${compact ? "p-0.5" : "p-1"}`}>
+            <Plus size={compact ? 10 : 12} aria-hidden />
           </button>
         </div>
       </div>
@@ -246,16 +252,16 @@ export default function GranuleTimeline(props: GranuleTimelineProps) {
                 const x = px(t.ms);
                 return (
                   <g key={i}>
-                    <line x1={x} y1={AXIS_H - 2} x2={x} y2={height} stroke={t.major ? "#d8d2c6" : "#f0ece4"} strokeWidth={1} />
-                    <text x={x + 2} y={11} fontSize={9} fill="#8a837b" className="mono">{t.label}</text>
+                    <line x1={x} y1={D.axis - 2} x2={x} y2={height} stroke={t.major ? "#d8d2c6" : "#f0ece4"} strokeWidth={1} />
+                    <text x={x + 2} y={compact ? 9 : 11} fontSize={compact ? 8 : 9} fill="#8a837b" className="mono">{t.label}</text>
                   </g>
                 );
               })}
               {/* today guideline */}
               {today > scale.t0 && today < scale.t1 && (
                 <g>
-                  <line x1={px(today)} y1={AXIS_H - 2} x2={px(today)} y2={height} stroke="#9e3b2c" strokeWidth={1} strokeDasharray="3 2" />
-                  <text x={px(today) + 2} y={height - 3} fontSize={9} fill="#9e3b2c">today</text>
+                  <line x1={px(today)} y1={D.axis - 2} x2={px(today)} y2={height} stroke="#9e3b2c" strokeWidth={1} strokeDasharray="3 2" />
+                  {!compact && <text x={px(today) + 2} y={height - 3} fontSize={9} fill="#9e3b2c">today</text>}
                 </g>
               )}
               {/* rows */}
@@ -268,9 +274,9 @@ export default function GranuleTimeline(props: GranuleTimelineProps) {
                   ...row.bars.map((b) => ({ at: b.start, to: b.end })),
                   ...row.marks.map((m) => ({ at: m.at, to: m.at })),
                 ].sort((a, b) => a.at - b.at);
-                const markY = row.y + ROW_PAD / 2 + MARK_H / 2;
-                const lanesTop = row.y + ROW_PAD / 2 + (row.marks.length ? MARK_H : 0);
-                const midY = lanesTop + (Math.max(1, row.lanes) * LANE_H) / 2;
+                const markY = row.y + D.pad / 2 + D.mark / 2;
+                const lanesTop = row.y + D.pad / 2 + (row.marks.length ? D.mark : 0);
+                const midY = lanesTop + (Math.max(1, row.lanes) * D.lane) / 2;
                 // gap connectors carry the EXACT day count between consecutive acquisitions; the line is only drawn
                 // through space that is empty in EVERY lane (after the furthest end seen so far)
                 let covered = -Infinity;
@@ -304,8 +310,8 @@ export default function GranuleTimeline(props: GranuleTimelineProps) {
                         && props.selection.index === b.index;
                       const x1 = px(b.start);
                       const x2 = Math.max(px(b.end), px(b.start) + 3);
-                      const by = lanesTop + b.lane * LANE_H + 1;
-                      const bh = LANE_H - 4;
+                      const by = lanesTop + b.lane * D.lane + 1;
+                      const bh = D.lane - (compact ? 3 : 4);
                       const used = (props.verdictUse ?? []).find((u) => u.stack === row.key
                         && u.ref_time.slice(0, 10) === isoDay(b.start)
                         && u.sec_time.slice(0, 10) === isoDay(b.end));
@@ -385,16 +391,28 @@ export default function GranuleTimeline(props: GranuleTimelineProps) {
             <g key={`label-${row.key}`}>
               <rect x={0} y={row.y} width={LABEL_W} height={row.h - 2} fill={r % 2 ? "#faf9f6" : "#ffffff"} />
               <line x1={LABEL_W} y1={row.y} x2={LABEL_W} y2={row.y + row.h - 2} stroke="#e7e2da" strokeWidth={1} />
-              <text x={4} y={row.y + row.h / 2 - 2} fontSize={10} fontWeight={600} fill="#1c1a17">{row.key}</text>
-              <text x={4} y={row.y + row.h / 2 + 9} fontSize={8} fill="#8a837b">{directionLabel(row.stack.direction)}</text>
+              {compact ? (
+                // one line: "A069 asc" (the colour already says the direction; the full word is in the tooltip)
+                <text x={4} y={row.y + row.h / 2 + 3} fontSize={9} fontWeight={600} fill="#1c1a17">
+                  <title>{`${row.key} ${directionLabel(row.stack.direction)}`}</title>
+                  {row.key}<tspan fontSize={7.5} fontWeight={400} fill="#8a837b">{` ${directionLabel(row.stack.direction).replace("ending", "")}`}</tspan>
+                </text>
+              ) : (
+                <>
+                  <text x={4} y={row.y + row.h / 2 - 2} fontSize={10} fontWeight={600} fill="#1c1a17">{row.key}</text>
+                  <text x={4} y={row.y + row.h / 2 + 9} fontSize={8} fill="#8a837b">{directionLabel(row.stack.direction)}</text>
+                </>
+              )}
             </g>
           ))}
         </svg>
       </div>
-      <p className="mt-1 px-1 text-[10px] text-[#8a837b]">
-        visible window {new Date(scale.t0).toISOString().slice(0, 10)} → {new Date(scale.t1).toISOString().slice(0, 10)}
-        {" · "}scale {pxPerMs(sc).toExponential(1)} px/ms
-      </p>
+      {!compact && (
+        <p className="mt-1 px-1 text-[10px] text-[#8a837b]">
+          visible window {isoDay(scale.t0)} → {isoDay(scale.t1)}
+          {" · "}scale {pxPerMs(sc).toExponential(1)} px/ms
+        </p>
+      )}
     </div>
   );
 }
